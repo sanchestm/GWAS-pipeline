@@ -288,8 +288,11 @@ class gwas_pipe:
         
     def append2log(self, func, call, out):
         self.log.loc[len(self.log)] = [func, call, out]
-        with open(f'{self.path}/log/{func}.log', 'w') as f:
-            f.write('\n'.join(out))
+        loc = 'err' if 'error' in '\n'.join(out).lower() else ''
+        with open(f'{self.path}/log{loc}/{func}.log', 'w') as f:
+                f.write('\n'.join(out))
+        if loc == 'err':
+            raise ValueError(f'found possible error in log, check the file {self.path}/log{loc}/{func}.log')
             
     def make_dir_structure(self, folders: list = ['data', 'genotypes', 'grm', 'log', 'logerr', 
                                             'results', 'temp', 'data/pheno', 'results/heritability', 
