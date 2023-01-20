@@ -1,5 +1,5 @@
 
-from gwas_class_auto import *
+from gwas_class import *
 import sys
 
 
