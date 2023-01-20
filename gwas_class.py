@@ -112,7 +112,6 @@ def vcf2plink(vcf = 'round9_1.vcf.gz', out_path = 'zzplink_genotypes/allgenotype
 
 # In[ ]:
 
-
 class gwas_pipe:
     '''
     to run the gwas pipeline we need to inzzplink_genotypes/lize the project as a class
@@ -195,7 +194,7 @@ class gwas_pipe:
     gwas.gwasPerChr()
     gwas.GWAS()
     gwas.addGWASresultsToDb(researcher='tsanches', project='tj', round_version='9.1', gwas_version='0.0.1-comitversion')
-    qtls = gwas.callQTLs(NonStrictSearchDir = 'test/results/loco/')
+    qtls = gwas.callQTLs(NonStrictSearchDir = 'test/results/gwas/')
     gwas.annotate(qtls)
     gwas.eQTL(qtls, annotate= True)
     gwas.phewas(qlts, annotate=True)
@@ -217,9 +216,21 @@ class gwas_pipe:
         self.gtca = 'gcta64' if not gtca_path else gtca_path
         self.path = path
         self.all_genotypes = all_genotypes
+        
         df = data
         df.columns = df.columns.str.lower()
-        self.df = df.sort_values('rfid').reset_index(drop = True)
+        if 'vcf' in self.all_genotypes:
+            sample_list_inside_genotypes = vcf_manipulation.get_vcf_header(self.all_genotypes)
+        else:
+            sample_list_inside_genotypes = pd.read_csv(self.all_genotypes+'.fam', header = None, sep=' ', dtype = str)[0].to_list()
+        df = df.sort_values('rfid').reset_index(drop = True).drop_duplicates(subset = ['rfid']).dropna(subset = 'rfid')
+        self.df = df[df.astype(str).rfid.isin(sample_list_inside_genotypes)].copy()
+        
+        if self.df.shape[0] != df.shape[0]:
+            missing = set(df.rfid.unique()) - set(self.df.rfid.unique())
+            if missing: missing = '  '.join(missing)
+            print(f"couldn't find the following rfids:\n {missing}")
+        
         self.traits = [x.lower() for x in traits]
         self.phewas_db = phewas_db
         self.project_name = project_name
@@ -407,12 +418,13 @@ class gwas_pipe:
         
         mfList = sorted(sexfmt.split('|'))
         
+        ############# might be able to remove this
         if sourceFormat == 'vcf':
             sample_list_inside_genotypes = vcf_manipulation.get_vcf_header(self.all_genotypes)
         elif sourceFormat in ['bfile', 'plink']:
             sample_list_inside_genotypes = pd.read_csv(self.all_genotypes+'.fam', header = None, sep=' ', dtype = str)[0].to_list()
-        
         dff = self.df[self.df.astype(str).rfid.isin(sample_list_inside_genotypes)].copy()
+        ##############
         dff.rfid = dff.rfid.astype(str)
         dff['plink_sex'] = dff[sexColumn].apply(lambda x: self.plink_sex_encoding(x, female_code=mfList[0] ,male_code=mfList[1]))
         
@@ -484,7 +496,7 @@ class gwas_pipe:
         just_full_grm: bool = True
             Runs only the full GRM
         '''
-        
+        sleep(2)
         funcName = inspect.getframeinfo(inspect.currentframe()).function
         
         
@@ -574,7 +586,7 @@ class gwas_pipe:
                                        --grm {self.path}grm/AllchrGRM   \
                                        --chr {chrom} \
                                        --mlma-subtract-grm {self.path}grm/{chrom}chrGRM  \
-                                       --mlma --out {self.path}results/gwas/gwas_{chrom}_{trait}',
+                                       --mlma --out {self.path}results/gwas/gwasperchar/gwas_{chrom}_{trait}',
                         f'GWAS_{chrom}_{trait}', print_call = print_call)
     
     def GWAS(self, subtract_grm: bool = False, loco: bool = True , print_call: bool = False):
@@ -600,7 +612,7 @@ class gwas_pipe:
         phenotype data file, and options for subtracting the GRM and performing LOCO analysis
         it runs the command using the bashLog method, which logs the command and its output, 
         and displays the command if print_call is set to True
-        it saves the GWAS results to a file in the 'results/loco' directory,
+        it saves the GWAS results to a file in the 'results/gwas' directory,
         with the filename indicating the trait, GRM subtraction status, and LOCO status.
         """
 
@@ -610,13 +622,13 @@ class gwas_pipe:
         loco_flag = '-loco' if loco else ''
         for trait in tqdm(self.traits):
             self.bashLog(f'{self.gtca} {self.thrflag} --pheno {self.path}data/pheno/{trait}.txt --bfile {self.genotypes_subset}\
-                                       --mlma{loco_flag} --out {self.path}results/loco/{trait}',
+                                       --mlma{loco_flag} --out {self.path}results/gwas/{trait}',
                         f'GWAS_{grm_name}_{loco_flag[1:]}_{trait}',  print_call = print_call)
             
     
     
     def addGWASresultsToDb(self, researcher: str , round_version: str, gwas_version: str,filenames: list = [],
-                           pval_thresh: float = 1e-3, safe_rebuild: bool = True,**kwards):
+                           pval_thresh: float = 1e-4, safe_rebuild: bool = True,**kwards):
         '''
         The addGWASresultsToDb function is used to add GWAS results to a pre-existing PheWAS database. 
         The function takes in several input parameters, including a list of GWAS result filenames,
@@ -628,13 +640,13 @@ class gwas_pipe:
         round_version: str
         gwas_version: str
         filenames: list = []
-        pval_thresh: float = 1e-3
+        pval_thresh: float = 1e-4
         safe_rebuild: bool = True
         
         Design
         ------
         The function first checks if the input filenames are a list or a single string,
-        and if it's empty it will look for the files in the results/loco/ directory, 
+        and if it's empty it will look for the files in the results/gwas/ directory, 
         it then reads in the GWAS results and assigns various metadata to the data.
         It also adds the number of snps and filters the data by the pval_thresh parameter.
         It then concatenates the new data with the pre-existing PheWAS database,
@@ -647,7 +659,7 @@ class gwas_pipe:
             filenames = [filenames]
             
         elif len(filenames) == 0 :
-            filenames = sorted(glob(f'{self.path}results/loco/*.mlma'))
+            filenames = [f'{self.path}results/gwas/{trait}.loco.mlma' for trait in self.traits]
         all_new = []
         for file in tqdm(filenames):
             trait = re.findall('/([^/]+).mlma', file)[0].replace('.loco', '')
@@ -661,21 +673,23 @@ class gwas_pipe:
                                                                                round_version = round_version,
                                                                                gwas_version = gwas_version)
 
-            ###### add phewas version
             new_info['n_snps'] =  new_info.shape[0]
-            # Subset by p-val 10e-2
             new_info = new_info.query(f'p < {pval_thresh}')
             all_new += [new_info]
-            # Add more to subset
-            # Test different keep values
-        all_new = pd.concat(all_new)   
-        
-        try:
-            alldata = pd.concat([all_new, pd.read_parquet(self.phewas_db)])
-        except:
-            print(f"Could not open phewas database in file: {self.phewas_db}, rebuilding db with only this project")
-            if safe_rebuild: return 'not doing anything further until data is manually verified'
+
+        all_new = pd.concat(all_new)  
+        if not os.path.isfile(self.phewas_db):
             alldata = all_new
+        else:
+            try:
+                alldata = pd.concat([all_new, pd.read_parquet(self.phewas_db)])
+            except:
+                print(f"Could not open phewas database in file: {self.phewas_db}, rebuilding db with only this project")
+                if safe_rebuild: 
+                    raise ValueError('not doing anything further until data is manually verified')
+                    return
+                else: 
+                    alldata = all_new
         
         alldata.drop_duplicates(subset = ['researcher', 'project', 'round_version', 'trait', 'SNP', 'uploadeddate'], 
                                 keep='first').to_parquet(self.phewas_db, index = False, compression='gzip')
@@ -725,8 +739,8 @@ class gwas_pipe:
         
         if not NonStrictSearchDir:
             topSNPs = pd.DataFrame()
-            for t, c in tqdm(list(itertools.product(self.traits, chr_list))):
-                filename = f'{self.path}results/gwas/gwas_{c}_{t}.mlma'
+            for t in tqdm(self.traits):
+                filename = f'{self.path}results/gwas/{t}.loco.mlma'
                 try:
                     topSNPs = pd.concat([topSNPs, pd.read_csv(filename, sep = '\t').query(f'p < {thresh}').assign(trait=t)])
                 except:
@@ -967,11 +981,12 @@ class gwas_pipe:
         a = bash(f'java -Xmx8g -jar snpEff/snpEff.jar {d} -no-intergenic -no-intron -noStats {self.path}temp/test.vcf', 'snpefftest' )
         res =pd.read_csv(StringIO('\n'.join(a)),  comment='#',  delim_whitespace=True,  header=None, names = temp.columns,  dtype=str)  
         ann = res['INFO'].str.replace('ANN=', '').str.split('|',expand=True)
-        ann.columns = ['alt_temp', 'annotation', 'putative_impact', 'gene', 'geneid', 'featuretype', 'featureid', 'transcriptbiotype',
-                      'rank', 'HGVS.c', 'HGVS.p', 'cDNA_position|cDNA_len', 'CDS_position|CDS_len', 'Protein_position|Protein_len',
-                      'distancetofeature', 'errors']
+        if ann.shape[1] == 16:
+            ann.columns = ['alt_temp', 'annotation', 'putative_impact', 'gene', 'geneid', 'featuretype', 'featureid', 'transcriptbiotype',
+                          'rank', 'HGVS.c', 'HGVS.p', 'cDNA_position|cDNA_len', 'CDS_position|CDS_len', 'Protein_position|Protein_len',
+                          'distancetofeature', 'errors']
         ann.index = qtltable.index
-        out = pd.concat([qtltable, ann], axis = 1).replace('', np.nan).dropna(how = 'all', axis = 1).drop('alt_temp', axis = 1)
+        out = pd.concat([qtltable, ann], axis = 1).replace('', np.nan).dropna(how = 'all', axis = 1).drop('alt_temp', axis = 1, errors ='ignore')
         if save:
             self.annotatedtablepath = f'{self.path}results/qtls/finalqtl.csv'
             out.to_csv(self.annotatedtablepath, index= False)
@@ -998,4 +1013,3 @@ class gwas_pipe:
             f.write('\n'.join(bash('conda list')[1:]))
             
             
-        
