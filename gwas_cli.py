@@ -3,7 +3,7 @@ from gwas_class_auto import *
 import sys
 
 
-dictionary = {k.replace('-', ''):v for k,v in [x.plit('=') for x in sys.argv] }
+dictionary = {k.replace('-', ''):v for k,v in [x.split('=') for x in sys.argv] }
 
 
 df = pd.read_csv(dictionary['df']).drop_duplicates(subset = 'rfid')
