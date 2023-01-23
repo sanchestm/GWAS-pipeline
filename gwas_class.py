@@ -40,7 +40,7 @@ class vcf_manipulation:
     def corrfunc(x, y, ax=None, **kws):
         r, _ = pearsonr(x, y)
         ax = ax or plt.gca()
-        ax.annotate(f'ρ = {r:.2f}', xy=(.1, .9), xycoords=ax.transAxes)
+        ax.annotate(f'Ï = {r:.2f}', xy=(.1, .9), xycoords=ax.transAxes)
 
     def get_vcf_header(vcf_path):
         with gzip.open(vcf_path, "rt") as ifile:
@@ -227,7 +227,7 @@ class gwas_pipe:
         
         self.traits = [x.lower() for x in traits]
         self.make_dir_structure()
-        for trait in tqdm(self.traits):
+        for trait in self.traits:
             trait_file = f'{self.path}data/pheno/{trait}.txt'            
             self.df[['rfid', 'rfid', trait]].fillna('NA').astype(str).to_csv(trait_file,  index = False, sep = ' ', header = None)
         
@@ -245,6 +245,10 @@ class gwas_pipe:
         self.print_call = True
         self.chrList = ['x' if x == 21 else x for x in range(1,22)]
         self.failed_full_grm = False
+        
+        self.sample_path = f'{self.path}genotypes/sample_rfids.txt'
+        self.sample_sex_path = f'{self.path}genotypes/sample_rfids_sex_info.txt'
+        self.sample_sex_path_gcta = f'{self.path}genotypes/sample_rfids_sex_info_gcta.txt'
         
     def plink2Df(self, call, temp_out_filename = 'temp/temp', dtype = 'ld'):
         '''
@@ -282,6 +286,19 @@ class gwas_pipe:
             return self.plink2Df(call ,dtype = f'{return_file}' ) 
         else:
             bash(call + f' --out {outfile}', print_call=False)
+        return
+    
+    def gcta(self,  **kwargs):
+        '''
+        this function is a wrapper to run gcta as a python function
+        instead of having to have it as a string and bash call it
+        if writing a flag that doesn't require a variable e.g.
+        --make-grm use make_grm = ''
+        '''
+        
+        call = f'{self.gcta} ' + ' '.join([f'--{k.replace("_", "-")} {v}'
+                                    for k,v in kwargs.items()])
+        bash(call + f' --out {outfile}', print_call=False)
         return
     
     def plink_sex_encoding(self, s, male_code = 'M', female_code = 'F'):
@@ -420,22 +437,13 @@ class gwas_pipe:
         
         mfList = sorted(sexfmt.split('|'))
         
-        ############# might be able to remove this
-        #if sourceFormat == 'vcf':
-        #    sample_list_inside_genotypes = vcf_manipulation.get_vcf_header(self.all_genotypes)
-        #elif sourceFormat in ['bfile', 'plink']:
-        #    sample_list_inside_genotypes = pd.read_csv(self.all_genotypes+'.fam', header = None, sep=' ', dtype = str)[0].to_list()
-        #dff = self.df[self.df.astype(str).rfid.isin(sample_list_inside_genotypes)].copy()
-        ##############
         dff = self.df.copy()
         dff.rfid = dff.rfid.astype(str)
         dff['plink_sex'] = dff[sexColumn].apply(lambda x: self.plink_sex_encoding(x, female_code=mfList[0] ,male_code=mfList[1]))
         
-        self.sample_path = f'{self.path}genotypes/sample_rfids.txt'
-        self.sample_sex_path = f'{self.path}genotypes/sample_rfids_sex_info.txt'
-        
         dff[['rfid', 'rfid']].to_csv(self.sample_path, index = False, header = None, sep = ' ')
         dff[['rfid', 'plink_sex']].to_csv(self.sample_sex_path, index = False, header = None, sep = ' ')
+        dff[['rfid', 'rfid', 'plink_sex']].to_csv(self.sample_sex_path_gcta, index = False, header = None, sep = ' ')
         self.sample_names = dff.rfid.to_list()
         
         
@@ -444,13 +452,13 @@ class gwas_pipe:
         for num, sx in enumerate(tqdm(mfList)): 
             
             dff_sm = dff[dff[sexColumn] == sx]
-            dff['plink_sex'] = dff[sexColumn].apply(lambda x: self.plink_sex_encoding(x, female_code=mfList[0] ,male_code=mfList[1]))
+            dff_sm['plink_sex'] = dff_sm[sexColumn].apply(lambda x: self.plink_sex_encoding(x, female_code=mfList[0] ,male_code=mfList[1]))
             
             self.samples[sx] = f'{self.path}genotypes/sample_rfids_{sx}.txt'
-            dff[['rfid', 'rfid']].to_csv(self.samples[sx], index = False, header = None, sep = ' ')
+            dff_sm[['rfid', 'rfid']].to_csv(self.samples[sx], index = False, header = None, sep = ' ')
             
             self.samples_sex[sx] = f'{self.path}genotypes/sample_rfids_sex_info_{sx}.txt'
-            dff[['rfid', 'plink_sex']].to_csv(self.samples_sex[sx], index = False, header = None, sep = ' ')
+            dff_sm[['rfid', 'plink_sex']].to_csv(self.samples_sex[sx], index = False, header = None, sep = ' ')
             
             filtering_flags = f' --geno {geno} --maf {maf} --hwe {hwe}'
             filtering_flags_justx = f''
@@ -458,11 +466,11 @@ class gwas_pipe:
             sex_flags = f'--update-sex {self.samples_sex[sx]}'
             
             self.bashLog(f'plink --{fmt_call} {self.all_genotypes} --keep {self.samples[sx]} {sex_flags} {filtering_flags} {rmv} {extra_flags} {self.thrflag} --make-bed --out {sub}_{sx}',
-                        f'{funcName}_subseting_{sx}')
+                        f'{funcName}_subseting_{sx}', print_call=print_call)
             
             if num == 1:
                 self.bashLog(f'plink --bfile {self.all_genotypes} --keep {self.samples[sx]} --chr x {self.thrflag} --geno {geno} --maf {maf} --make-bed --out {sub}_{sx}_xchr',
-                        f'{funcName}_maleXsubset{sx}') #--out {sub}_{sx}_xchr {sub}_{sx} 
+                        f'{funcName}_maleXsubset{sx}',  print_call=print_call) #--out {sub}_{sx}_xchr {sub}_{sx} 
                 male_1_x_filenames = [aa for aa in [f'{sub}_{sx}', f'{sub}_{sx}_xchr'] if len(glob(aa+'.*')) >= 5]
                 male_gen_filenames = f'{self.path}genotypes/temp_male_filenames'
                 pd.DataFrame(male_1_x_filenames).to_csv(male_gen_filenames, index = False, header = None)
@@ -470,7 +478,7 @@ class gwas_pipe:
                 
         print('merging sexes')        
         self.bashLog(f'plink --bfile {female_hwe} --merge-list {male_gen_filenames} {self.thrflag} --make-bed --out {sub}',
-                        f'{funcName}_mergeSexes') # {filtering_flags}
+                        f'{funcName}_mergeSexes', print_call=print_call) # {filtering_flags}
         
         self.genotypes_subset = f'{sub}'
         
@@ -481,7 +489,7 @@ class gwas_pipe:
         
         
     def generateGRM(self, autosome_list: list = list(range(1,21)), print_call: bool = True,
-                    extra_chrs: list = ['xchr'], just_autosomes: bool = False, just_full_grm: bool = True,
+                    extra_chrs: list = ['xchr'], just_autosomes: bool = True, just_full_grm: bool = True,
                    full_grm: bool = True, **kwards):
         
         '''
@@ -503,51 +511,48 @@ class gwas_pipe:
         print('generating GRM...')
         funcName = inspect.getframeinfo(inspect.currentframe()).function
         
-        if full_grm:
-            auto_flags = f'--autosome-num {int(len(autosome_list))} --autosome' if just_autosomes else ''
-            sex_flags = ''#f' --sex {self.sample_sex_path}'
-            
-
-            self.bashLog(f'{self.gtca} {self.thrflag} --bfile {self.genotypes_subset}  \
-                           --make-grm-bin {auto_flags} --update-sex {self.sample_sex_path} --dc 1 --out {self.autoGRM}',
-                funcName, print_call = print_call)
-
-            for i in ['1']:
-                if not os.path.exists(f'{self.autoGRM}.grm.bin'):
-                    print (f"couldn't make grm, redoing it with {i} threads to reduce memory footprint...")
-                    #temporarily removing the flag --make-grm-bin 
-                    self.bashLog(f'{self.gtca} --thread-num {i} --bfile {self.genotypes_subset} \
-                           --make-grm-bin {auto_flags} --update-sex {self.sample_sex_path} --dc 1 --out {self.autoGRM}',
-                    funcName, print_call = print_call)
-                if not os.path.exists(f'{self.autoGRM}.grm.bin') and i == '1':  
-                    print('failed all full grms ... generating grms per chr... snp heretability and gwas might be affected')
-                    self.failed_full_grm = True
-                    # {sex_flags} 
-                
-        if not full_grm:
-            self.failed_full_grm = True
+        #if full_grm:
+        #    auto_flags = f'--autosome-num {int(len(autosome_list))} --autosome' if just_autosomes else ''
+        #    sex_flags = f'--update-sex {self.sample_sex_path_gcta} --dc 1' #f' --sex {self.sample_sex_path}'
+        #    
+        #    self.bashLog(f'{self.gtca} {self.thrflag} --bfile {self.genotypes_subset} {sex_flags}\
+        #                   --make-grm-bin {auto_flags} --out {self.autoGRM}',
+        #                   funcName, print_call = print_call) # 
+        #    
+        #    if not os.path.exists(f'{self.autoGRM}.grm.bin'):  
+        #        print('failed all full grms... generating grms per chr... snp heretability and gwas might be affected')
+        #        self.failed_full_grm = True
+        #            # {sex_flags} 
+        #        
+        #if not full_grm:
+        #    self.failed_full_grm = True
+        #
+        #if not just_full_grm or self.failed_full_grm:
+        all_filenames_partial_grms = pd.DataFrame(columns = ['filename'])
         
-        if not just_full_grm or self.failed_full_grm:
-            all_filenames_partial_grms = pd.DataFrame(columns = ['filename'])
-            
-            if 'xchr' in extra_chrs:
-                self.bashLog(f'{self.gtca} {self.thrflag} --bfile {self.genotypes_subset} --make-grm-xchr --out {self.xGRM}',
-                            f'{funcName}_chrX', print_call = False)
-                
-            all_filenames_partial_grms.loc[len(all_filenames_partial_grms), 'filename'] = self.xGRM
+        if 'xchr' in extra_chrs:
+            self.bashLog(f'{self.gtca} {self.thrflag} --bfile {self.genotypes_subset} --autosome-num 20 \
+                           --make-grm-xchr --out {self.xGRM}',
+                        f'{funcName}_chrX', print_call = False)
 
-            for c in tqdm(autosome_list):
-                self.bashLog(f'{self.gtca} {self.thrflag} --bfile {self.genotypes_subset} --chr {c} --make-grm-bin --out {self.path}grm/{c}chrGRM',
-                            f'{funcName}_chr{c}',  print_call = False)
-                
-                all_filenames_partial_grms.loc[len(all_filenames_partial_grms), 'filename'] = f'{self.path}grm/{c}chrGRM'
-            
-            all_filenames_partial_grms.to_csv(f'{self.path}grm/listofchrgrms.txt', index = False, sep = ' ', header = None)
-            
-            self.bashLog(f'{self.gtca} {self.thrflag} --mgrm {self.path}grm/listofchrgrms.txt \
-                           --make-grm-bin --out {self.autoGRM}', f'{funcName}_mergedgrms',  print_call = False )
+        all_filenames_partial_grms.loc[len(all_filenames_partial_grms), 'filename'] = self.xGRM
+
+        for c in tqdm(autosome_list):
+            self.bashLog(f'{self.gtca} {self.thrflag} --bfile {self.genotypes_subset} --chr {c} --autosome-num 20\
+                         --make-grm-bin --out {self.path}grm/{c}chrGRM',
+                        f'{funcName}_chr{c}',  print_call = False)
+
+            all_filenames_partial_grms.loc[len(all_filenames_partial_grms), 'filename'] = f'{self.path}grm/{c}chrGRM'
+
+        all_filenames_partial_grms.to_csv(f'{self.path}grm/listofchrgrms.txt', index = False, sep = ' ', header = None)
+
+        self.bashLog(f'{self.gtca} {self.thrflag} --mgrm {self.path}grm/listofchrgrms.txt \
+                       --make-grm-bin --out {self.autoGRM}', f'{funcName}_mergedgrms',  print_call = False )
+
+        #if os.path.exists(f'{self.autoGRM}.grm.bin'): 
+        #    self.failed_full_grm = False 
         
-            self.failed_full_grm = os.path.exists(f'{self.autoGRM}.grm.bin')
+        return 1
             
                 
 
@@ -583,10 +588,12 @@ class gwas_pipe:
             self.df[['rfid', 'rfid', trait]].fillna('NA').astype(str).to_csv(trait_file,  index = False, sep = ' ', header = None)
             
             if self.failed_full_grm:
-                self.bashLog(f'{self.gtca} --reml {self.thrflag} --reml-no-constrain --pheno {trait_file} --mgrm {self.path}grm/listofchrgrms.txt --out {out_file}',
-                            f'snpHeritability_{trait}', print_call = print_call) #--autosome --reml-maxit 1000
+                self.bashLog(f'{self.gtca} --reml {self.thrflag} --reml-no-constrain --autosome-num 20 \
+                                           --pheno {trait_file} --mgrm {self.path}grm/listofchrgrms.txt --out {out_file}',
+                            f'snpHeritability_{trait}', print_call = print_call) 
             else:
-                self.bashLog(f'{self.gtca} --reml {self.thrflag} --autosome --pheno {trait_file} --grm {self.autoGRM} --out {out_file}',
+                self.bashLog(f'{self.gtca} --reml {self.thrflag} --autosome --autosome-num 20\
+                                           --pheno {trait_file} --grm {self.autoGRM} --out {out_file}',
                             f'snpHeritability_{trait}', print_call = print_call)
             
             a = pd.read_csv(f'{out_file}.hsq', skipfooter=6, sep = '\t',engine='python')
@@ -600,7 +607,8 @@ class gwas_pipe:
         return h2table
         
     
-    def GWAS(self, subtract_grm: bool = False, loco: bool = True , print_call: bool = False, nchr:int = 21, **kwards):
+    def GWAS(self, subtract_grm: bool = False, loco: bool = True , run_per_chr: bool = True,
+             print_call: bool = False, nchr:int = 21, **kwards):
         """
         This function performs a genome-wide association study (GWAS) on the provided genotype data using the GCTA software.
         
@@ -628,31 +636,36 @@ class gwas_pipe:
         """
 
         print('starting GWAS')
-        if loco and subtract_grm:
-            raise ValueError('cannot have both loco and subtract_grm')
+        #if loco and subtract_grm:
+        #    raise ValueError('cannot have both loco and subtract_grm')
         #grm_flag = f'--grm {self.path}grm/AllchrGRM ' if subtract_grm else ''
-        grm_flag = f'--mgrm {self.path}grm/listofchrgrms.txt ' if subtract_grm else '' 
-        grm_name = '-subtract-grm' if subtract_grm else 'with_grm'
-        loco_flag = '-loco' if loco else ''
+        #grm_flag = f'--mgrm {self.path}grm/listofchrgrms.txt ' if subtract_grm else '' 
+        #grm_name = '-subtract-grm' if subtract_grm else 'with_grm'
+        #loco_flag = '-loco' if loco else ''
+        from joblib import Parallel, delayed
+        #results = Parallel(n_jobs=2)(delayed(countdown)(10**7) for _ in range(20))
         
-        if not self.failed_full_grm:
+        if not run_per_chr:
             print('running gwas per trait...')
             for trait in tqdm(self.traits):
-                    self.bashLog(f'{self.gtca} {self.thrflag} {grm_flag} --pheno {self.path}data/pheno/{trait}.txt --bfile {self.genotypes_subset}\
+                    self.bashLog(f'{self.gtca} {self.thrflag} {grm_flag} --pheno {self.path}data/pheno/{trait}.txt --autosome-num 20 --bfile {self.genotypes_subset}\
                                                --mlma{loco_flag} --out {self.path}results/gwas/{trait}',
                                 f'GWAS_{loco_flag[1:]}_{trait}',  print_call = print_call)
-
-            
-        if self.failed_full_grm:
+        else:
             print('running gwas per chr per trait...')
             for trait, chrom in tqdm(list(itertools.product(self.traits, range(1,nchr+1)))):
-                if chrom == 21: chrom = 'x'
+                if chrom == 21: chromp2 = 'x'
+                else: chromp2 = chrom
                 self.bashLog(f'{self.gtca} {self.thrflag} --pheno {self.path}data/pheno/{trait}.txt --bfile {self.genotypes_subset} \
+                                           --grm {self.path}grm/AllchrGRM \
+                                           --autosome-num 20\
                                            --chr {chrom} \
-                                           --grm {self.path}grm/{chrom}chrGRM \
-                                           --mlma-subtract-grm   \
-                                           --mlma --out {self.path}results/gwas/{trait}_chrgwas{chrom}', #   \
+                                           --mlma-subtract-grm {self.path}grm/{chromp2}chrGRM \
+                                           --mlma \
+                                           --out {self.path}results/gwas/{trait}_chrgwas{chromp2}', #   \
                             f'GWAS_{chrom}_{trait}', print_call = print_call)
+                
+        return 1
 
     
     
@@ -724,6 +737,8 @@ class gwas_pipe:
         alldata.drop_duplicates(subset = ['researcher', 'project', 'round_version', 'trait', 'SNP', 'uploadeddate'], 
                                 keep='first').to_parquet(self.phewas_db, index = False, compression='gzip')
         
+        return 1
+        
         ###scp this to tscc
         # bash(#scp tsanches@tscc-login.sdsc.edu:/projects/ps-palmer/hs_rats/rattacafinalgenotypes/RattacaG01
         #/RattacaG01_QC_Sex_Het_pass_n971.vcf.gz.tbi rattaca_genotypes.vcf.gz.tbi
@@ -769,21 +784,16 @@ class gwas_pipe:
         
         if not NonStrictSearchDir:
             topSNPs = pd.DataFrame()
-            for t in tqdm(self.traits):
-                try:
-                    filename = f'{self.path}results/gwas/{t}.mlma'
-                    topSNPs = pd.concat([topSNPs, pd.read_csv(filename, sep = '\t').query(f'p < {thresh}').assign(trait=t)])
-                except Exception:
-                    filename = f'{self.path}results/gwas/{t}.loco.mlma'
-                    topSNPs = pd.concat([topSNPs, pd.read_csv(filename, sep = '\t').query(f'p < {thresh}').assign(trait=t)])
-                    #print(f"didn't open {filename}, does it exist?")
-                except Exception:
-                    filename = glob(f'{self.path}results/gwas/*{t}*.mlma')
-                    topSNPs = pd.concat([topSNPs, pd.read_csv(filename, sep = '\t').query(f'p < {thresh}').assign(trait=t)])
-                    
+            for t, chrom in tqdm(list(itertools.product(self.traits, range(1,nchr+1)))):
+                    if chrom == 21 : chrom = 'x'
+                    filename = f'{self.path}results/gwas/{t}_chrgwas{chrom}.mlma'
+                    if os.path.exists(filename):
+                        topSNPs = pd.concat([topSNPs, pd.read_csv(filename, sep = '\t').query(f'p < {thresh}').assign(trait=t)])
+                    else: print(f'could not locate {filename}')
+
         else:
             topSNPs = pd.concat([pd.read_csv(filename, sep = '\t').query(f'p < {thresh}').assign(trait=re.findall('/([^/]*).mlma', 
-                                                                                                                  filename)[0].replace('.loco', '')) for
+                                                                                            filename)[0].replace('.loco', '')).split('_chrgwas')[0] for
                                  filename in tqdm(glob(f"{NonStrictSearchDir}/*.mlma"))])
 
         out = pd.DataFrame()
@@ -866,7 +876,6 @@ class gwas_pipe:
         8.it saves the final table to a file
         9.if annotate is True, it annotates the PheWAS table using the annotate method and the provided annotate_genome
         10.return the final PheWAS table.
-        
         '''
                 
         db_vals = pd.read_parquet(self.phewas_db).query(f'p < {pval_threshold} and project != "{self.project_name}"')  #, compression='gzip'      
@@ -1053,8 +1062,8 @@ class gwas_pipe:
             f.write('\n'.join(bash('conda list')[1:]))
             
     def qsub_until_phewas(self, queue = 'condo', walltime = 8, ppn = 12, out = 'log/', err = 'logerr/', project_dir = ''):
-        qsub( queue = queue, walltime = walltime, ppn = ppn, out = 'log/', err = 'logerr/', call = 'gwas_cli.py')
+        qsub( queue = queue, walltime = walltime, ppn = ppn, out = 'log/', err = 'logerr/', call = 'python gwas_cli.py')
         
     def qsub_phewas(self, queue = 'condo', walltime = 8, ppn = 12, out = 'log/', err = 'logerr/', project_dir = ''):
-        qsub( queue = queue, walltime = walltime, ppn = ppn, out = 'log/', err = 'logerr/', call = 'phewas_cli.py')
+        qsub( queue = queue, walltime = walltime, ppn = ppn, out = 'log/', err = 'logerr/', call = 'python phewas_cli.py')
     
