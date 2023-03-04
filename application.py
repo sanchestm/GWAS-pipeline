@@ -1539,4 +1539,4 @@ def view_igv(snp_manual ,qtlrow,qtlinfo,trait_nom, gwas_data,project_name):#
 #port = 8091, mode = 'external',, host='127.0.0.1'/'137.110.193.14', mode='jupyterlab',  
 
 if __name__ == '__main__':
-    app.run_server(debug=True, port=8080)
+    application.run_server(debug=True, port=8080)
