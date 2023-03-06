@@ -1535,9 +1535,7 @@ def view_igv(snp_manual ,qtlrow,qtlinfo,trait_nom, gwas_data,project_name):#
                 )
     except: fig = dcc.Graph()#px.scatter(x = [0], y = [0])
     return fig
-
-#port = 8091, mode = 'external',, host='127.0.0.1'/'137.110.193.14', mode='jupyterlab',
-
+  
 if __name__ == '__main__':
     app.run_server(port=8080, threaded=True)#0.0.0.0 host = '0.0.0.0'
 #gunicorn -w 4 -b 0.0.0.0:8080 app:server --timeout 600
