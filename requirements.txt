@@ -1,9 +1,13 @@
+python=3.8
 numpy
+pandas
+graphviz
 plotly
 dash
 scikit-learn
 hdbscan
 ipykernel
+jupyter-dash
 lightgbm
 shap
 prophet
@@ -19,3 +23,7 @@ dash-bio
 dash-auth
 scikit-optimize
 gunicorn
+nodejs
+ipywidgets
+pandas-plink
+fastparquet
