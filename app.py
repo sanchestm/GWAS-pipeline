@@ -51,7 +51,7 @@ import plotly.tools as ptools
 import networkx as nx
 from prophet.plot import plot_plotly, plot_components_plotly
 import calendar
-from prophet.utilities import regressor_coefficients
+from prophet.utilities import regressor_coefficients 
 import plotly.express as px
 import base64
 import numpy as np
@@ -93,7 +93,7 @@ from skopt.plots import plot_objective
 from skopt.utils import use_named_args
 from skopt.plots import plot_convergence
 from sklearn.feature_selection import RFECV
-set_config(display='diagram')
+set_config(display='diagram') 
 from pandas.plotting import scatter_matrix
 import matplotlib.pyplot as plt
 import matplotlib
@@ -106,7 +106,7 @@ import gzip
 import urllib.request as urlreq
 import dash_auth
 VALID_USERNAME_PASSWORD_PAIRS = {
-    '??????????????????': '?????????????????????????'
+    '?????????????????': '????????????????????'
 }
 application = app  = dash.Dash(__name__, external_stylesheets=[dbc.themes.MINTY])
 server = app.server
@@ -123,7 +123,7 @@ RN7_data = {
     'label': 'Rat rn7',
     'url': 'https://hgdownload.soe.ucsc.edu/gbdb/rn7/rn7.2bit'},
 
-'tracks':[{ 'viz': 'scale', 'label': 'Scale' },  { 'viz': 'location', 'label': 'Location'},
+'tracks':[{ 'viz': 'scale', 'label': 'Scale' },  { 'viz': 'location', 'label': 'Location'},  
     {'viz': 'genotypes','label': 'Founder genotypes', 'source': 'vcf', 'sourceOptions': {'url':founders['vcf']}},
      {'viz': 'genes', 'label': 'Uniprot Full', 'source': 'bigBed', 'sourceOptions': {'url': 'https://hgdownload.soe.ucsc.edu/gbdb/rn6/ncbiRefSeq/ncbiRefSeqOther.bb'}},
      #{'viz': 'features', 'label': 'clinvar', 'source': 'bigBed', 'sourceOptions': {'url': 'https://hgdownload.soe.ucsc.edu/gbdb/rn6/bbi/evaSnp.bb'}},
@@ -140,7 +140,7 @@ phewas_projects = ['u01_peter_kalivas_us','u01_tom_jhou', 'dean_baculum', 'u01_h
 
 phewas_projects = ['p50_david_dietz_2020', 'u01_suzanne_mitchell',
                    'p50_paul_meyer_2014', 'p50_paul_meyer_2020', 'r01_doug_adams',
-                  'u01_olivier_george_cocaine', 'u01_olivier_george_oxycodone', 'u01_peter_kalivas',
+                  'u01_olivier_george_cocaine', 'u01_olivier_george_oxycodone', 'u01_peter_kalivas', 
                    'u01_tom_jhou', 'dean_baculum', 'p50_shelly_flagel_2014',
                    'lionikas_2014']
 genotypes = pd.read_parquet('https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/compressed_genome.parquet')
@@ -173,20 +173,20 @@ class pipemaker2:
         self.memory = 0
         self.optimized_pipe = (0, 0)
         self.input_pipe = ipt_pipe
-
+        
     def Pipe(self):
         return clone(self.input_pipe)
-
+    
     def Cache_pipe(self):
         self.location = 'cachedir'
         self.memory = Memory(location=self.location, verbose=0)
         self.cached_pipe = self.Pipe().set_params(memory = self.memory)
-
+    
     def release_cache(self):
         self.memory.clear(warn=True)
         rmtree(self.location)
         del self.memory
-
+        
     def export_kwards(self):
         return self.Pipe().get_params()
     def fit_transform(self):
@@ -195,34 +195,34 @@ class pipemaker2:
         return self.Pipe().fit_predict(self.df, self.df[self.TG])
     def fit(self):
         return self.Pipe().fit(self.df, self.df[self.TG])
-
+    
     def RFECV(self):
         preprocessed_df = pd.DataFrame(self.Pipe()['preprocessing'].fit_transform(self.df))
-
+        
         if self.optimized_pipe[1] == 0:
             selector = RFECV(self.Pipe()['classifier'], step=1, cv=KFold(10, shuffle= True)).fit(preprocessed_df, self.df[self.TG])
         else:
             selector = RFECV(self.optimized_pipe[0]['classifier'], step=1, cv=KFold(10, shuffle= True)).fit(preprocessed_df, self.df[self.TG])
-
+            
         hX = np.array( range(1, len(selector.grid_scores_) + 1))
         hY= selector.grid_scores_
         H = pd.DataFrame(np.array([hX, hY]).T, columns = ['Number of parameters', 'Cross Validation Score'])
-
+        
         plt.figure()
         plt.xlabel("Number of features selected")
         plt.ylabel("Cross validation score (nb of correct classifications)")
         plt.plot(hX, hY)
         plt.show()
         return pd.DataFrame([selector.ranking_, selector.support_], columns = preprocessed_df.columns, index = ['Ranking', 'support'])
-
+    
     def make_skpot_var(self, param, temperature = 3, distribution = 'uniform', just_classifier = False): #'log-uniform'
         value = self.export_kwards()[param]
         if just_classifier == True: name = param.split('__')[1]
         else: name = param
-
+        
         if value == 0 or value ==1: return
-
-        if type(value) == int:
+        
+        if type(value) == int: 
             if value == -1: return Integer(1, 200, name = name)
             lower_bondary = int(value/temperature)
             if lower_bondary < 2: lower_bondary = 2
@@ -240,11 +240,11 @@ class pipemaker2:
 
     def skopt_classifier_space(self, just_classifier = False):
         dic = self.export_kwards()
-        classifier_params = [x for x in  dic.keys()
-                             if x.find('classifier__') != -1
-                             and  x.find('silent') == -1
+        classifier_params = [x for x in  dic.keys() 
+                             if x.find('classifier__') != -1 
+                             and  x.find('silent') == -1 
                              and  x.find('n_jobs') == -1
-                             and x.find('bagging_fraction') == -1
+                             and x.find('bagging_fraction') == -1 
                              and x != 'classifier__subsample'
                              and x != 'classifier__validation_fraction'] # and
         SPACE = [self.make_skpot_var(i, just_classifier = just_classifier) for i in classifier_params]
@@ -254,24 +254,24 @@ class pipemaker2:
     def objective(self, params):
         classifier = self.Pipe().set_params(**{dim.name: val for dim, val in zip(self.skopt_classifier_space(), params)})
         return -np.mean(cross_val_score(classifier, self.df, self.df[self.TG], cv = StratifiedKFold(n_splits = 5, shuffle=True)))
-
+    
     def objective_just_classifier(self, params, metric , cv_method ):
-        return -np.mean(cross_val_score(self.cached_pipe['classifier'].set_params(**{dim.name: val for dim, val in zip(self.skopt_classifier_space(just_classifier = 1), params)}),
-                                        self.transformed_opt,
+        return -np.mean(cross_val_score(self.cached_pipe['classifier'].set_params(**{dim.name: val for dim, val in zip(self.skopt_classifier_space(just_classifier = 1), params)}), 
+                                        self.transformed_opt, 
                                         self.target_opt,
                                         scoring = metric,
-                                        cv = cv_method,
+                                        cv = cv_method, 
                                         n_jobs = -1))
-
+    
     def objective_cached(self, params):
         return -np.mean(cross_val_score(self.cached_pipe.set_params(**{dim.name: val for dim, val in zip(self.skopt_classifier_space(), params)}),
-                                        self.df,
-                                        self.df[self.TG],
+                                        self.df, 
+                                        self.df[self.TG], 
                                         cv = StratifiedKFold(n_splits = 5, shuffle=True)))
-
-
+    
+    
     def optimize_classifier(self, n_calls = 50, cache = False):
-        if cache:
+        if cache: 
             self.Cache_pipe()
             result = gp_minimize(self.objective_cached, self.skopt_classifier_space() , n_calls=n_calls)
             self.release_cache()
@@ -279,37 +279,37 @@ class pipemaker2:
         #plot_convergence(result)
         #_ = plot_objective(result, n_points=n_calls)
         #print(result.fun)
-        return {'result': result, 'best_params': self.get_params(result, self.skopt_classifier_space() )}
-
+        return {'result': result, 'best_params': self.get_params(result, self.skopt_classifier_space() )} 
+    
     def fast_optimize_classifier(self, n_calls = 50,  is_classifier = True):
         self.Cache_pipe()
-
+        
         self.transformed_opt = self.cached_pipe['preprocessing'].fit_transform(self.df)
         self.target_opt = self.df[self.TG]
-
-        if is_classifier:
+        
+        if is_classifier: 
             cv_method = StratifiedKFold(n_splits = 5, shuffle=True)
             metric    = 'f1_weighted'
-        else:
+        else:      
             cv_method = KFold(n_splits = 5, shuffle=True)
             metric    = 'r2'
-
+        
         result = gp_minimize(lambda x: self.objective_just_classifier(x, metric, cv_method), self.skopt_classifier_space(just_classifier = True) , n_calls=n_calls)
         self.release_cache()
-
+        
         best_params = self.get_params(result, self.skopt_classifier_space(just_classifier = True))
         best_params = {'classifier__'+ i[0]:i[1] for i in best_params.items()}
-
+        
         self.optimized_pipe = (self.Pipe().set_params(**best_params), 1)
 
-        return {'result': result, 'best_params':best_params}
+        return {'result': result, 'best_params':best_params} 
 
     def get_params(self, result_object, space):
         try:
             return { i.name: result_object.x[num] for  num, i in enumerate(space) }
         except:
             raise
-
+             
     def Vis_Cluster(self, method):
         transformed = self.Pipe()['preprocessing'].fit_transform(self.df)
         classsification = method.fit_predict(transformed)  #(*args, **kwds)
@@ -317,13 +317,13 @@ class pipemaker2:
         palette = sns.color_palette('deep', np.unique(classsification).max() + 1)
         colors = [palette[x] if x >= 0 else (0.0, 0.0, 0.0) for x in classsification]
         plt.scatter(transformed.T[0], transformed.T[1], c=colors, s = MinMaxScaler(feature_range=(30, 300)).fit_transform(self.df[self.TG].values.reshape(-1, 1)) , **{'alpha' : 0.5,  'linewidths':0})
-        frame = plt.gca()
+        frame = plt.gca() 
         for num, spine in enumerate(frame.spines.values()):
             if num == 1 or num == 3: spine.set_visible(False)
         plt.title('Clusters found by {}'.format(str(method)), fontsize=24)
         plt.show()
-        return
-
+        return 
+    
     def Evaluate_model(self):
         tprs = []
         aucs = []
@@ -375,7 +375,7 @@ class pipemaker2:
             ax[1].grid(False)
         except: print('is it a regressor?')
         fig.tight_layout()
-        try:
+        try: 
             report = classification_report(clf.predict(X_test), y_test, output_dict=True) # target_names=['Negative detection', 'Positive detection']
         except: #### report for regression
             if self.optimized_pipe[1] == 0: clf = self.Pipe()
@@ -384,8 +384,8 @@ class pipemaker2:
             fig, ax = plt.subplots(1, 1, figsize = (10,10))
             fig.tight_layout()
         return report, fig
-
-    def named_preprocessor(self):
+        
+    def named_preprocessor(self):  
         naming_features = []
         for transformer in self.Pipe()['preprocessing'].transformers:
             transformed = ColumnTransformer(transformers = [transformer]).fit_transform(self.df)
@@ -404,10 +404,10 @@ class pipemaker2:
         dat_trans = self.named_preprocessor()
         explainer = shap.TreeExplainer(clf['classifier'].fit(dat_trans, self.df[self.TG])) #,feature_perturbation = "tree_path_dependent"
         shap_values = explainer.shap_values(dat_trans)
-
+        
         #### force-plot
         a = [_force_plot_html(explainer.expected_value[i], shap_values[i], dat_trans) for i in len(shap_values)]
-
+        
         ### dependence matrix
         ivalues = explainer.shap_interaction_values(dat_trans)
         figdm, axdm = plt.subplots(len( dat_trans.columns),  len(dat_trans.columns), figsize=(15, 15))
@@ -430,7 +430,7 @@ def plotly_cyt(d):
     edges = [{'data': {'weight': i['data']['weight'], 'source': str(i['data']['source']), 'target': str(i['data']['target'])}}  for i in d['edges']]
     nodes = [{'data': {k:i['data'][k] for k in ('id', 'value', 'name') }, 'position' : dict(zip(('x', 'y'),i['data']['data']))} for i in d['nodes']]
     return nodes + edges
-
+    
 def plotly_cyt2(G):
     d = nx.cytoscape_data(G)['elements']
     pos = nx.spring_layout(G)
@@ -447,7 +447,7 @@ def plotly_cyt3(G):
     return nodes + edges
 
 def make_colormap_clustering(column, palette, continuous, data):
-    if not continuous:
+    if not continuous: 
         lut = dict(zip(sorted(data[column].unique()), sns.color_palette(palette, len(data[column].unique()))))
     else: lut = sns.color_palette(palette, as_cmap=True)
     return data[column].map(lut)
@@ -462,8 +462,8 @@ def mplfig2html(figure):
     pic_IObytes2 = io.BytesIO()
     figure.savefig(pic_IObytes2,  format='png')
     figure.clear()
-    pic_IObytes2.seek(0)
-    return  html.Img(src ='data:image/png;base64,{}'.format(base64.b64encode(pic_IObytes2.read()).decode()))
+    pic_IObytes2.seek(0)  
+    return  html.Img(src ='data:image/png;base64,{}'.format(base64.b64encode(pic_IObytes2.read()).decode())) 
 
 def mpl2plotlyGraph(figure):
     return dcc.Graph(ptools.mpl_to_plotly(figure)) #image_height: int=600,image_width: int=800
@@ -473,7 +473,7 @@ def convert2cytoscapeJSON(G):
     # load all nodes into nodes array
     final = {}
     final["nodes"] = []
-    final["edges"] = []
+    final["edges"] = [] 
     for node in G.nodes():
         nx = {}
         nx["data"] = {}
@@ -507,7 +507,7 @@ upload_tab = [
                dcc.Tab(label = 'Anova Table', children = html.Div( id = 'anova_table_div', style = {'justify-content': 'center'} )),
                dcc.Tab(label = 'Explained Variance', children = html.Div(id='EV_table_div') ),
                #dcc.Tab(label = 'Outliers', children = html.Div(id='outlier_table_div') ),
-
+               
            ], style = {'justify-content': 'center','display': 'flex' ,'width': '100%','margin-left': '12px','overflow': 'clip'})) ], width=12, style = {'overflow': 'clip'})
 ]
 
@@ -531,8 +531,8 @@ merge_tab = [
 kep_tab=[ dbc.Row([
            dbc.Col(
                [dbc.Row([
-                   dbc.Container([
-                       html.H5("what are the continous columns for the UMAP?", id = 'kep_tab_continuous_columns_target'),
+                   dbc.Container([ 
+                       html.H5("what are the continous columns for the UMAP?", id = 'kep_tab_continuous_columns_target'), 
                        dbc.Popover([ dbc.PopoverHeader("how we look at continuous data"),dbc.PopoverBody("https://umap-learn.readthedocs.io/en/latest/basic_usage.html")],target="kep_tab_continuous_columns_target",trigger="hover",),
                        dcc.Dropdown(options=[],value=[], multi=True, id = 'UMAP_cont'),
                        html.H5("what are the categorical columns for the UMAP?", id = 'kep_tab_cat_columns_target'),
@@ -561,27 +561,27 @@ kep_tab=[ dbc.Row([
                             {"label": "Pipeline from machine learning tab","value": 3}],value = 2,
                             labelCheckedStyle={"color": "#223c4f", 'font-size': '14px'},
                             labelStyle = {}, style = {'font-size': '14px', 'margin' : '8px', 'margin-left': '20px' ,'transform':'scale(1.1)'}, switch=True,
-                            inputStyle = { }
+                            inputStyle = { }          
                                      ),
                       dbc.Button("Generate UMAP", color="info", size = 'lg', className="d-grid gap-2", id='UMAP_start') ],className="h-100 p-5 bg-light border rounded-3 g-0 d-grid", fluid = True),
                       dbc.Popover([ dbc.PopoverHeader("what is UMAP?"),dbc.PopoverBody("see https://umap-learn.readthedocs.io/en/latest/how_umap_works.html \nhttps://umap-learn.readthedocs.io/en/latest/scientific_papers.html\nhttps://umap-learn.readthedocs.io/en/latest/faq.html#what-is-the-difference-between-pca-umap-vaes")],target="UMAP_start",trigger="hover",),
-
-
-               ])],width=2)  ,
+                   
+                   
+               ])],width=2)  , 
            dbc.Col([dcc.Loading(id="loading-umap",type="default", children= dcc.Tabs([
                dcc.Tab(label = 'umap-view', children = [html.Div(dcc.Graph(id='UMAP_view'), style = {'height': '1000px', 'width' : '1500px','margin-left':'30px'}),html.Div( id = 'umap_selected_stats', style = {'width': '98%'})] ),
                dcc.Tab(label = 'heatmap/cytoscape', children = html.Div( id = 'cytoscape', style = {'justify-content': 'center'} )),
                dcc.Tab(label = 'hdbscan clustering', children = html.Div(id='graph') ),
            ], style = {'justify-content': 'center','display': 'flex' ,'width': '100%','margin-left': '12px','overflow': 'clip'})) ], width=10, style = {'overflow': 'clip'})],  className="g-0")] #
-
-#className="nav nav-pills"      , className="g-0"         autosize=False
+                                
+#className="nav nav-pills"      , className="g-0"         autosize=False                 
 
 time_series_tab = [
     dbc.Row([
         dbc.Col( dbc.Container([
-            html.H5("Target column"),
+            html.H5("Target column"), 
             dcc.Dropdown(options=[],value=[], multi=False, id = 'prophet_y'),
-            html.H5("Datetime column"),
+            html.H5("Datetime column"), 
             dcc.Dropdown(options=[],value=[], multi=False, id = 'prophet_ds'),
             html.Hr(style= {'margin-bottom': '3px'}),
             html.H5("Additional regressors"),
@@ -591,7 +591,7 @@ time_series_tab = [
             html.H6('number of days'),
             dbc.Input(id="prophet_rolling_average", type="number", value = 0, min = 0, max = 366, step = 0.25),
             html.Hr(style= {'margin-bottom': '3px'}),
-            html.H5("Growth"),
+            html.H5("Growth"), 
             dcc.Dropdown(options=[
                 {"label": "logistic", "value": 'logistic'},
                 {"label": "flat", "value": 'flat'},
@@ -608,7 +608,7 @@ time_series_tab = [
                 {"label": "Yearly", "value": 'yearly_seasonality'},
                 {"label": "Weekly", "value": 'weekly_seasonality'},
                 {"label": "Daily", "value": 'daily_seasonality'},
-            ]  ,value=['yearly_seasonality'], id = 'prophet_seasonality' ,
+            ]  ,value=['yearly_seasonality'], id = 'prophet_seasonality' , 
                           style = {'font-size': '14px', 'margin' : '2px', 'margin-left': '20px' ,'transform':'scale(1.)'}, switch=True),
             html.H6('mode'),
             dcc.Dropdown(options=[
@@ -625,13 +625,13 @@ time_series_tab = [
             dbc.Input(id="changepoint_prior", type="number", value = .05, min = 0, max = 10., step = 0.01),
             html.H6('range'),
             dbc.Input(id="changepoint_range", type="number", value = .8, min = 0.1, max = 1., step = 0.01),
-
-
-
-
+            
+            
+            
+            
         ],className="h-100 p-5 bg-light border rounded-3 g-0", fluid = True), width = 2),
         dbc.Col(dcc.Loading(id="loading-prophet",type="default", children=html.Div(id='prophet_plots', style = {'justify-content': 'center', 'margin': '0 auto', 'width': '100%'} ), style= {'margin-top': '100px'})),
-        dbc.Col( dbc.Container([
+        dbc.Col( dbc.Container([ 
             html.H5('Forecast'),
             html.H6('prediction range'),
             dcc.DatePickerRange(id= 'prophet_future_dates', display_format='MMM DD YYYY'),
@@ -646,21 +646,21 @@ time_series_tab = [
             html.Hr(style= {'margin-bottom': '50px'}),
             dbc.Button("Run forecast", color="info", size = 'lg', id='run_prophet')
         ],className="h-100 p-5 bg-light border rounded-3 g-0", fluid = True), className="g-0", width = 2)
-
-
+        
+            
     ], className="g-0", style={'margin-bottom': '10px'})
-
-
+    
+    
 ]
 
 sklearn_preprocessor_list = ['Binarizer','FunctionTransformer', 'KBinsDiscretizer', 'KernelCenterer', 'LabelBinarizer', 'LabelEncoder', 'MinMaxScaler',
                              'MaxAbsScaler','QuantileTransformer', 'Normalizer', 'OneHotEncoder', 'OrdinalEncoder', 'PowerTransformer', 'RobustScaler', 'SplineTransformer',
                               'StandardScaler', 'PolynomialFeatures']
-sklearn_decomposition_list = ['DictionaryLearning','FastICA', 'IncrementalPCA', 'KernelPCA', 'MiniBatchDictionaryLearning', 'MiniBatchSparsePCA',
+sklearn_decomposition_list = ['DictionaryLearning','FastICA', 'IncrementalPCA', 'KernelPCA', 'MiniBatchDictionaryLearning', 'MiniBatchSparsePCA', 
                               'NMF','PCA','SparsePCA', 'FactorAnalysis','TruncatedSVD', 'LatentDirichletAllocation']
 sklearn_manifold_list = ['LocallyLinearEmbedding', 'Isomap', 'MDS', 'SpectralEmbedding', 'TSNE']
 transformers = sklearn_preprocessor_list + sklearn_decomposition_list + sklearn_manifold_list + ['UMAP', 'passthrough']
-transformer_options = [ {'label': x, 'value': x } for x in  transformers]
+transformer_options = [ {'label': x, 'value': x } for x in  transformers] 
 
 sklearn_ensemble_list  = ['BaseEnsemble','RandomForestClassifier', 'RandomForestRegressor', 'RandomTreesEmbedding', 'ExtraTreesClassifier', 'ExtraTreesRegressor',
                           'BaggingClassifier', 'BaggingRegressor', 'IsolationForest', 'GradientBoostingClassifier', 'GradientBoostingRegressor', 'AdaBoostClassifier',
@@ -669,20 +669,20 @@ sklearn_ensemble_list  = ['BaseEnsemble','RandomForestClassifier', 'RandomForest
 sklearn_linear_model_list = ['ARDRegression', 'BayesianRidge', 'ElasticNet', 'ElasticNetCV', 'Hinge', 'Huber', 'HuberRegressor', 'Lars', 'LarsCV', 'Lasso', 'LassoCV',
                              'LassoLars', 'LassoLarsCV', 'LassoLarsIC', 'LinearRegression', 'Log', 'LogisticRegression', 'LogisticRegressionCV', 'ModifiedHuber',
                              'MultiTaskElasticNet', 'MultiTaskElasticNetCV', 'MultiTaskLasso', 'MultiTaskLassoCV', 'OrthogonalMatchingPursuit', 'OrthogonalMatchingPursuitCV',
-                             'PassiveAggressiveClassifier', 'PassiveAggressiveRegressor', 'Perceptron', 'QuantileRegressor', 'Ridge', 'RidgeCV', 'RidgeClassifier',
-                             'RidgeClassifierCV', 'SGDClassifier', 'SGDRegressor', 'SGDOneClassSVM', 'SquaredLoss', 'TheilSenRegressor',
+                             'PassiveAggressiveClassifier', 'PassiveAggressiveRegressor', 'Perceptron', 'QuantileRegressor', 'Ridge', 'RidgeCV', 'RidgeClassifier', 
+                             'RidgeClassifierCV', 'SGDClassifier', 'SGDRegressor', 'SGDOneClassSVM', 'SquaredLoss', 'TheilSenRegressor', 
                             'RANSACRegressor', 'PoissonRegressor', 'GammaRegressor', 'TweedieRegressor']
 sklearn_naive_bayes_list = ['BernoulliNB', 'GaussianNB', 'MultinomialNB', 'ComplementNB', 'CategoricalNB']
 classifier_list = ['LGBMClassifier', 'LGBMRegressor'] + sklearn_ensemble_list + sklearn_naive_bayes_list + sklearn_linear_model_list
-classifier_options = [ {'label': x, 'value': x } for x in  classifier_list]
+classifier_options = [ {'label': x, 'value': x } for x in  classifier_list] 
 
 
 ML_tab = [
    dbc.Row([
        dbc.Col(
-           [dbc.Container([
+           [dbc.Container([ 
                 dbc.Row([
-                   dbc.Col([ html.H5("number of transformers:")]),
+                   dbc.Col([ html.H5("number of transformers:")]), 
                    dbc.Col([#dcc.Dropdown(options=[ {'label': str(x), 'value': str(x)} for x in range(10)],value='2', multi=False,clearable=False, id = 'n_tabs')
                             dbc.Input(id="n_tabs", type="number", value = 1, min = 1, max = 10)
                            ]),
@@ -690,8 +690,8 @@ ML_tab = [
                    dbc.Col([dcc.Dropdown(options=[],value=[], multi=False, id = 'ML_target',clearable=False)]),
                    dbc.Col([html.H5("Classifier:", id = 'ml_tab_classifier'), dbc.Popover([ dbc.PopoverHeader("chosing a classifier"),dbc.PopoverBody('see: \
                    https://scikit-learn.org/stable/supervised_learning.html#supervised-learning\n https://lightgbm.readthedocs.io/en/latest/Quick-Start.html ')],target="ml_tab_classifier",trigger="hover",)]),
-                   dbc.Col([dcc.Dropdown(options=classifier_options ,value = 'LGBMRegressor',  multi=False, id = 'clf_disp', clearable=False)]) ]), #)],className="h-100 p-5 bg-light border rounded-3 g-0", fluid = True),
-            dbc.Row([dbc.Col(
+                   dbc.Col([dcc.Dropdown(options=classifier_options ,value = 'LGBMRegressor',  multi=False, id = 'clf_disp', clearable=False)]) ]), #)],className="h-100 p-5 bg-light border rounded-3 g-0", fluid = True),  
+            dbc.Row([dbc.Col( 
                    [html.H5("Columns to be transformed:")] +
                    [ dcc.Dropdown(options= ['0'], value = ['0'],multi=True,clearable=False, id = 'Columns_'+ str(i))  for i in range(3)], id = 'preprocessing_columns'),
             dbc.Col(
@@ -703,12 +703,12 @@ ML_tab = [
 
 
            ],width=6, id='ml_user_input') ] + [dbc.Col([dbc.Button("Update Pipeline", color="info", size = 'lg', className="d-grid gap-2", id='submit_pipe'),
-                                                         html.Div(id = 'show_pipeline', style ={'width': '50%','borderWidth': '0px' ,'border': 'white'})],
+                                                         html.Div(id = 'show_pipeline', style ={'width': '50%','borderWidth': '0px' ,'border': 'white'})], 
                                                         width = 6), dbc.Col(html.Div([dbc.Button("Download CSV", color="info", size = 'lg', className="d-grid gap-2", id='btn_preprocess_ml'),
                           dcc.Download(id="download-dataframe-csv")])),
                                               dbc.Col(html.Div([dbc.Button("Download model parameters", color="info", size = 'lg', className="d-grid gap-2", id='btn_model'),
                           dcc.Download(id="download-model-params")]))
-
+                                              
                                               ], className="g-0",justify="center", style = {'font-size': '12px', 'margin' : '5px' }),
     dbc.Row([dbc.Col(
         dbc.Container([
@@ -717,9 +717,9 @@ ML_tab = [
                       dbc.Popover([ dbc.PopoverHeader("Tunning the model"),dbc.PopoverBody("here we use scikit optimize's bayesian optimization to tune the hyperparameters\
                       https://scikit-optimize.github.io/stable/auto_examples/bayesian-optimization.html")],target="ml_tab_tunning",trigger="hover",),
                     dbc.Col([dbc.Input(id="slider_hyperopt", type="number", value = 5, min = 10, max = 1000)], width = 1)], className="g-0", style={'margin-bottom': '10px'}), #
-            dbc.Row([dbc.Button("Run pipeline", color="info", size = 'lg', className="d-grid gap-2",  id='run_ML')], className = 'd-grid g-0'),
-            dcc.Loading(id="loading-ml",type="default", children=html.Div(id = 'ml_results', style = {'justify-content': 'center', 'margin': '0 auto', 'width': '1760', 'height' : '220px'}),
-                                 style= {'margin-top': '-300px','justify-content': 'center'})],className="h-100 p-5 bg-light border rounded-3 g-0", fluid = True)
+            dbc.Row([dbc.Button("Run pipeline", color="info", size = 'lg', className="d-grid gap-2",  id='run_ML')], className = 'd-grid g-0'), 
+            dcc.Loading(id="loading-ml",type="default", children=html.Div(id = 'ml_results', style = {'justify-content': 'center', 'margin': '0 auto', 'width': '1760', 'height' : '220px'}), 
+                                 style= {'margin-top': '-300px','justify-content': 'center'})],className="h-100 p-5 bg-light border rounded-3 g-0", fluid = True)  
                      , width = 12,  style = {'justify-content': 'center', 'height' : '220px'}) ], className="g-0")
 ]
 
@@ -736,21 +736,21 @@ table_results_tab = [dbc.Container([html.H3('SNP Heritability:'),
 GWAS_tab=[ dbc.Row([
            dbc.Col(
                [dbc.Row([
-                   dbc.Container([
-                       html.H5("which feature GWAS do you want to visualize?", id = 'gwaslabelpart1'),
+                   dbc.Container([ 
+                       html.H5("which feature GWAS do you want to visualize?", id = 'gwaslabelpart1'), 
                        dcc.Dropdown(options=[],\
                                     value=[], multi=True, id = 'GWAS_options'),
-                       html.H5("aggregate traits?", id = 'gwaslabel1'),
+                       html.H5("aggregate traits?", id = 'gwaslabel1'), 
                        dcc.Dropdown(options=[ 'max', 'mean', 'std', 'none'],\
                                     value='none', multi=False, id = 'GWAS_agg'),
                        html.Div(id = 'gwasrundate'),
                        html.H5("what is the pvalue threshold?", id = 'pval_threshold_value'),
-                       dcc.Input(value = 5.7, type="number", debounce = True,id = 'pvalue_threshold'),
+                       dcc.Input(value = 5.31, type="number", debounce = True,id = 'pvalue_threshold'),
                        dbc.Button("visualize GWAS", color="info", size = 'lg', className="d-grid gap-2", id='View GWAS') ],\
                        className="h-100 p-5 bg-light border rounded-3 g-0 d-grid", fluid = True),
-
-
-               ])],width=2)  ,
+                      
+                   
+               ])],width=2)  , 
            dbc.Col([dcc.Loading(id="loading gwas",type="default", children= dcc.Tabs([
                dcc.Tab(label = 'GWAS', children = [html.Div(dcc.Graph(id='gwastaviewer',
                                                                  style = {'height': '1000px', 'width' : '1500px','margin-left':'30px'})),
@@ -773,12 +773,12 @@ GWAS_tab=[ dbc.Row([
                                                                 style = {'height': '1000px', 'width' : '1500px','margin-left':'30px'},
                                                                 id='phediv' ) ),
 
-
-           ], style = {'justify-content': 'center','display': 'flex' ,'width': '100%','margin-left': '12px','overflow': 'clip'})) ],
+               
+           ], style = {'justify-content': 'center','display': 'flex' ,'width': '100%','margin-left': '12px','overflow': 'clip'})) ], 
                    width=10, style = {'overflow': 'clip'})],  className="g-0")] #
+                               
 
-
-
+    
 
 # html.Iframe(srcDoc = ret_map._repr_html_().decode(), height='1280', width='2350') iframe for html representation of pipeline sklearn
 tab_style = {
@@ -837,7 +837,7 @@ app.layout = html.Div([
 
 
 cyto.load_extra_layouts()
-
+        
 
 
 def list2options(l):
@@ -871,28 +871,28 @@ def add_box_plot_covar_options(x, project_name):
               State('project_name', 'value'),
               prevent_initial_call=True)
 def make_boxplot(covar,  var, data, project_name):
-    df = pd.read_json(data)
-    if len(covar) == 0:
+    df = pd.read_json(data)   
+    if len(covar) == 0: 
         return  px.scatter(x = [0], y = [0])
     df[var] = StandardScaler().fit_transform(df[[var]])
     variable_names = list(df.columns[df.columns.str.contains(var)])
     id_names = list(df.columns[~df.columns.str.contains(var)])
     melted = df.melt(id_vars=covar, value_vars=variable_names)
-
+    
     temp = df.melt(id_vars=id_names, value_vars = variable_names, var_name='normalization',value_name=var)
     temp.normalization = temp.normalization.apply(lambda x :'yes' if 'regressed' in x else 'no')
-
+    
     datadic = pd.read_csv(f'https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/{project_name}/data_dict_{project_name}.csv').set_index('measure')
     covar_type = datadic.loc[covar, 'trait_covariate']
 
-
+    
     if covar_type == 'covariate_categorical':
-        figdist = px.violin(temp,  x = 'normalization', y = var,
+        figdist = px.violin(temp,  x = 'normalization', y = var, 
                             color=covar, box=True, hover_data=temp.columns)
     else:
         figdist = px.scatter(temp, x=covar, y=var, color='normalization', marginal_y="violin",
            marginal_x="box", trendline="ols", template="simple_white", hover_data=temp.columns)
-
+        
     return figdist
 
 
@@ -907,7 +907,7 @@ def make_boxplot(covar,  var, data, project_name):
             Output('phewas_table', 'children'),
             Output('heritability_table', 'children'),
             Input('project_name', 'value'),
-             prevent_initial_call=True)
+             prevent_initial_call=True)  
 def preprocess_data(project_name):
     data = pd.read_csv(f'https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/{project_name}/processed_data_ready.csv', dtype = {'rfid': str}).assign(genotypes = 1)
     data = data.merge(genotypes.reset_index(names = 'rfid'), on = 'rfid')
@@ -916,9 +916,9 @@ def preprocess_data(project_name):
     datadic = datadic[datadic.measure.isin(data.columns)]
     variables_ = list(data.columns[data.columns.str.contains('regressedlr_')].str.replace('regressedlr_', '').unique())
     covariates_ =  datadic.measure[datadic.trait_covariate.str.contains('covar')].to_list()
-    #with open(f'{project_name}/data_distributions.html', 'r') as f:
+    #with open(f'{project_name}/data_distributions.html', 'r') as f:  
     #    html_var = f.read()
-
+        
     #except: return html.Div(), html.Div(), html.Div(), html.Div(), html.Div(), []
 
     stR = statsReport.stat_check(data)
@@ -936,7 +936,7 @@ def preprocess_data(project_name):
                                                   style_cell={'minWidth': '180px', 'width': '90px', 'maxWidth': '180px','overflow': 'hidden','textOverflow': 'ellipsis'}, style_as_list_view=True,
                                                   style_header={'backgroundColor': 'rgb(230, 230, 230)','fontWeight': 'bold'} ,
                                  filter_action="native", sort_action="native", page_size=10)
-
+    
     #expvargraph = dcc.Graph(figure=ff.create_table(explained_var.sort_values('value', ascending = False)))
     expvargraph = dash_table.DataTable(data=explained_var.sort_values('value', ascending = False).to_dict('records'), columns=[{'name': str(i), 'id': str(i),
                                                                                                  'type':'numeric', 'format': Format(precision=2, scheme=Scheme.fixed)
@@ -945,10 +945,10 @@ def preprocess_data(project_name):
                                               style_cell={'minWidth': '180px', 'width': '90px', 'maxWidth': '180px','overflow': 'hidden','textOverflow': 'ellipsis'}, style_as_list_view=True,
                                               style_header={'backgroundColor': 'rgb(230, 230, 230)','fontWeight': 'bold'} ,
                              filter_action="native", sort_action="native",  page_size=10)
-
-    html_var = urlreq.urlopen(f'https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/{project_name}/data_descriptions.html').read()
+    
+    html_var = urlreq.urlopen(f'https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/{project_name}/data_descriptions.html').read()    
     htmrep = [ html.Iframe(srcDoc = html_var.decode(), height='900', width='1600')] #
-
+    
     igv_options = pd.read_csv(f'https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/{project_name}/results/qtls/finalqtl.csv').query('QTL == True').sort_values('p', ascending = False)
     #options_out =[{'label': f"POS:chr{x.Chr}:{round(x.bp)}|P:{round(x['p'], 2)}->{x.trait}", 'value':f'chr{x.Chr}:{round(x.bp)}@{x.trait}' } for y,x in igv_options.iterrows()]
     igv_options = igv_options[['SNP', 'p', 'b','trait','interval_size', 'A1', 'A2', 'trait_description']]
@@ -972,21 +972,24 @@ def preprocess_data(project_name):
                                                           style_header={'backgroundColor': 'rgb(230, 230, 230)','fontWeight': 'bold'} ,
                                         row_selectable="single",   filter_action="native", sort_action="native",  page_size=10)
     except: eqtl_table = html.Div()
-
+    
     out = []
-    try: out += [pd.read_csv(f'https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/{project_name}/results/phewas/table_exact_match.csv', index_col= 0).assign(exact_match = True).rename({'SNP': f'SNP_{project_name}'}) ]
+    try:
+        out += [pd.read_csv(f'https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/{project_name}/results/phewas/table_exact_match.csv', index_col= 0).assign(exact_match = True)\
+                .rename(lambda x: x.replace('_QTL', f'_{project_name}'), axis = 1).rename({'SNP': f'SNP_{project_name}'}, axis = 1).set_index(f'SNP_{project_name}') ]
     except: pass
-    for i in ['table_window_match']:
-        try: out += [pd.read_csv(f'https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/{project_name}/results/phewas/{i}.csv')\
-                     .drop(['NearbySNP', 'NearbyBP'], axis = 1)
-                     .assign(exact_match = False, pval_thresh = i.split('_')[-2] , r2_thresh = i.split('_')[-1].replace('.csv', '')) ]
-        except: pass
-    phewas_info =  pd.concat(out).query('QTL == True').drop('QTL', axis = 1)
+    try:
+        out += [pd.read_csv(f'https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/{project_name}/results/phewas/table_window_match.csv')\
+                     .drop(['NearbySNP', 'NearbyBP'], axis = 1).rename(lambda x: x.replace('_QTL', f'_{project_name}'), axis = 1)\
+                     .assign(exact_match = False, log_pval_thresh = 5 , r2_thresh = .8)\
+                     .set_index(f'SNP_{project_name}')]
+    except: pass
+
+    phewas_info =  pd.concat(out).query('QTL == True').drop('QTL', axis = 1).reset_index()
     phewas_info = phewas_info.loc[:, ~phewas_info.columns.str.contains('Chr|A\d|bp_|b_|se_|Nearby|research|filename')]\
                               .rename(lambda x: x.replace('_phewasdb', '_PheDb'), axis = 1)\
-                              .rename(lambda x: x.replace('_QTL', f'_{project_name}'), axis = 1).drop(['bp', 'genotypes_file'], axis = 1)
+                              .drop(['genotypes_file'], axis = 1)
     phewas_info['p_PheDb'] = -np.log10(phewas_info.p_PheDb)
-    #phewas_info.loc[:,phewas_info.columns.str.startswith('p_')] = -np.log10(phewas_info.loc[:,phewas_info.columns.str.startswith('p_')])
     phewas_table = dash_table.DataTable(data=phewas_info.to_dict('records'), columns=[{'name': str(i), 'id': str(i),
                                                                                                          'type':'numeric', 'format': Format(precision=2, scheme=Scheme.fixed)
                                                                                                          } for i in phewas_info.columns],
@@ -994,7 +997,7 @@ def preprocess_data(project_name):
                                                       style_cell={'minWidth': '180px', 'width': '90px', 'maxWidth': '180px','overflow': 'hidden','textOverflow': 'ellipsis'}, style_as_list_view=True,
                                                       style_header={'backgroundColor': 'rgb(230, 230, 230)','fontWeight': 'bold'} ,
                                     row_selectable="single", filter_action="native", sort_action="native",  page_size=30)
-
+    
     heritable = pd.read_csv(f'https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/{project_name}/results/heritability/heritability.tsv',
                             sep = '\t', index_col=0)
     heritable.index = [x.replace('regressedlr_', '') for x in heritable.index]
@@ -1008,26 +1011,26 @@ def preprocess_data(project_name):
                                                       style_cell={'minWidth': '180px', 'width': '90px', 'maxWidth': '180px','overflow': 'hidden','textOverflow': 'ellipsis'}, style_as_list_view=True,
                                                       style_header={'backgroundColor': 'rgb(230, 230, 230)','fontWeight': 'bold'} ,
                                      filter_action="native", sort_action="native",  page_size=22)
-
-
+    
+    
     return htmrep, data.to_json(), anovatablegraph, \
            expvargraph,list2options(variables_), list2options(variables_),qtl_table, eqtl_table, phewas_table, heritability_table
-
-
+    
+    
 classifier_list = ['LGBMClassifier', 'LGBMRegressor'] + sklearn_ensemble_list + sklearn_naive_bayes_list + sklearn_linear_model_list
-
+    
 def inpt_children_to_pipe(columns, funcs, classif):
     C = [x['props']['value'] for x in columns[1:]]
     F = [x['props']['value'] for x in funcs[1:]]
-
+    
     if classif == 'LGBMClassifier' or  classif == 'LGBMRegressor':
         classifier_function = globals()[classif](boosting_type='gbdt',  subsample=1.0)
     else: classifier_function = globals()[classif]()
     return Pipeline(steps = [('preprocessing', make_pipe(C, F)), ('classifier', classifier_function)])
-
+        
 def make_pipe(columns_list, transformer_list):
     simplfy = []
-    for num, (cols, trans) in enumerate(zip(columns_list, transformer_list) ):
+    for num, (cols, trans) in enumerate(zip(columns_list, transformer_list) ): 
         sub_smp = []
         for x in trans:
             if x[0].isupper() == True:
@@ -1046,11 +1049,11 @@ def make_pipe(columns_list, transformer_list):
               State(component_id = 'clf_disp', component_property = 'value'),
               State(component_id = 'df', component_property = 'data'),
               State(component_id = 'ML_target', component_property = 'value'),
-              State(component_id = 'slider_hyperopt', component_property = 'value'))
+              State(component_id = 'slider_hyperopt', component_property = 'value')) 
 def run_ML(clicked, f_list, c_list, val, data, target, ncalls):
     pipe = inpt_children_to_pipe(c_list,f_list, val)
     if 'CV' in val: ncalls = 2
-    try:
+    try: 
         df = pd.read_json(data,convert_dates = False).dropna(subset= [target])
         #all_colls = []
         #for collist in [x['props']['value'] for x in columns[1:]]:
@@ -1058,42 +1061,42 @@ def run_ML(clicked, f_list, c_list, val, data, target, ncalls):
         #        cols = [x for x in cols if x!= 'genotypes'] + genotype_cols
         #    all_colls += colls
         #df = df.dropna(subset= allcolls)
-
+            
     except: return html.Div()
     Maj = pipemaker2(df, pipe, target)
-    try:
+    try: 
         opt_results = Maj.fast_optimize_classifier(n_calls= int(ncalls))
         new_pipe2 = [html.Iframe(srcDoc = estimator_html_repr(Maj.optimized_pipe[0]),height='360', width='920', hidden = 'hidden')]
-    except:
-        try:
+    except: 
+        try: 
             opt_results = Maj.fast_optimize_classifier(n_calls= int(ncalls), is_classifier= False)
             new_pipe2 = [html.Iframe(srcDoc = estimator_html_repr(Maj.optimized_pipe[0]), height='360', width='920', hidden = 'hidden')]
         except:
             new_pipe2 = [html.Iframe(srcDoc = estimator_html_repr(Maj.Pipe()), height='360', width='920', hidden = 'hidden')]
             Maj = pipemaker2(pd.read_json(data,convert_dates = False), inpt_children_to_pipe(c_list,f_list, val), target)
-    try:
+    try: 
         scores, fig  = Maj.Evaluate_model()
         rev_table = pd.DataFrame(scores).T.reset_index().round(3)
         graph_part = mplfig2html(fig)
         scoreshtml = [dcc.Graph(figure=ff.create_table(rev_table)),graph_part]
-
+        
     except: scoreshtml =  [html.H4('Failed evaluate scores: is it a regressor?', className="display-3") ,html.H4('Failed evaluate scores: is it a regressor?', className="display-3") ]
-
+        
     ##### shapley graphs
     if Maj.optimized_pipe[1] == 0: clf = Maj.Pipe()
     else: clf = Maj.optimized_pipe[0]
-
+    
     new_pipe = html.Iframe(srcDoc = estimator_html_repr(clf), height='360', width='920', hidden = True)
     shap.initjs()
     dat_trans = Maj.named_preprocessor()
     print('calculating shapley')
-    try:
+    try: 
         explainer = shap.TreeExplainer(clf['classifier'].fit(dat_trans, Maj.df[Maj.TG]), dat_trans) ######## added dat_trans here ____________________remove if breaks!!!
         shap_values = explainer.shap_values(dat_trans, check_additivity=False)        #,feature_perturbation = "tree_path_dependent"
-    except:
-        explainer = shap.Explainer(clf['classifier'].fit(dat_trans, Maj.df[Maj.TG]), dat_trans)
+    except: 
+        explainer = shap.Explainer(clf['classifier'].fit(dat_trans, Maj.df[Maj.TG]), dat_trans) 
         shap_values = explainer.shap_values(dat_trans)
-
+    
     #### summary plot
     fig_summary, ax = plt.subplots(figsize=(15, 15))
     shap.summary_plot(shap_values,dat_trans, plot_type='bar',plot_size=(10,10), max_display=20,show= False)
@@ -1104,7 +1107,7 @@ def run_ML(clicked, f_list, c_list, val, data, target, ncalls):
     try: a = [_force_plot_html(explainer.expected_value[i], shap_values[i], dat_trans) for i in range(len(shap_values))]
     except: a = [_force_plot_html(explainer.expected_value, shap_values, dat_trans) ]
     #a = []
-
+    
     print('datamatrix')
     try:
         adding_code_here_to_break_try == 1
@@ -1119,12 +1122,12 @@ def run_ML(clicked, f_list, c_list, val, data, target, ncalls):
         fig2html = mplfig2html(figdm)
     except:
         fig2html = html.H6("Shapley interaction matrix only available for tree-based models")
-    #fig2html = html.H6("Shapley interaction matrix only available for tree-based models")
+    #fig2html = html.H6("Shapley interaction matrix only available for tree-based models")    
     #### heatmap
     print('heatmap')
-    try:
+    try: 
         #adding_code_here_to_break_try
-        try : shap.plots.heatmap(explainer(dat_trans), show= False)
+        try : shap.plots.heatmap(explainer(dat_trans), show= False) 
         except : shap.plots.heatmap(explainer(dat_trans), show= False, check_additivity=False)
         fig1 = plt.gcf()
         fig1.set_figheight(15)
@@ -1132,25 +1135,25 @@ def run_ML(clicked, f_list, c_list, val, data, target, ncalls):
         fig1.tight_layout()
         fig1html = mplfig2html(fig1)
         heatmapfigs = [fig1html]
-    except:
+    except: 
         heatmapfigs = [html.H6('heatmap is only available in binary classification')]
-
+        
     if val == "LGBMClassifier" or val == 'LGBMRegressor':
         decision_tree, ax = plt.subplots(1,1, figsize=(15, 15))
         lgbmfig = []
 
     else:
         lgbmfig = []
-
+        
     figure_names =  (['scores','roc-auc & cm'] if is_classifier(globals()[val]()) else ['score'] )+ ['feature importance'] + ['force-plot feat'+ str(i) for i in range(len(a))] + ['heatmap', 'feature interaction'] + ['decision_tree' for x in lgbmfig]
     ml_all_figures = (scoreshtml if is_classifier(globals()[val]()) else scoreshtml[:1] ) + sumhtml +a +heatmapfigs + [fig2html] + lgbmfig
     ml_result_tabs = dcc.Tabs([dcc.Tab(children = html.Div(content, style = {'justify-content': 'center', 'margin': '0 auto', 'width': '1760px', 'height' : '1100px'}), label = name)
-                               for name,content in zip(figure_names, ml_all_figures)],
+                               for name,content in zip(figure_names, ml_all_figures)], 
                               style = {'justify-content': 'center', 'margin': '0 auto', 'width': '100%'})
 
     return [ml_result_tabs]+ new_pipe2
 
-
+    
 @app.callback(Output(component_id= 'show_pipeline', component_property ='children'),
               Input(component_id= 'preprocessing_functions', component_property ='children'),
               Input(component_id= 'preprocessing_columns', component_property ='children'),
@@ -1159,14 +1162,14 @@ def run_ML(clicked, f_list, c_list, val, data, target, ncalls):
               Input(component_id = 'submit_pipe', component_property = 'n_clicks') )
 def html_pipe(f_list, c_list, val, ml_children, clicked):
     ctx = dash.callback_context.triggered[0]['prop_id'].split('.')[0]
-    if ctx != 'ml_results':
+    if ctx != 'ml_results': 
         pipe = inpt_children_to_pipe(c_list,f_list, val)
-        return html.Iframe(srcDoc = estimator_html_repr(pipe),  height='360', width='920',style = {'border-style':'none', 'frameborder':'none'})
-    else:
+        return html.Iframe(srcDoc = estimator_html_repr(pipe),  height='360', width='920',style = {'border-style':'none', 'frameborder':'none'})    
+    else: 
         try: ret = ml_children[-1]['props']['srcDoc']
-        except: return html.Iframe(srcDoc = estimator_html_repr(inpt_children_to_pipe(c_list,f_list, val)), height='360', width='920',  style = {'border-style':'none', 'frameborder':'none'})
+        except: return html.Iframe(srcDoc = estimator_html_repr(inpt_children_to_pipe(c_list,f_list, val)), height='360', width='920',  style = {'border-style':'none', 'frameborder':'none'})  
     return html.Iframe(srcDoc = ret,  height='360', width='920', style = {'border-style':'none', 'frameborder':'none'}) #1150
-
+ 
 @app.callback(Output(component_id= 'preprocessing_functions', component_property ='children'),
               Output(component_id= 'preprocessing_columns', component_property ='children'),
               Input('n_tabs', 'value'),
@@ -1180,7 +1183,7 @@ def reajust_number_of_column_transformers_ML(val,data,oldf, oldc ):
         new_func =  oldf[:int(val)+1]
     else:
         new_func =  oldf
-
+        
     try: df = pd.read_json(data,convert_dates = False)
     except: df = pd.DataFrame([0], columns = ['0'])
     col_cat =  [x for x in df.columns if str(df[x].dtype) == 'int64']
@@ -1189,11 +1192,11 @@ def reajust_number_of_column_transformers_ML(val,data,oldf, oldc ):
     new_c = [oldc[0]]+[ dcc.Dropdown(options= sorted_vals, value = '0' , multi=True,clearable=True, id = 'ColumnSelector_'+ str(i)) for i in range(int(val))]
     return new_func, new_c
 
-
-@app.callback(Output(component_id= 'UMAP_cat', component_property ='options'),  Output(component_id= 'UMAP_cat', component_property ='value'),
-              Output(component_id= 'UMAP_y', component_property ='options'),  Output(component_id= 'UMAP_y', component_property ='value'),
-              Output(component_id= 'UMAP_cont', component_property ='options'), Output(component_id= 'UMAP_cont', component_property ='value'),
-              Output(component_id= 'ML_target', component_property ='options'),  Output(component_id= 'ML_target', component_property ='value'),
+    
+@app.callback(Output(component_id= 'UMAP_cat', component_property ='options'),  Output(component_id= 'UMAP_cat', component_property ='value'), 
+              Output(component_id= 'UMAP_y', component_property ='options'),  Output(component_id= 'UMAP_y', component_property ='value'), 
+              Output(component_id= 'UMAP_cont', component_property ='options'), Output(component_id= 'UMAP_cont', component_property ='value'), 
+              Output(component_id= 'ML_target', component_property ='options'),  Output(component_id= 'ML_target', component_property ='value'), 
               Output(component_id= 'prophet_y', component_property ='options'),  Output(component_id= 'prophet_y', component_property ='value'),
               Output(component_id= 'prophet_ds', component_property ='options'), # Output(component_id= 'prophet_ds', component_property ='value'),
               Output(component_id= 'prophet_regressors', component_property ='options'),  Output(component_id= 'prophet_regressors', component_property ='value'),
@@ -1209,23 +1212,23 @@ def update_UMAP_and_ML_select_columns(inpt, data): #, columns_list_id
         col_num = [x for x in df.columns if str(df[x].dtype) == 'float64'] #+ ['genotypes']
         col_object = [x for x in df.columns if (str(df[x].dtype) in ['object', 'datetime64[ns]'] )]
         sorted_vals = [{'label': x, 'value': x} for x in col_num + col_cat] + [ {'label': x, 'value': x} for x in  df.columns if x not in ['Unnamed: 0']+ col_num + col_cat ] #+ cols_genotypes #
-        if len(col_object) > 0:
+        if len(col_object) > 0: 
             if 'date' in col_object: col_object = 'date'
             elif 'datetime' in col_object: col_object = 'datetime'
-            else: col_object = col_object[0]
-        vals_object = [ {'label': x, 'value': x} for x in  df.columns  if (str(df[x].dtype) in ['object', 'datetime64[ns]'] )]
+            else: col_object = col_object[0] 
+        vals_object = [ {'label': x, 'value': x} for x in  df.columns  if (str(df[x].dtype) in ['object', 'datetime64[ns]'] )] 
         vals_plus_umap = sorted_vals +  [{'label': 'UMAP_'+str(x), 'value': 'UMAP_'+str(x)} for x in range(1,3)]
         #prep_cols =  [columns_list_id[0]]+[ dcc.Dropdown(options= [{'label': x, 'value': x} for x in df.columns], value = df.columns[0] , multi=True,clearable=True, id = 'ColumnSelector_'+ str(i)) for i in range(len(columns_list_id)+1)]
-
+        
         return sorted_vals, [],  sorted_vals, [], sorted_vals ,[],  sorted_vals, [], vals_plus_umap, [], vals_object,  vals_plus_umap, [] #col_object
-
+    
     except:
         return [], [], [], [], [],[], [], [], [], [],[], [],[] #, columns_list_id  str(fixed_dataset.date.dtype) == 'object'
 
 
-@app.callback(Output(component_id= 'UMAP_view', component_property ='figure'),
+@app.callback(Output(component_id= 'UMAP_view', component_property ='figure'), 
               Output(component_id= 'df_with_umap', component_property ='data'),
-              Output(component_id= 'graph', component_property ='children'),
+              Output(component_id= 'graph', component_property ='children'), 
               Output(component_id= 'cytoscape', component_property ='children'),
               Input('UMAP_start', 'n_clicks'),
               State('UMAP_cat', 'value'),
@@ -1246,27 +1249,27 @@ def generate_UMAP(clicked, cat_labels, cont_labels,y ,n_nb, radio_val,MLcolumns,
             cont_labels = [x for x in cont_labels if x!= 'genotypes'] + genotype_cols
         df = df.dropna(subset = cont_labels+cat_labels)
         if y == None or y == []:
-            if len(cont_labels) > 0:
+            if len(cont_labels) > 0:  
                 if radio_val == 2: preprocessed_data = StandardScaler().fit_transform(df[cont_labels])
                 if radio_val == 1: preprocessed_data = df[cont_labels]
                 if radio_val == 3: preprocessed_data = inpt_children_to_pipe(MLcolumns, MLfuncs, MLclassif)['preprocessing'].fit_transform(df)
                 umap_list += [umap.UMAP(n_neighbors = n_nb).fit(preprocessed_data)]
-            if len(cat_labels) > 0:
-                try: umap_list += [umap.UMAP(metric="jaccard", n_neighbors=150).fit(make_pipeline(OneHotEncoder()).fit_transform(df[cat_labels]))]
-                except: umap_list += [umap.UMAP(metric="jaccard", n_neighbors=150).fit(make_pipeline(OrdinalEncoder(), MinMaxScaler()).fit_transform(df[cat_labels]))]
-        else:# len(y) > 0:#:
-            if len(cont_labels) > 0:
+            if len(cat_labels) > 0:   
+                try: umap_list += [umap.UMAP(metric="jaccard", n_neighbors=150).fit(make_pipeline(OneHotEncoder()).fit_transform(df[cat_labels]))] 
+                except: umap_list += [umap.UMAP(metric="jaccard", n_neighbors=150).fit(make_pipeline(OrdinalEncoder(), MinMaxScaler()).fit_transform(df[cat_labels]))] 
+        else:# len(y) > 0:#: 
+            if len(cont_labels) > 0:  
                 if radio_val == 2: preprocessed_data = StandardScaler().fit_transform(df[cont_labels])
                 if radio_val == 1: preprocessed_data = df[cont_labels]
                 if radio_val == 3: preprocessed_data = inpt_children_to_pipe(MLcolumns, MLfuncs, MLclassif)['preprocessing'].fit_transform(df)
-                umap_list +=[umap.UMAP(n_neighbors = n_nb).fit(preprocessed_data,y=df[y])]
-            if len(cat_labels) > 0:
+                umap_list +=[umap.UMAP(n_neighbors = n_nb).fit(preprocessed_data,y=df[y])]   
+            if len(cat_labels) > 0:   
                 try: umap_list += [umap.UMAP(metric="jaccard", n_neighbors=150).fit(make_pipeline(OneHotEncoder()).fit_transform(df[cat_labels]),y=df[y])]
                 except: umap_list += [umap.UMAP(metric="jaccard", n_neighbors=50).fit(make_pipeline(OrdinalEncoder(), MinMaxScaler()).fit_transform(df[cat_labels]),y=df[y])]
 
         if len(umap_list) > 1: UMAP = umap_list[0] + umap_list[1]
-        elif len(umap_list) == 1: UMAP = umap_list[0]
-        else: return html.Div(), pd.DataFrame(np.zeros([1,1])).to_json() , html.Div()
+        elif len(umap_list) == 1: UMAP = umap_list[0] 
+        else: return html.Div(), pd.DataFrame(np.zeros([1,1])).to_json() , html.Div() 
         umap_df = pd.DataFrame(UMAP.embedding_, index = df.index, columns = ['UMAP_1', 'UMAP_2'])
         df = pd.concat([df, umap_df], axis = 1)
         cluster = hdbscan.HDBSCAN(min_cluster_size=10, gen_min_span_tree=True)
@@ -1275,7 +1278,7 @@ def generate_UMAP(clicked, cat_labels, cont_labels,y ,n_nb, radio_val,MLcolumns,
         dfscatter = df.copy()
         dfscatter['hdbscan'] = dfscatter['hdbscan'].apply(str) #------- covert to str ------------
         dfscatter = dfscatter.reset_index()
-
+        
         #------------------------------------------------- generate graph of distances! ----------------------
         default_stylesheet_cyto = [
         {'selector': '[degree < 15]','style': {'background-color': '#223c4f','label': 'data(id)','width': "30%",'height': "30%" }},
@@ -1288,18 +1291,18 @@ def generate_UMAP(clicked, cat_labels, cont_labels,y ,n_nb, radio_val,MLcolumns,
             cytodisplay2 = cyto.Cytoscape(id='cytoscape', layout={'name': 'cose'},style={'width': '1000px', 'height': '90%'},
                                           stylesheet = default_stylesheet_cyto,
                                           elements = plotly_cyt3(cyt)) #{'width': '2000px', 'height': '1000px'}
-        else:
+        else: 
             df_colors_sns = pd.DataFrame(MinMaxScaler(feature_range = (-2,2)).fit_transform(dfscatter[['UMAP_1','UMAP_2']]), columns = ['UMAP_1','UMAP_2'])
-            colors_sns = pd.concat([make_colormap_clustering('hdbscan', 'tab10',0, dfscatter),
-                                    make_colormap_clustering('UMAP_1', 'PiYG',1, df_colors_sns).apply(lambda x: x[:-1]),
+            colors_sns = pd.concat([make_colormap_clustering('hdbscan', 'tab10',0, dfscatter), 
+                                    make_colormap_clustering('UMAP_1', 'PiYG',1, df_colors_sns).apply(lambda x: x[:-1]), 
                                     make_colormap_clustering('UMAP_2', 'PiYG',1, df_colors_sns)], axis = 1)
             sns.clustermap(dfscatter[[x.replace(' ', '_') for x in cont_labels]], figsize=(15,14),cmap = sns.diverging_palette(20, 220, as_cmap=True), z_score = 1, cbar_pos = None, vmax = 2, vmin = -2,
                            row_colors =colors_sns , dendrogram_ratio=(.2, .1)) #col_cluster=False
             fig1 = plt.gcf()
             fig1.tight_layout()
             cytodisplay2 = mplfig2html(fig1) #mplfig2html(fig1) --------------- edited here---------------------------
-
-
+        
+        
         #### image from hdbscan
         pic_IObytes = io.BytesIO()
         fig = plt.figure(figsize = [16,6], dpi = 100)
@@ -1311,8 +1314,8 @@ def generate_UMAP(clicked, cat_labels, cont_labels,y ,n_nb, radio_val,MLcolumns,
         fig.savefig(pic_IObytes,  format='png')
         fig.clear()
         #lpotlyfigured2 = mpl2plotlyGraph(fig)
-        pic_IObytes.seek(0)
-
+        pic_IObytes.seek(0)        
+        
         graph_part = [ html.Img(src ='data:image/png;base64,{}'.format(base64.b64encode(pic_IObytes.read()).decode()))]#cytodisplay ,cytodisplay1
         #graph_part = [lpotlyfigured2]
 
@@ -1324,9 +1327,9 @@ def generate_UMAP(clicked, cat_labels, cont_labels,y ,n_nb, radio_val,MLcolumns,
               Output(component_id= 'umap_selected_stats', component_property ='children'),
               Input(component_id= 'UMAP_view', component_property ='selectedData'),
               State(component_id= 'df_with_umap', component_property ='data'))
-def store_selected_umap_points(x, json_df):
+def store_selected_umap_points(x, json_df):    
     if x and x['points']:
-        try:
+        try: 
             region = pd.concat([pd.DataFrame(i) for i in x['points']])
             indices = region.groupby(['curveNumber','pointIndex']).first().customdata.unique()
             dataset = pd.read_json(json_df,convert_dates = False) ######  major edits ######
@@ -1335,9 +1338,9 @@ def store_selected_umap_points(x, json_df):
             subset_describe = subset.describe().fillna(-999).T.reset_index() #include='all'
             subset_describe['ttest_p-value'] = subset_describe['index'].apply(lambda x: ttest_ind(subset[x], outer_group[x], equal_var = False)[1])
             subset_describe['ttest1samp_p-value'] = subset_describe['index'].apply(lambda x: ttest_1samp(subset[x], dataset[x].mean()).pvalue)
-
+            
             subset_describe = subset_describe[['index', 'count', 'mean', 'std', 'ttest_p-value','ttest1samp_p-value', 'min', 'max', '50%', '25%', '75%']]
-        except:
+        except: 
             return pd.DataFrame(np.zeros([1,1])).to_json(), html.Div(str(list(region['customdata'].apply(lambda w: int(w)).unique())))
         return subset.to_json(), dash_table.DataTable( data=subset_describe.to_dict('records'), columns=[{'name': str(i), 'id': str(i),
                                                                                                          'type':'numeric', 'format': Format(precision=5, scheme=Scheme.fixed)
@@ -1345,12 +1348,12 @@ def store_selected_umap_points(x, json_df):
                                                       style_cell={'minWidth': '180px', 'width': '90px', 'maxWidth': '180px','overflow': 'hidden','textOverflow': 'ellipsis'}, style_as_list_view=True,
                                                      style_data_conditional=[ {'if': {'row_index': 'odd'}, 'backgroundColor': 'rgb(248, 248, 248)'} ,
                                                                               {'if': {'column_id': 'ttest_p-value',  'filter_query': '{ttest_p-value} <= 0.05'}, 'color': 'red','fontWeight': 'bold'},
-                                                                              {'if': {'column_id': 'ttest1samp_p-value',  'filter_query': '{ttest1samp_p-value} <= 0.05'}, 'color': 'red','fontWeight': 'bold'}],
+                                                                              {'if': {'column_id': 'ttest1samp_p-value',  'filter_query': '{ttest1samp_p-value} <= 0.05'}, 'color': 'red','fontWeight': 'bold'}],  
                                                       style_header={'backgroundColor': 'rgb(230, 230, 230)','fontWeight': 'bold'},  page_size=10 )
-    else:
+    else: 
         return pd.DataFrame(np.zeros([1,1])).to_json(), html.Div()
-
-
+    
+    
 @app.callback(Output(component_id= 'prophet_future_dates', component_property ='start_date'),
               Output(component_id= 'prophet_future_dates', component_property ='end_date'),
               Output(component_id= 'prophet_remove_months', component_property ='value'),
@@ -1361,7 +1364,7 @@ def store_selected_umap_points(x, json_df):
               State(component_id= 'df', component_property ='data'),
               )
 def add_prophet_future(ds_column,regressors, data ):
-    try:
+    try: 
         df = pd.read_json(data)
         df[ds_column] = df[ds_column].apply(pd.to_datetime)
 
@@ -1372,18 +1375,18 @@ def add_prophet_future(ds_column,regressors, data ):
         else:
             start = (df[ds_column].max() + datetime.timedelta(1)).strftime('%b %d %Y')
             end = (df[ds_column].max() + datetime.timedelta(366)).strftime('%b %d %Y')
-
+        
     except: return datetime.datetime.now().strftime('%b %d %Y'), (datetime.datetime.now()   + datetime.timedelta(365)).strftime('%b %d %Y'), [],[],[]
-
+    
     not_present_months = [x for x in range(1,13) if x not in df[ds_column].dt.month.unique()]
     not_present_weekdays = [x for x in range(7) if x not in df[ds_column].dt.weekday.unique()]
     not_present_hours = [x for x in range(24) if x not in df[ds_column].dt.hour.unique()]
     return start, end, not_present_months, not_present_weekdays, not_present_hours
-
-@app.callback(Output(component_id= 'prophet_plots', component_property ='children'),
+    
+@app.callback(Output(component_id= 'prophet_plots', component_property ='children'), 
               Input(component_id= 'run_prophet', component_property ='n_clicks'),
               State(component_id= 'df', component_property ='data'),
-              State(component_id= 'df_with_umap', component_property ='data'), #  ,
+              State(component_id= 'df_with_umap', component_property ='data'), #  , 
               State(component_id= 'prophet_y', component_property ='value'),
               State(component_id= 'prophet_ds', component_property ='value'),
               State(component_id= 'prophet_regressors', component_property ='value'),
@@ -1419,40 +1422,40 @@ def run_fbprophet(click,data, data_umap, y_column, ds_column, regressors, rollin
             df = df.set_index(ds_column)
             df = df.rolling(window= str(int(rolling_avg *24))+'H').mean().reset_index()
             #resampled_data = fixed_dataset_time.resample('20d').mean().dropna().reset_index()
-
+            
         df = df[[ds_column, y_column]+ regressors].dropna() ### added dropna()
         df.columns = ['ds', 'y']+ regressors
-
-        season_true_kwards = {x: 25 for x in seasonality}
+        
+        season_true_kwards = {x: 25 for x in seasonality} 
         season_false_kwards = {x: False for x in ['yearly_seasonality', 'weekly_seasonality', 'daily_seasonality'] if x not in seasonality}
-
+        
         if growth == 'logistic':
             df['cap'] = cap
             df['floor'] = floor
-
+            
         df = df[~(df['ds'].dt.month.isin(removed_months))]
         df = df[~(df['ds'].dt.weekday.isin(removed_months))]
-        df = df.query('ds.dt.hour not in @removed_hours')
-
-
+        df = df.query('ds.dt.hour not in @removed_hours')        
+        
+        
         fbmodel = Prophet(growth = growth,seasonality_mode =season_mode, seasonality_prior_scale =season_scale,
                           n_changepoints= change_points_n, changepoint_prior_scale=change_points_prior , changepoint_range = change_points_range,
                           **season_true_kwards, **season_false_kwards) #mcmc_samples=100
 
         for i in regressors:
             fbmodel.add_regressor(i)
-
+        
         fbmodel.fit(df)
-
+        
         if len(regressors) > 0:
             future = df[df.ds.dt.year == df.ds.dt.year.max()].copy()
             future.ds += pd.to_timedelta(365, unit='d')
-
+        
         elif 'daily_seasonality' not in seasonality:
             future = pd.DataFrame(pd.date_range(pd.to_datetime(forecast_range_start), pd.to_datetime(forecast_range_end),freq='d'), columns = ['ds'])
         else:
             future = pd.DataFrame(pd.date_range(pd.to_datetime(forecast_range_start), pd.to_datetime(forecast_range_end),freq='H'), columns = ['ds'])
-
+        
         future = future[~(future['ds'].dt.month.isin(removed_months))]
         future = future[~(future['ds'].dt.weekday.isin(removed_months))]
         future = future.query('ds.dt.hour not in @removed_hours')
@@ -1460,9 +1463,9 @@ def run_fbprophet(click,data, data_umap, y_column, ds_column, regressors, rollin
         if growth == 'logistic':
             future['cap'] = cap
             future['floor'] = floor
-
+            
         forecast = fbmodel.predict(pd.concat([df, future], axis = 0).reset_index())
-
+        
         returnable = [dcc.Graph(figure= plot_plotly(fbmodel,forecast, figsize = (1240, 960),  xlabel=ds_column, ylabel=y_column), id = 'prophet_forecast_plot', ),
                       dcc.Graph(figure= plot_components_plotly(fbmodel,forecast, figsize = (1240, 340)), id = 'prophet_forecast_components')]
         if len(regressors) > 0:
@@ -1473,11 +1476,11 @@ def run_fbprophet(click,data, data_umap, y_column, ds_column, regressors, rollin
             #sns.barplot(x = 'regressor', y = 'coef', data =regressor_coefs)
             fig00 = px.bar(regressor_coefs, x="regressor", y="coef", hover_data=regressor_coefs.columns, template='plotly',height=800, width=1240)
             returnable += [dcc.Graph(figure = fig00, id='regressor_impt')] #[mplfig2html(fig1)]
-
+        
         returnable_tabs = dcc.Tabs([dcc.Tab(children = content, label = name) for name,content in zip(['timeline', 'components', 'regressor coeficients'], returnable)])
-
+        
         return returnable_tabs
-
+    
     return html.Div()
 
 
@@ -1497,7 +1500,7 @@ def generate_gwas(trait,nclicks ,thresh, project_name, agg):
         for t in trait:
             chrlist = [str(i) if i!=21 else 'x' for i in range(1,22)]
             for opt in [f'regressedlr_{t}.loco.mlma'] + [f'regressedlr_{t}.mlma'] + [f'regressedlr_{t}_chrgwas{chromp2}.mlma' for chromp2 in chrlist]:
-                try:
+                try: 
                     df_gwas += [pd.read_csv(f'https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/{project_name}/results/gwas/{opt}', sep = '\t').assign(trait = t)]
                     logopt = opt.replace('.loco.mlma', '.log').replace('.mlma', '.log')
                     df_date += [pd.read_csv(f'https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/{project_name}/results/gwas/{logopt}',
@@ -1521,16 +1524,16 @@ def generate_gwas(trait,nclicks ,thresh, project_name, agg):
         df_gwas_subset['BP'] = df_gwas_subset['BP'].astype(int)
         df_gwas_subset['SNP'] =  df_gwas_subset['SNP'].str.replace('X', '21')#.astype(int)
         df_gwas_subset = df_gwas_subset.sort_values(['CHR', 'BP']).drop('index', axis = 1).reset_index(drop = True)
-
+        
         return dashbio.ManhattanPlot(dataframe=df_gwas_subset, title = f'GWAS Manhattan Plot {alltraits}, rundate: {df_date}',\
-                                    genomewideline_value=thresh, annotation = 'TRAIT', chrm = 'CHR', bp = "BP", p = 'P', snp = 'SNP' ), \
+                                    genomewideline_value=thresh,suggestiveline_value = 5.95 ,annotation = 'TRAIT', chrm = 'CHR', bp = "BP", p = 'P', snp = 'SNP' ), \
                dashbio.VolcanoPlot(dataframe=df_gwas_subset,annotation = 'TRAIT', title = f'GWAS Volcano Plot {alltraits}, rundate: {df_date}',
                                    genomewideline_value=thresh, effect_size_line  = [-1., 1.], effect_size_line_color = 'red', effect_size = 'B'),\
                df_gwas_subset.to_json()
     else:
         return px.scatter(x = [0], y = [0]),px.scatter(x = [0], y = [0]),  [], pd.DataFrame().to_json()
 
-
+    
 
 @app.callback(Output('igvGraph', 'children'),
               Input('igvmanual', 'value'),
@@ -1552,7 +1555,7 @@ def view_igv(snp_manual,qtlrow,qtlinfo,trait_nom, gwas_data,project_name):#
             gwas_track += [{'type': "gwas", 'format': "gwas", 'name': f"GWAS {trait} r2",'visibilityWindow': 10000000, 'posteriorProbability': True,\
                    'url': fil, 'autoHeight': True, 'max' : 1, 'min': 0, 'columns': { 'chromosome': 2,  'position': 3,  'value': 10} }]
         if snp_manual != None and len(snp_manual)>0:
-            if len(re.findall('chr\d+:\d+', snp_manual)) > 0:
+            if len(re.findall('chr\d+:\d+', snp_manual)) > 0: 
                 snp = snp_manual
                 #gwas = pd.read_json(gwas_data)
                 fil = f'https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/{project_name}/results/gwas/regressedlr_{trait_nom[0]}.loco.mlma'
@@ -1581,8 +1584,7 @@ def view_igv(snp_manual,qtlrow,qtlinfo,trait_nom, gwas_data,project_name):#
     except: fig = dcc.Graph()#px.scatter(x = [0], y = [0])
     return fig
 
-#port = 8091, mode = 'external',, host='127.0.0.1'/'137.110.193.14', mode='jupyterlab',
 
 if __name__ == '__main__':
     app.run_server(host = '127.0.0.1', port=8080, threaded=True, ssl_context='adhoc')#0.0.0.0 host = '0.0.0.0', debug = True,debug = True
-#gunicorn --certfile cert.pem --keyfile key.pem -w 2 -b 0.0.0.0:8080 app:server --timeout 1200 --threads 6
+#gunicorn --certfile cert.pem --keyfile key.pem -w 2 -b 0.0.0.0:8080 app:server --timeout 1200 --threads 6 
