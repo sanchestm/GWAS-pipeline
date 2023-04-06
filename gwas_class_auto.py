@@ -1,4 +1,3 @@
-
 import pandas as pd
 import subprocess
 from glob import glob
@@ -29,11 +28,18 @@ import warnings
 import requests
 from io import StringIO
 import requests
+import goatools
+from goatools.base import download_ncbi_associations
+from collections import defaultdict, namedtuple
+from goatools.anno.genetogo_reader import Gene2GoReader
+gene2go = download_ncbi_associations()
+geneid2gos_rat= Gene2GoReader(gene2go, taxids=[10116])
 #import sleep
 warnings.filterwarnings('ignore')
 #conda create --name gpipe -c conda-forge openjdk=17 ipykernel pandas seaborn scikit-learn umap-learn psycopg2 dask
 #conda activate gpipe
 #conda install -c bioconda gcta plink snpeff
+#pip install goatools
 #wget https://snpeff.blob.core.windows.net/versions/snpEff_latest_core.zip
 
 
@@ -310,7 +316,7 @@ class gwas_pipe:
         'function to encode the sex column in the plink format'
         if s == male_code: return 1
         if s == female_code: return 2
-        return 0
+        return -1
         
     def bashLog(self, call, func, print_call = True):
         '''
@@ -332,7 +338,7 @@ class gwas_pipe:
     def make_dir_structure(self, folders: list = ['data', 'genotypes', 'grm', 'log', 'logerr', 
                                             'results', 'temp', 'data/pheno', 'results/heritability', 
                                              'results/gwas',  'results/loco', 'results/qtls','results/eqtl',
-                                                  'results/phewas', 'temp/r2', 'results/lz/']):
+                                                  'results/phewas', 'temp/r2', 'results/lz/', 'images/']):
         
         '''
         creates the directory structure for the project
@@ -599,10 +605,91 @@ class gwas_pipe:
             newrow = pd.concat(
                 [a[['Source','Variance']].T[1:].rename({i:j for i,j in enumerate(a.Source)}, axis = 1).rename({'Variance': trait}),
                 b],axis =1 )
+            newrow.loc[trait, 'heritability_SE'] = a.set_index('Source').loc['V(G)/Vp', 'SE']
             h2table= pd.concat([h2table,newrow])
             
         if save: h2table.to_csv(f'{self.path}results/heritability/heritability.tsv', sep = '\t')
         return h2table
+        
+        
+    def BLUP(self, print_call: bool = False, save: bool = True, frac: float = 1.,**kwards):
+        '''
+        Create a blup model to get SNP effects and breeding values.
+        
+        Parameters
+        ----------
+        print_call: bool = False
+            whether the command line call for each trait is printed.
+        
+        Design
+        ------
+
+        '''
+        print(f'starting BLUP model {self.project_name}...')      
+
+        for trait in tqdm(self.traits):
+            os.makedirs( f'{self.path}data/BLUP', exist_ok = True)
+            os.makedirs( f'{self.path}results/BLUP', exist_ok = True)
+            trait_file, trait_rfids = f'{self.path}data/BLUP/{trait}_trait_.txt', f'{self.path}data/BLUP/{trait}_train_rfids.txt'
+            out_file = f'{self.path}results/BLUP/{trait}' 
+            tempdf = self.df.sample(frac = frac) if frac < .999 else self.df.copy()
+            tempdf[['rfid', 'rfid', trait]].fillna('NA').astype(str).to_csv(trait_file,  index = False, sep = ' ', header = None)
+            tempdf[['rfid', 'rfid']].to_csv(trait_rfids, header = None, index = False, sep = ' ')
+            self.bashLog(f'{self.gtca} --grm {self.autoGRM} --autosome-num 20  --keep {trait_rfids} \
+                                        --make-grm  --out {out_file}_GRMsubset',
+                        f'BLUP_{trait}_GRM', print_call = print_call)
+            self.bashLog(f'{self.gtca} --reml {self.thrflag} \
+                                       --pheno {trait_file} --grm {out_file}_GRMsubset --reml-pred-rand --out {out_file}_BV',
+                        f'BLUP_{trait}_BV', print_call = print_call) #--autosome
+            self.bashLog(f'{self.gtca} --bfile {self.genotypes_subset} {self.thrflag} --blup-snp {out_file}_BV.indi.blp \
+                           --autosome --autosome-num 20 --out {out_file}_snpscores',
+                        f'BLUP_{trait}_snpscores', print_call = print_call) #--autosome
+
+        BVtable = pd.concat([pd.read_csv(f'{self.path}results/BLUP/{trait}_BV.indi.blp',sep = '\t',  header = None)\
+                                    .dropna(how = 'all', axis = 1).iloc[:, [0, -1]]\
+                                    .set_axis(['rfid',f'BV_{trait}_{self.project_name}'], axis = 1).set_index('rfid')
+                            for trait in tqdm(self.traits)],axis=1)
+            
+            
+        if save: BVtable.to_csv(f'{self.path}results/BLUP/BLUP.tsv', sep = '\t')
+        return BVtable
+    
+    def BLUP_predict(self,genotypes2predict: str = '', rfid_subset: list = [], traits: list = [], print_call: bool = False, save: bool = True):
+        '''
+        Create a blup model to get SNP effects and breeding values.
+
+        Parameters
+        ----------
+        print_call: bool = False
+            whether the command line call for each trait is printed.
+
+        Design
+        ------
+
+        '''
+        if type(traits) == str: traits = [traits]
+        pred_path = f'{self.path}results/BLUP/predictions'
+        os.makedirs( pred_path, exist_ok = True) 
+        #for file in glob(f'{pred_path}/*'): os.remove(file)
+        if len(rfid_subset) > 0:
+            tempdf = pd.DataFrame(rfid_subset, columns = ['rfid'])
+            tempdf[['rfid', 'rfid']].to_csv(f'{pred_path}/test_rfids', header = None, index = False, sep = ' ')
+            keep_flag = f'--keep {pred_path}/test_rfids'
+        else: keep_flag = ''
+        traitlist = self.traits if not traits else traits
+        genotypes2predictname = genotypes2predict.split('/')[-1]
+        #print(traitlist)
+
+        for trait in tqdm(traitlist):
+            self.bashLog(f'plink {self.thrflag} --bfile {genotypes2predict} {keep_flag} --score {self.path}results/BLUP/{trait}_snpscores.snp.blp 1 2 3 sum --out {pred_path}/{trait}_{genotypes2predictname}', 
+                 f'blup_predictions_{trait}_{genotypes2predictname}',print_call = print_call)
+        outdf = pd.concat([pd.read_csv(f'{pred_path}/{trait}_{genotypes2predictname}.profile', sep = '\s+')[['IID', 'SCORESUM']].set_axis(['rfid', trait], axis =1).set_index('rfid') 
+                   for trait in traitlist], axis = 1)
+        if save: outdf.to_csv(f'{self.path}results/BLUP/BLUP_predictions.tsv', sep = '\t')
+
+        return outdf
+        
+        
         
     
     def GWAS(self, traitlist: list = [] ,subtract_grm: bool = True, loco: bool = True , run_per_chr: bool = False,
@@ -754,7 +841,7 @@ class gwas_pipe:
         #/RattacaG01_QC_Sex_Het_pass_n971.vcf.gz.tbi rattaca_genotypes.vcf.gz.tbi
         
         
-    def callQTLs(self, threshold: float = 5.3, window: int = 1e6, subterm: int = 2,  annotate_genome: str = 'rn7',
+    def callQTLs(self, threshold: float = 5.3591, window: int = 1e6, subterm: int = 2,  annotate_genome: str = 'rn7',
                  ldwin = 1e6, ldkb = 11000, ldr2 = .4, qtl_dist = 2*1e6, nchr: int = 21, NonStrictSearchDir = True, **kwards):
         
         '''
@@ -852,16 +939,16 @@ class gwas_pipe:
             ldfilename = f'{self.path}results/lz/temp_qtl_n_@{row.trait}@{row.SNP}'
             r2 = self.plink(bfile = self.genotypes_subset, chr = row.Chr, ld_snp = row.SNP, ld_window_r2 = 0.001, r2 = 'dprime',\
                                     ld_window = 100000, thread_num = 12, ld_window_kb =  6000, nonfounders = '').loc[:, ['SNP_B', 'R2', 'DP']] 
-            gwas = pd.concat([pd.read_csv(x, sep = '\t') for x in glob(f'{self.project_name}/results/gwas/*{row.trait}.loco.mlma') \
-                                + glob(f'{self.project_name}/results/gwas/*{row.trait}.mlma')])
-            tempdf = pd.concat([gwas.set_index('SNP'), r2.rename({'SNP_B': 'SNP'}, axis = 1).set_index('SNP')], join = 'inner', axis = 1)
-            tempdf = self.annotate(tempdf.reset_index(), annotate_genome, 'SNP', save = False).set_index('SNP')
+            gwas = pd.concat([pd.read_csv(x, sep = '\t') for x in glob(f'{self.project_name}/results/gwas/regressedlr_{row.trait}.loco.mlma') \
+                                + glob(f'{self.project_name}/results/gwas/regressedlr_{row.trait}_chrgwasx.mlma')]).drop_duplicates(subset = 'SNP')
+            tempdf = pd.concat([gwas.set_index('SNP'), r2.rename({'SNP_B': 'SNP'}, axis = 1).drop_duplicates(subset = 'SNP').set_index('SNP')], join = 'inner', axis = 1)
+            tempdf = self.annotate(tempdf.reset_index(), annotate_genome, 'SNP', save = False).set_index('SNP').fillna('UNK')
             tempdf.to_csv( f'{self.project_name}/results/lz/lzplottable@{row.trait}@{row.SNP}.tsv', sep = '\t')
         
         
         return out.set_index('SNP')   
     
-    def phewas(self, qtltable: pd.DataFrame(), ld_window: int = int(3e6), pval_threshold: float = 1e-4, nreturn: int = 30 ,r2_threshold: float = .8,\
+    def phewas(self, qtltable: pd.DataFrame(), ld_window: int = int(3e6), pval_threshold: float = 1e-4, nreturn: int = 1 ,r2_threshold: float = .8,\
               annotate: bool = True, annotate_genome: str = 'rn7', **kwards) -> pd.DataFrame():
         '''
         This function performs a phenotype-wide association study (PheWAS) on a 
@@ -903,9 +990,11 @@ class gwas_pipe:
         '''
         print(f'starting phewas ... {self.project_name}')         
         if qtltable.shape == (0,0): qtltable = pd.read_csv(self.annotatedtablepath).set_index('SNP')
-        db_vals = pd.read_parquet(self.phewas_db).query(f'p < {pval_threshold} and project != "{self.project_name}"')  #, compression='gzip'      
+        db_vals = pd.read_parquet(self.phewas_db).query(f'p < {pval_threshold}')  #, compression='gzip'   and project != "{self.project_name}   
+        db_vals.SNP = db_vals.SNP.str.replace('chr', '')
         
         table_exact_match = db_vals.merge(qtltable.reset_index(), on = 'SNP', how = 'inner', suffixes = ('_phewasdb', '_QTL'))
+        table_exact_match = table_exact_match.query(f'project != "{self.project_name}" or trait_phewasdb != trait_QTL ')
         self.phewas_exact_match_path = f'{self.path}results/phewas/table_exact_match.csv'
         table_exact_match.to_csv(self.phewas_exact_match_path )
         #pd.concat([qtltable, db_vals] ,join = 'inner', axis = 1)
@@ -919,11 +1008,11 @@ class gwas_pipe:
               .assign(**row.to_dict())\
               .set_index('SNP')
               for  _, row in tqdm(list(qtltable.iterrows())) ])
-        
+        nearby_snps.NearbySNP = nearby_snps.NearbySNP.str.replace('chr', '')
         
         table_window_match = db_vals.merge(nearby_snps.reset_index(), left_on= 'SNP', 
                                                          right_on='NearbySNP', how = 'inner', suffixes = ('_phewasdb', '_QTL'))
-        
+        table_window_match = table_window_match.query(f'project != "{self.project_name}" or trait_phewasdb != trait_QTL ')
         
         self.phewas_window_r2 = f'{self.path}results/phewas/table_window_match.csv'
         
@@ -948,11 +1037,12 @@ class gwas_pipe:
 
         
         
-    def eQTL(self, qtltable: pd.DataFrame(), pval_thresh: float = 1e-4, r2_thresh: float = .8, nreturn: int =30, ld_window: int = 3e6,\
-            tissue_list: list = ['Adipose', 'BLA','Brain','Eye','IL','LHb','Liver','NAcc','NAcc2','OFC','PL','PL2'],\
-            annotate = True, annotate_genome = 'rn7', **kwards) -> pd.DataFrame():
+    def eQTL(self, qtltable: pd.DataFrame(), pval_thresh: float = 1e-4, r2_thresh: float = .6, nreturn: int =1, ld_window: int = 3e6,\
+            tissue_list: list = ['BLA','Brain','Eye','IL','LHb','NAcc','NAcc2','OFC','PL','PL2'],\
+            annotate = True, genome = 'rn7', **kwards) -> pd.DataFrame():
         
         '''
+        #'Adipose','Liver'
         This function performs eQTL analysis on a given QTL table by iterating over a list of tissues
         and searching for cis-acting eQTLs (expression quantitative trait loci) that are in linkage disequilibrium
         (LD) with the QTLs.
@@ -991,12 +1081,14 @@ class gwas_pipe:
             8.save the final eQTL table to a file and return the final eQTL table.
         '''
         print(f'starting eqtl ... {self.project_name}') 
+        #d =  {'rn6': '', 'rn7': '.rn7.2'}[genome]
         if qtltable.shape == (0,0): qtltable = pd.read_csv(self.annotatedtablepath).set_index('SNP')
         out = []
         for tissue in tqdm(tissue_list,  position=0, desc="tissue", leave=True):
 
-            tempdf = pd.read_csv(f'https://ratgtex.org/data/eqtl/{tissue}.cis_qtl_signif.txt.gz', sep = '\t').assign(tissue = tissue)\
+            tempdf = pd.read_csv(f'https://ratgtex.org/data/eqtl/{tissue}.{genome}.cis_qtl_signif.txt.gz', sep = '\t').assign(tissue = tissue)\
                                                                                                              .rename({'variant_id': 'SNP'}, axis = 1)
+            tempdf['SNP'] =tempdf.SNP.str.replace('chr', '')
             out += [pd.concat([ 
                    self.plink(bfile = self.genotypes_subset, chr = row.Chr,ld_snp = row.name,r2 = 'dprime',\
                    ld_window = ld_window, thread_num = 12, nonfounders = '')\
@@ -1010,7 +1102,7 @@ class gwas_pipe:
 
         out = pd.concat(out).reset_index(drop=True)
         if annotate:
-            out = self.annotate(out, annotate_genome, 'NearbySNP', save = False)
+            out = self.annotate(out, genome, 'NearbySNP', save = False)
         self.eqtl_path = f'{self.path}results/eqtl/eqtl.csv'
         out.to_csv(self.eqtl_path, index= False)
         
