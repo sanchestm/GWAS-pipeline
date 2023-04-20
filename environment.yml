@@ -16,3 +16,11 @@ dependencies:
   - snpeff
   - gcta
   - pandas-profiling
+  - plotly
+  - biopython
+  - pdf2image
+  - poppler
+  - mygene
+  - pytables
+  - h5py
+  - pandas-plink
