@@ -42,6 +42,7 @@ import matplotlib.pyplot as plt
 tqdm.pandas()
 import plotly.graph_objects as go
 from  os.path import dirname, basename
+from itertools import product
 mg = mygene.MyGeneInfo()
 #import sleep
 warnings.filterwarnings('ignore')
@@ -220,13 +221,15 @@ class gwas_pipe:
                  trait_descriptions: list = [],
                  project_name: str = 'test',
                  phewas_db: str = 'phewasdb.parquet.gz',
-                 threads: int = os.cpu_count()):
+                 threads: int = os.cpu_count(),
+                 founder_genotypes: str = '/projects/ps-palmer/hs_rats/Ref_panel_mRatBN7.2/Ref_panel_mRatBN7_2_chr_GT'):
 
         
         if use_tscc_modules: bash(f'module load {" ".join(use_tscc_modules)}')
         self.gtca = 'gcta64' if not gtca_path else gtca_path
         self.path = path
         self.all_genotypes = all_genotypes
+        self.founder_genotypes = founder_genotypes
         
         df = data
         df.columns = df.columns.str.lower()
@@ -698,7 +701,7 @@ class gwas_pipe:
         if save: BVtable.to_csv(f'{self.path}results/BLUP/BLUP.tsv', sep = '\t')
         return BVtable
     
-    def BLUP_predict(self,genotypes2predict: str = '', rfid_subset: list = [], traits: list = [], print_call: bool = False, save: bool = True):
+    def BLUP_predict(self,genotypes2predict: str = '', rfid_subset: list = [], traits: list = [], print_call: bool = False, save: bool = True) -> pd.DataFrame():
         '''
         Create a blup model to get SNP effects and breeding values.
 
@@ -884,7 +887,7 @@ class gwas_pipe:
         #/RattacaG01_QC_Sex_Het_pass_n971.vcf.gz.tbi rattaca_genotypes.vcf.gz.tbi
         
         
-    def callQTLs(self, threshold: float = 5.3591, window: int = 2e6, subterm: int = 2,  annotate_genome: str = 'rn7', display_plots: bool = True,
+    def callQTLs(self, threshold: float = 5.3591, window: int = 2e6, subterm: int = 2,  annotate_genome: str = 'rn7', add_founder_genotypes: bool = True,
                  ldwin = 7e6, ldkb = 11000, ldr2 = .4, qtl_dist = 7*1e6, nchr: int = 21, NonStrictSearchDir = True, **kwards):
         
         '''
@@ -980,46 +983,51 @@ class gwas_pipe:
         out =  out.reset_index().rename({'index': 'bp'}, axis = 1).sort_values('trait')#.assign(project = self.project_name)
         out['trait_description'] = out.trait.apply(lambda x: self.get_trait_descriptions[x])
         out['trait'] = out.trait.apply(lambda x: x.replace('regressedlr_', ''))
+        if add_founder_genotypes:
+            dffounder = pd.read_csv(self.founder_genotypes, sep = '\t')
+            dffounder['SNP'] = dffounder['chr'].astype('str')+ ':'+dffounder.pos.astype('str')
+            out = out.merge(dffounder.drop(['chr', 'pos'], axis = 1), on = 'SNP', how = 'left')
+            #usnps = out.SNP.unique()
+            #aa = ','.join(usnps)
+            #try: self.bashLog(f'plink --bfile {self.founder_genotypes} --snps {aa} --recode --alleleACGT --out {self.path}temp/founderinfo', 'founderinfo', print_call=False)
+            #snporder = list(pd.read_csv(f'{self.path}temp/stripplot.map', sep = '\s+', header = None)[1])
+            #temp = pd.read_csv(f'{self.path}temp/stripplot.ped', sep = '\s+', index_col = [0,1,2,3,4,5], header = None)
+            #temp = temp.iloc[:, 1::2].set_axis(snporder, axis = 1) + temp.iloc[:, 0::2].set_axis(snporder, 1)
+            #temp = temp.reset_index().drop([1,2,3,4,5], axis = 1).rename({0:'founders'},axis = 1).set_index('founders').T.rename_axis('SNP').reset_index()
+            #out = out.merge(temp, on = 'SNP', how = 'left')
+        
         self.allqtlspath = f'{self.path}results/qtls/allQTLS.csv'
         out.to_csv(self.allqtlspath, index = False)
+        return out.set_index('SNP') 
         
-        #print(f'generating locuszoom info for project {self.project_name}')
-        #for name, row in tqdm(list(out.iterrows())):
-        #    ldfilename = f'{self.path}results/lz/temp_qtl_n_@{row.trait}@{row.SNP}'
-        #    r2 = self.plink(bfile = self.genotypes_subset, chr = row.Chr, ld_snp = row.SNP, ld_window_r2 = 0.001, r2 = 'dprime',\
-        #                            ld_window = 100000, thread_num = 12, ld_window_kb =  6000, nonfounders = '').loc[:, ['SNP_B', 'R2', 'DP']] 
-        #    gwas = pd.concat([pd.read_csv(x, sep = '\t') for x in glob(f'{self.project_name}/results/gwas/regressedlr_{row.trait}.loco.mlma') \
-        #                        + glob(f'{self.project_name}/results/gwas/regressedlr_{row.trait}_chrgwasx.mlma')]).drop_duplicates(subset = 'SNP')
-        #    tempdf = pd.concat([gwas.set_index('SNP'), r2.rename({'SNP_B': 'SNP'}, axis = 1).drop_duplicates(subset = 'SNP').set_index('SNP')], join = 'inner', axis = 1)
-        #    tempdf = self.annotate(tempdf.reset_index(), annotate_genome, 'SNP', save = False).set_index('SNP').fillna('UNK')
-        #    tempdf.to_csv( f'{self.path}results/lz/lzplottable@{row.trait}@{row.SNP}.tsv', sep = '\t')
-        
-        print(f'starting effect size plot within qtl function ... {self.project_name}') 
+    def effectsize(self, qtltable: pd.DataFrame(),display_plots: bool = True):
+        print(f'starting effect size plot... {self.project_name}') 
+        out = qtltable.reset_index()
         usnps = out.SNP.unique()
         aa = ','.join(usnps)
         self.bashLog(f'plink --bfile {self.genotypes_subset} --snps {aa} --recode --alleleACGT --out {self.path}temp/stripplot', 'stripplot', print_call=False)
+        snporder = list(pd.read_csv(f'{self.path}temp/stripplot.map', sep = '\s+', header = None)[1])
         temp = pd.read_csv(f'{self.path}temp/stripplot.ped', sep = '\s+', index_col = [0,1,2,3,4,5], header = None)
-        temp = temp.iloc[:, 1::2].set_axis(usnps, axis = 1) + temp.iloc[:, 0::2].set_axis(usnps, 1)
+        temp = temp.iloc[:, 1::2].set_axis(snporder, axis = 1) + temp.iloc[:, 0::2].set_axis(snporder, 1)
         temp = temp.reset_index().drop([1,2,3,4,5], axis = 1).rename({0:'rfid'},axis = 1)
         temp = temp.merge(self.df[self.traits + ['rfid', 'sex']].rename(lambda x: x.replace('regressedlr_', ''), axis =1), on = 'rfid')
-        for name, row in out.iterrows():
+        for name, row in tqdm(list(out.iterrows())):
             sns.violinplot(temp[temp[row.SNP]!= '00'].sort_values(row.SNP), x = row.SNP, y = row.trait, cut = 0,  palette = 'RdBu') # hue="sex", split=True, bw= .2,
             sns.stripplot(temp[temp[row.SNP]!= '00'].sort_values(row.SNP), x = row.SNP,  y = row.trait, color = 'black', jitter = .2, alpha = .2)
             plt.hlines(y = 0, xmin =-.5, xmax=2.5, color = 'black', linewidth = 2, linestyle = '--')
             sns.despine()
             os.makedirs(f'{self.path}images/violin/', exist_ok=True)
-            plt.savefig(f'{self.path}images/violin/{row.SNP}@{row.trait}.png')
+            plt.savefig(f'{self.path}images/violin/{row.SNP}__{row.trait}.png')
             if display_plots: plt.show() 
             plt.close()
-            #sns.boxplot(temp[temp[row.SNP]!= '00'].sort_values(row.SNP), x = row.SNP, y = row.trait, palette = 'RdBu' )#cut = 0,  bw= .2, hue="sex", split=True
-            #sns.stripplot(temp[temp[row.SNP]!= '00'].sort_values(row.SNP), x = row.SNP,  y = row.trait, color = 'black', jitter = .2, alpha = .4)
-            #plt.hlines(y = 0, xmin =-.5, xmax=2.5, color = 'black', linewidth = 2, linestyle = '--')
-            #sns.despine()
-            #os.makedirs(f'{self.path}images/boxplot/box', exist_ok=True)
-            #plt.savefig(f'{self.path}images/boxplot/box/box{row.SNP}@{row.trait}.png')
-            #plt.show()
-        
-        return out.set_index('SNP')   
+            sns.boxplot(temp[temp[row.SNP]!= '00'].sort_values(row.SNP), x = row.SNP, y = row.trait, palette = 'RdBu' )#cut = 0,  bw= .2, hue="sex", split=True
+            sns.stripplot(temp[temp[row.SNP]!= '00'].sort_values(row.SNP), x = row.SNP,  y = row.trait, color = 'black', jitter = .2, alpha = .4)
+            plt.hlines(y = 0, xmin =-.5, xmax=2.5, color = 'black', linewidth = 2, linestyle = '--')
+            sns.despine()
+            os.makedirs(f'{self.path}images/boxplot/', exist_ok=True)
+            plt.savefig(f'{self.path}images/boxplot/boxplot{row.SNP}__{row.trait}.png')
+            if display_plots: plt.show()
+            plt.close()   
     
     def locuszoom(self, qtltable: pd.DataFrame(), threshold: float = 5.3591, qtl_r2_thresh: float = .6, padding: float = 2e5, annotate_genome: str = 'rn7'):
         '''
@@ -1061,12 +1069,12 @@ class gwas_pipe:
                 --metal {lzpvalname} --ld {lzr2name} \
                 --refsnp {qtl_row.SNP} --chr {int(topsnpchr)} --start {int(range_interest["min"] - 3e5)} --end {int(range_interest["max"] + 3e5)} --build u01_peter_kalivas_v7 \
                 --db /projects/ps-palmer/software/local/src/locuszoom/bin/u01_peter_kalivas_v7.db \
-                --plotonly showRecomb=FALSE showAnnot=FALSE --prefix {self.path}temp/{qtl_row.trait} signifLine="5.6" signifLineColor="red" \
+                --plotonly showRecomb=FALSE showAnnot=FALSE --prefix {self.path}temp/{qtl_row.trait} signifLine="{threshold}" signifLineColor="red" \
                 title = "{qtl_row.trait} SNP {qtl_row.SNP}" > /dev/null 2>&1 ''')
             path = glob(f'{self.path}temp/{qtl_row.trait}*{qtl_row.SNP}/*.pdf'.replace(':', '_'))[0]
             for num,image in enumerate(convert_from_path(path)):
                 bn = basename(path).replace('.pdf', '.png')
-                if not num: image.save(f'{self.path}images/lz/lzold@{qtl_row.trait}@{qtl_row.SNP}.png', 'png')
+                if not num: image.save(f'{self.path}images/lz/lz__{qtl_row.trait}__{qtl_row.SNP}.png', 'png')
     
     def phewas(self, qtltable: pd.DataFrame(), ld_window: int = int(3e6), pval_threshold: float = 1e-4, nreturn: int = 1 ,r2_threshold: float = .8,\
               annotate: bool = True, annotate_genome: str = 'rn7', **kwards) -> pd.DataFrame():
@@ -1305,9 +1313,9 @@ class gwas_pipe:
         #d =  {'rn6': '', 'rn7': '.rn7.2'}[genome]
         if qtltable.shape == (0,0): qtltable = pd.read_csv(self.annotatedtablepath).set_index('SNP')
         out = []
-        for tissue in tqdm(tissue_list,  position=0, desc="tissue", leave=True):
+        for tissue, (typ, prefix) in tqdm(list(product(tissue_list, [('cis','cis_qtl_signif'), ('trans','trans_qtl_pairs')])),  position=0, desc="tissue+CisTrans", leave=True):
 
-            tempdf = pd.read_csv(f'https://ratgtex.org/data/splice/{tissue}.{genome}.splice.trans_qtl_pairs.txt.gz', sep = '\t').assign(tissue = tissue)\
+            tempdf = pd.read_csv(f'https://ratgtex.org/data/splice/{tissue}.{genome}.splice.{prefix}.txt.gz', sep = '\t').assign(tissue = tissue)\
                                                                                                              .rename({'variant_id': 'SNP', 'pval': 'pval_nominal'}, axis = 1)  
             tempdf['SNP'] =tempdf.SNP.str.replace('chr', '')
             out += [pd.concat([ 
@@ -1318,23 +1326,25 @@ class gwas_pipe:
                   .assign(**row.to_dict())\
                   .merge(tempdf, right_on= 'SNP',  left_on='NearbySNP', how = 'inner', suffixes = ('_QTL', '_sqtldb'))\
                   .query(f'R2 > {r2_thresh} and pval_nominal < {pval_thresh}')\
-                  .nsmallest(nreturn, 'pval_nominal').assign(sQTLtype = 'trans')
+                  .nsmallest(nreturn, 'pval_nominal').assign(sQTLtype = typ)
                   for  _, row in qtltable.iterrows() ])]
             
-        tempdf = pd.read_csv(f'https://ratgtex.org/data/splice/rn7.top_assoc_splice.txt', sep = '\t').rename({'variant_id': 'SNP', 'pval': 'pval_nominal'}, axis = 1)
-        out += [pd.concat([ 
-                   self.plink(bfile = self.genotypes_subset, chr = row.Chr,ld_snp = row.name,r2 = 'dprime',\
-                   ld_window = ld_window, thread_num = 12, nonfounders = '')\
-                  .drop(['CHR_A', 'BP_A', 'CHR_B'], axis = 1)\
-                  .rename({'SNP_A': 'SNP', 'SNP_B': 'NearbySNP', 'BP_B': 'NearbyBP'}, axis = 1)\
-                  .assign(**row.to_dict())\
-                  .merge(tempdf, right_on= 'SNP',  left_on='NearbySNP', how = 'inner', suffixes = ('_QTL', '_sqtldb'))\
-                  .query(f'R2 > {r2_thresh} and pval_nominal < {pval_thresh}')\
-                  .nsmallest(nreturn, 'pval_nominal').assign(sQTLtype = 'cis')
-                  for  _, row in qtltable.iterrows() ])]
+        #tempdf = pd.read_csv(f'https://ratgtex.org/data/splice/rn7.top_assoc_splice.txt', sep = '\t').rename({'variant_id': 'SNP', 'pval': 'pval_nominal'}, axis = 1)
+        #out += [pd.concat([ 
+        #           self.plink(bfile = self.genotypes_subset, chr = row.Chr,ld_snp = row.name,r2 = 'dprime',\
+        #           ld_window = ld_window, thread_num = 12, nonfounders = '')\
+        #          .drop(['CHR_A', 'BP_A', 'CHR_B'], axis = 1)\
+        #          .rename({'SNP_A': 'SNP', 'SNP_B': 'NearbySNP', 'BP_B': 'NearbyBP'}, axis = 1)\
+        #          .assign(**row.to_dict())\
+        #          .merge(tempdf, right_on= 'SNP',  left_on='NearbySNP', how = 'inner', suffixes = ('_QTL', '_sqtldb'))\
+        #          .query(f'R2 > {r2_thresh} and pval_nominal < {pval_thresh}')\
+        #          .nsmallest(nreturn, 'pval_nominal').assign(sQTLtype = 'cis')
+        #          for  _, row in qtltable.iterrows() ])]
+        #https://ratgtex.org/data/splice/IL.rn7.splice.cis_qtl_signif.txt.gz
+
 
         out = pd.concat(out).reset_index(drop=True)
-        out.gene_id = out.phenotype_id.str.extract('(ENSRNOG\d+)')
+        out['gene_id'] = out.phenotype_id.str.extract('(ENSRNOG\d+)')
         if annotate: out = self.annotate(out, genome, 'NearbySNP', save = False)
         self.sqtl_path = f'{self.path}results/sqtl/sqtl_table.csv'
         out.to_csv(self.sqtl_path, index= False)
@@ -1383,7 +1393,8 @@ class gwas_pipe:
             fig.layout['xaxis']['ticktext'] = [str(x).replace('21', 'X').replace('22', 'Y').replace('23', 'MT') for x in range(1, 22)]
             if display: fig.show(renderer = 'png',width = 1920, height = 800)
             #if 'html' in save_fmt: fig.write_html(f"{self.path}images/{t}.html",width = 1920, height = 800)
-            if 'png' in save_fmt: fig.write_image(f"{self.path}images/{t}.png",width = 1920, height = 800)
+            os.makedirs(f'{self.path}images/manhattan/', exist_ok = True)
+            if 'png' in save_fmt: fig.write_image(f"{self.path}images/manhattan/{t}.png",width = 1920, height = 800)
             
     
     def porcupineplot(self, qtltable: pd.DataFrame(), traitlist: list = [], threshold: float = 5.3591, run_only_qtls = True,
