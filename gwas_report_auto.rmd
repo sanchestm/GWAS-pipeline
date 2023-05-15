@@ -52,15 +52,13 @@ pretify <- function(data){
         list(className = "dt-center", targets = 0:1))))}
         
 pretify2 = function(data){
-    print(htmltools::tagList(datatable(data,rownames=F,escape = F,options = list(dom = 'Bfrtip',buttons = c('copy', 'csv', 'excel', 'pdf', 'print')))))
+    print(htmltools::tagList(datatable(data %>% mutate_if(is.numeric, ~round(., 3)) ,rownames=F,escape = F,options = list(dom = 'Bfrtip',buttons = c('copy', 'csv', 'excel', 'pdf', 'print')))))
 }
 ```
 
 
 ******
 # **General Information**
-
-Principal Investigators: 
 
 Phenotype Info
 
@@ -70,7 +68,7 @@ Phenotype Info
 
 * covariate dropboxes: [here](https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/PATHNAMEdata_dict_PROJECTNAME.csv) 
 
-* phenotype qc file: [here](https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/PATHNAMEdata_distributions.html) 
+* phenotype statistical descriptions file: [here](https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/PATHNAMEdata_distributions.html) 
 
 Genotype Info
 
@@ -90,65 +88,93 @@ Genotype Info
 Collaborative data dictionary google document: 
 
 ```{r trait descriptions, echo=FALSE,eval=T,message=FALSE,include=T}
-ddict <-read.csv( "../data_dict_PROJECTNAME.csv",header=T,stringsAsFactors=F) %>% select(-c('general_category', 'trait_name', 'subtrait_name', 'tier'))
-ddict$covariates = gsub(',', ', ', ddict$covariates)
-pretify(ddict)
+tryCatch(
+    expr = {
+        ddict <-read.csv( "../data_dict_PROJECTNAME.csv",header=T,stringsAsFactors=F) %>% select('measure', 'trait_covariate','covariates', 'description') %>% filter(measure != '')
+        ddict$covariates = gsub(',', ', ', ddict$covariates)
+        pretify(ddict)
+    },
+    error = function(e){ 
+        print('cound_not_open  ../data_dict_PROJECTNAME.csv')
+    })
 ```
-
-******
-# **Raw trait distribution**  
-
-
-See the phenotype qc report for covariate distributions and trait distributions separated by covariates:  [here](https://www.dropbox.com/s/yezhrba9qdlijw3/kalivas_final_phenotype_qc_report_kalivas_calculated_v3.html?dl=0)
-
-For many statistical analyses, it’s often assumed that the trait of interest (the dependent variable) is normally distributed. This assumption is often broken due to multiple factors. In cases where this assumption is violated, extreme values can be overrepresented, and in some cases the conclusions of the model might be misleading [Simpson Paradox](https://en.wikipedia.org/wiki/Simpson%27s_paradox). To address these issues our pipeline performs a [quantile normalization](https://scikit-learn.org/stable/modules/generated/sklearn.preprocessing.QuantileTransformer.html), which is a transformation that preserves the rank of each subject but reassigns values such that the final distribution is perfectly normally distributed. This means that our GWAS identifies biallelic snps that contribute to a change in the rank of the phenotype (e.g. having a mutation on snp 1:3029384 contributes to a rat to go from the top 70% percentile of the trait to the top 75%). 
-
-This is an example of a normally distributed trait: 
 
 ```{r raw trait distribution,echo=FALSE,eval=T,message=FALSE,include=T,warning=F,results='asis'}
 #htmltools::includeHTML("../data_distributions.html")
+
+
+# ******
+#**Raw trait distribution**  
+
+
+#See the phenotype qc report for covariate distributions and trait distributions separated by covariates:  [here](https://www.dropbox.com/s/yezhrba9qdlijw3/kalivas_final_phenotype_qc_report_kalivas_calculated_v3.html?dl=0)
+
+#For many statistical analyses, it’s often assumed that the trait of interest (the dependent variable) is normally distributed. This assumption is often broken due to multiple factors. In cases where this assumption is violated, extreme values can be overrepresented, and in some cases the conclusions of the model might be misleading [Simpson Paradox](https://en.wikipedia.org/wiki/Simpson%27s_paradox). To address these issues our pipeline performs a [quantile normalization](https://scikit-learn.org/stable/modules/generated/sklearn.preprocessing.QuantileTransformer.html), which is a transformation that preserves the rank of each subject but reassigns values such that the final distribution is perfectly normally distributed. This means that our GWAS identifies biallelic snps that contribute to a change in the rank of the phenotype (e.g. having a mutation on snp 1:3029384 contributes to a rat to go from the top 70% percentile of the trait to the top 75%). 
+
+#This is an example of a normally distributed trait: 
 ```
 
 ******
 # **Phenotype processing details **  
 
 
-Quantile normalized separately for males and females then regress out the effect of other covariates (simulataneously) if they are significant and explain more than 2% of variance. 
+Quantile normalized separately for males and females then regress out the effect of other covariates (simulataneously) if they are significant and explain more than REGRESSTHRS of variance. 
 
 Here are the covariates looked at: 
 
 ```{r covariate, echo=FALSE,eval=TRUE,message=FALSE,include=T,comment=NA}
-expvar <-read.csv( "../melted_explained_variances.csv",header=T,stringsAsFactors=F)
-names(expvar) = c('Covariate', 'Trait', 'Explained variance')
-expvar$Covariate = gsub('OHE_', '', expvar$Covariate)
-for (name in unique(expvar$Covariate)){cat('* ', name, '\n')}
+
+
+tryCatch(
+    expr = {
+        expvar <-read.csv( "../melted_explained_variances.csv",header=T,stringsAsFactors=F)
+        names(expvar) = c('Covariate', 'Trait', 'Explained variance')
+        expvar$Covariate = gsub('OHE_', '', expvar$Covariate)
+        for (name in sort(unique(expvar$Covariate))){cat('* ', name, '\n')}
+    },
+    error = function(e){ 
+        print('cound_not_open  ../melted_explained_variances.csv ')
+    })
+
+
 ```
 
+Covariates may confound the results of the analysis. Common covariates include “age”, “weight”, “coat color”, “cohort”, and “phenotyping center”. We work with individual PIs to determine which covariates should be considered. In order to “regress out” the part of the phenotypic variance that is related to known covariates, we follow the procedure of fitting a linear model that predicts the desired trait based only on the measured covariates. Then the trait is subtracted by the trait predictions generated by the linear model described above. The resulting subtraction is expected to be independent of the covariates as all the effects caused by those covariates were removed. Since this method utilizes a linear regression to remove those effects, non-linear effects of those covariates onto the traits will not be addressed and assumed to be null. In certain cases, it’s possible that accounting for too many covariates might ‘overcorrect’ the trait. To address this issue, we ‘regress out’ only the covariates that explain more than REGRESSTHRS of the variance of the trait. This calculation is often called r^2 or pve (percent explained variance) and is estimated as cov (covariant, trait)/variance(trait). Lastly, the corrected trait is quantile normalized again, as it’s expected to follow a normal distribution.
 
 
-Covariates may also influence a trait but are not of interest, so should be removed. Common examples include “age”, “weight”, “coat color”, “cohort”, and “phenotyping center”. We work with individual PIs to determine which covariates should be considered. In order to “regress out” the part of the phenotypic variance that is related to known covariates, we follow the procedure of fitting a linear model that predicts the desired trait based solemnly on the measured covariates. Then the trait is subtracted by the trait predictions generated by the linear model described above. The resulting subtraction is expected to be independent of the covariates as all the effects caused by those covariates were removed. Since this method utilizes a linear regression to remove those effects, non-linear effects of those covariates onto the traits will not be addressed and assumed to be null. Categorical traits (such as sex and cohort) are [one-hot encoded](https://scikit-learn.org/stable/modules/generated/sklearn.preprocessing.OneHotEncoder.html) in order to convert them into a format that can be used on a linear regression, with this particular encoding assuming that each category is equally unique and unrelated to each other. In certain cases, it’s possible that accounting for too many covariates might ‘overcorrect’ the trait. To address this issue, we ‘regress out’ only the covariates that explain more than 5% of the variance of the trait. This calculation is often called r^2 or pve (percent explained variance) and is estimated as cov (covariant, trait)/variance(trait). Lastly, the corrected trait is quantile normalized again, as it’s expected to follow a normal distribution.
-
-
-The following table lists the percent variance >2% explained by each covariate. 
+The following table lists the percent variance >REGRESSTHRS explained by each covariate. 
 
  
 
 ```{r age, echo=FALSE,eval=TRUE,message=FALSE,include=T,comment=NA}
-expvar <-read.csv( "../melted_explained_variances.csv",header=T,stringsAsFactors=F)
-names(expvar) = c('Covariate', 'Trait', 'Explained variance')
-expvar$Covariate = gsub('OHE_', '', expvar$Covariate)
-pretify(expvar)
+tryCatch(
+    expr = {
+        expvar <-read.csv( "../melted_explained_variances.csv",header=T,stringsAsFactors=F)
+        names(expvar) = c('Covariate', 'Trait', 'Percent Explained variance')
+        expvar$'Percent Explained variance' = paste0(as.character(round(expvar$'Percent Explained variance'*100, 3)), '%')
+        expvar$Covariate = gsub('OHE_', '', expvar$Covariate)
+        pretify(arrange(expvar, desc('Explained variance')))
+    },
+    error = function(e){ 
+        print('cound_not_open  ../melted_explained_variances.csv ')
+    })
 ```
  
 
 ******
 # **Genetic Correlation Matrix**
 
-Genetic correlation is a statistical concept that quantifies the extent to which two traits share a common genetic basis. The estimation of genetic correlation can be accomplished using Genome-wide Complex Trait Analysis (GCTA), a software tool that utilizes summary statistics from genome-wide association studies (GWAS) to estimate the genetic covariance between pairs of traits. GCTA implements a method that decomposes the total phenotypic covariance between two traits into genetic and environmental components, providing an estimate of the genetic correlation between them. This approach allows researchers to examine the degree of shared genetic architecture between traits of interest and gain insights into the biological mechanisms underlying complex traits and diseases.
+Genetic correlation is a statistical concept that quantifies the extent to which two traits share a common genetic basis. The estimation of genetic correlation can be accomplished using Genome-wide Complex Trait Analysis (GCTA), a software tool that utilizes summary statistics from genome-wide association studies (GWAS) to estimate the genetic covariance between pairs of traits. GCTA implements a method that decomposes the total phenotypic covariance between two traits into genetic and environmental components, providing an estimate of the genetic correlation between them. This approach allows researchers to examine the degree of shared genetic architecture between traits of interest and gain insights into the biological mechanisms underlying complex traits and diseases. For the figure, the upper triangle represents the genetic correlation, while the lower triangle represents the phenotypic correlation. Hierarchical clustering is performed using [scipy's linkage function](https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.linkage.html) with the genetic correlation. Dendrogram is drawn using [scipy dendrogram](https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.dendrogram.html) where color coding for clusters depends on a distance threshold set to 70% of the maximum linkage distance. Asterisks means that test failed, for genetic relationship the main failure point is if the 2 traits being tested are colinear, while for the phenotypic correlation it's due to no overlapping rats between the 2 traits.
 
 ```{r geneticcorrelationblock,message=F,warning=F,eval=T,include=T,results = 'asis',echo=F}
 
 cat(str_interp("\n![](../images/genetic_correlation_matrix.png)\n\n\n"))
+
+
+gcorr = read.csv("heritability/genetic_correlation_melted_table.csv",header=T,stringsAsFactors = F) %>% mutate_if(is.numeric, ~round(., 3)) %>% select(-c('X'))
+gcorr$trait1 = str_remove_all(gcorr$trait1, 'regressedlr_')
+gcorr$trait2 = str_remove_all(gcorr$trait2, 'regressedlr_')
+pretify(gcorr)
 
 ```
 
@@ -156,17 +182,18 @@ cat(str_interp("\n![](../images/genetic_correlation_matrix.png)\n\n\n"))
 # **SNP Heritability Estimates _h^2^_** 
 
 
-SNP heritability (often reported as h^2^SNP) is the fraction of phenotypic variance that can be explained by all genetic variants. It is conceptually similar to heritability estimates that are obtained from panels of inbred strains (or using a twin design in humans), but SNP heritability is expected to be lower.  Specifically, this section shows the SNP heritability (“narrow-sense heritability”) estimated for each trait by GCTA-GREML, which uses the phenotypes and genetic relatedness matrix (GRM) as inputs. Traits with higher SNP heritability are more likely to produce significant GWAS results.  It is important to consider both the heritability estimate but also the standard error; smaller sample sizes typically have very large errors, making the results harder to interpret. 
+SNP heritability (often reported as h^2^SNP) is the fraction of phenotypic variance that can be explained by the genetic variance measured from the Biallelic SNPS called by the genotyping pipeline. It is conceptually similar to heritability estimates that are obtained from panels of inbred strains (or using a twin design in humans), but SNP heritability is expected to be lower.  Specifically, this section shows the SNP heritability (“narrow-sense heritability”) estimated for each trait by GCTA-GREML, which uses the phenotypes and genetic relatedness matrix (GRM) as inputs. Traits with higher SNP heritability are more likely to produce significant GWAS results. It is important to consider both the heritability estimate but also the standard error; smaller sample sizes typically have very large errors, making the results harder to interpret. 
 Note that Ns for each trait may differ from trait to trait due to missing data for each trait. 
 
 
 Column definitions: 
 
 
-* trait_name: trait of interest
+* trait: trait of interest
 * N: number of samples (rats) containing a non-NA value for this trait
-* snp_heritability: quantifies the proportion of phenotypic variance of a trait that can be attributed to genetic variance
-* SE: standard error, variance that is affected by N and the distribution of trait values
+* heritability: quantifies the proportion of phenotypic variance of a trait that can be attributed to genetic variance
+* heritability_se: standard error, variance that is affected by N and the distribution of trait values
+* pval: probability of observing the estimated heritability under the NULL hypothesis (that the SNP heritability is 0) 
 
 
 ```{r SNP heritability estimates, echo=FALSE,eval=TRUE,message=FALSE,include=T}
@@ -175,23 +202,27 @@ df = read.csv("../results/heritability/heritability.tsv",header=T,stringsAsFacto
 names(df) = c('trait', 'gen_var', 'env_var', 'phe_var', 'heritability', 'likelihood', 'lrt', 'df', 'pval', 'n', 'heritability_se')
 df =df %>% mutate_if(is.numeric, ~round(., 3))
 df$trait = str_remove_all(df$trait, 'regressedlr_')
-df= df[c('trait', 'heritability',  'pval', 'n', 'heritability_se')]
+df= df[c('trait', 'n','heritability',   'heritability_se', 'pval')]
 pretify(df)
 
 ```
 
-###### load qtls
+
 ```{r read in QTL table,message=F,warning=F,eval=T,include=T,echo=F}
+###### load qtls
 qtls<-read.csv("../results/qtls/finalqtl.csv",header=T,stringsAsFactors = F ) %>% mutate_if(is.numeric, ~round(., 3))
-qtls<-rename(qtls, '-Log10(p)' = 'p','beta'= 'b') %>% filter(QTL == 'True') %>% select(-c('bp','Chr','A1','A2', 'QTL')) 
+qtls<-rename(qtls, '-Log10(p)' = 'p','beta'= 'b') %>% filter(QTL == 'True')%>% select(c('SNP','Freq','beta','se','-Log10(p)','significance_level','trait','ACI', 'BN', 'BUF', 'F344', 'M520', 'MR', 'WKY', 'WN')) 
+
+# %>% select(-c('bp','Chr','A1','A2', 'QTL')) , 'interval_size'
 ```
 
-###### load snp annotations
+
 ```{r variant annotation table, message=F,warning=F,eval=T,include=T,echo=F}
+###### load snp annotations
 ann<-read.csv( "../results/qtls/possible_causal_snps.tsv",header=T,stringsAsFactors=F, sep = '\t')
 ann = filter(ann, putative_impact %in% c('HIGH', 'MODERATE'))  %>% select(-c('A1','A2', 'featureid', 'rank', 
-                                                                       'HGVS.c','HGVS.p','cDNA_position.cDNA_len','CDS_position.CDS_len',
-                                                                       'Protein_position.Protein_len','distancetofeature')) 
+                                                                       'cDNA_position.cDNA_len','CDS_position.CDS_len',
+                                                                       'Protein_position.Protein_len','distancetofeature')) #'HGVS.c','HGVS.p',
 ```
 
 
@@ -203,10 +234,11 @@ phewas<-read.csv( '../results/phewas/pretty_table_window_match.tsv',header=T,str
         select(-c('round_version', 'uploadeddate')) %>% rename( '-Log10(p)PheDb' = 'p_PheDb')
 
 eqtl<-read.csv( '../results/eqtl/pretty_eqtl_table.csv',header=T,stringsAsFactors=F, sep = ',') %>%
-      rename( '-Log10(p)' = 'X.log10.P.value.','-Log10(p)_eqtldb'= 'X.log10.pval_nominal.') %>% select(-c('ma_samples','gene_id')) 
+      rename( '-Log10(p)' = 'X.log10.P.value.','-Log10(p)_eqtldb'= 'X.log10.pval_nominal.') %>% select(-c('gene_id')) 
 
 sqtl<-read.csv( '../results/sqtl/pretty_sqtl_table.csv',header=T,stringsAsFactors=F, sep = ',') %>%
-      rename( '-Log10(p)' = 'X.log10.P.value.','-Log10(p)_eqtldb'= 'X.log10.pval_nominal.') %>% select(-c('gene_id')) 
+      rename( '-Log10(p)' = 'X.log10.P.value.','-Log10(p)_sqtldb'= 'X.log10.pval_nominal.') %>% select(-c('gene_id')) 
+
 ```
 
 ******
@@ -214,18 +246,10 @@ sqtl<-read.csv( '../results/sqtl/pretty_sqtl_table.csv',header=T,stringsAsFactor
 
 The genome-wide significance threshold (-log10p): 
 
-* round 10 10%: threshold10
-* round 10 5% : threshold5
+* round 10 10%: THRESHOLD10
+* round 10 5% : THRESHOLD
 
 The values shown in the table below pass the round 10 subjective threshold. 
-
-Additional parameters: 
-
-* qtl_dist MB QTL boundary distance
-* qtlwindow MB window
-* ld_threshold ld r2 threshold
-* padding_support_snps MB flanking distance to see if there are any supporting snps for topsnp or if it is a rogue snp
-
 
   Quantitative trait loci (QTLs) are regions in the genome that contain single nucleotide polymorphisms (SNPs) that correlate with a complex trait.
 If there are multiple QTLs in a given chromosome, then the top SNP from the most significant QTL is used as a covariate for another GWAS analysis within the chromosome.  If the analysis results in another SNP with a p-value that exceeds the permutation-derived threshold then it is considered an independent locus. This continues until no more QTLs are devoted within a given chromosome. This method is described in details in (Chitre et al., 2020)
@@ -234,20 +258,20 @@ If there are multiple QTLs in a given chromosome, then the top SNP from the most
 Column definitions: 
 
 
-* trait: raw or calculated phenotype
-* topSNP: location of the top SNP on the chromosome, read it as follows chromosome: position, so 10:10486551 would be chromosome 10, location on the chromosome at 10486551
-* topSNP(-log10): statistical significance of the association between the trait variability and the top SNP, displayed as -log10(p-value). The log-transformed p-value used in all figures and tables in this report
-* size of the interval: the length of the chromosomal interval containing the top SNP in Mb (megabases)
-* number of genes in interval
+* TopSNP: SNPs with lowest p-value whithin an independent QTL. SNP name is defined by the location of the top SNP on the chromosome. Read it as follows chromosome: position, so 10:10486551 would be chromosome 10, location on the chromosome at 10486551
+* maf: frequency of the TopSNP in the rats used for this study
+* beta: effect size of topSNP
+* betase: standard error of effect size of topSNP
+* -Log10(p): statistical significance of the association between the trait variability and the top SNP, displayed as -log10(p-value). The log-transformed p-value used in all figures and tables in this report
+* trait: trait in which the snp was indentified
+* ACI, BN, BUF, F344, M520, MR, WKY, WN: genotypes of founders at the topSNP
 
 
 \hfill\break
 
 ```{r summary of QTLs, include=T,message=F,echo=F,warning=F}
-
-qtls =read.csv("../results/qtls/finalqtl.csv",header=T,stringsAsFactors = F ) %>% mutate_if(is.numeric, ~round(., 3)) %>%
-      rename( '-Log10(p)' = 'p','beta'= 'b') %>% filter(QTL == 'True') %>% select(-c('bp','Chr','A1','A2', 'QTL')) 
-pretify(qtls  %>% select(-c('trait_description')))
+qtls_v2 = qtls %>% rename( 'TopSNP' = 'SNP','maf'= 'Freq', 'betase' = 'se')
+pretify(  qtls_v2)
 
 ```
 
@@ -255,7 +279,7 @@ pretify(qtls  %>% select(-c('trait_description')))
 ******
 # **Porcupine Plot**
 
-Porcupine plot is a graphical tool that combines multiple Manhattan plots, each representing a single trait, into a single plot. The resulting plot provides a visual representation of the regions of the genome that influence multiple traits, enabling researchers to identify genetic loci that have pleiotropic effects. These plots allow for a quick and efficient analysis of multiple traits simultaneously.
+Porcupine plot is a graphical tool that combines multiple Manhattan plots, each representing a single trait, into a single plot. The resulting plot provides a visual representation of the regions of the genome that influence multiple traits, enabling researchers to identify genetic loci that have pleiotropic effects. These plots allow for a quick and efficient analysis of multiple traits simultaneously. For the porcupine plots shown below, only traits with at least one significant QTL are shown.
 
 ```{r porcupineplot,message=F,warning=F,eval=T,include=T,results = 'asis',echo=F}
 
@@ -268,25 +292,21 @@ cat(str_interp("\n![](../images/porcupineplot.png)\n\n\n"))
 ******
 # **Manhattan plots (for significant QTLS)**
 
-These Manhattan plots show QTLs that genome-wide significance threshold of THRESHOLD10% (10%FPR) in red and round 9.1 threshold of THRESHOLD% (5%FPR) in blue. 
+These Manhattan plots show QTLs that genome-wide significance threshold of THRESHOLD10% (10%FPR) in red and high significance THRESHOLD% (5%FPR) in blue. 
 
 
 The Manhattan plot displays the p-values of each SNP sampled, with the aim of finding specific SNPs that pass the significance threshold. The x-axis shows chromosomal position and the y-axis shows -log10 of the p-value. The GWAS analysis uses a linear mixed model implemented by the software package GCTA (function MLMA-LOCO) using dosage and genetic relatedness matrices (GRM) to account for relatedness between individuals in the HS rat population. The analysis also employs Leave One Chromosome Out (LOCO) to avoid proximal contamination. 
 
-The red line is the genome-wide significance threshold calculated using permutation test, and the genotypes at the SNPs with p-values exceeding that threshold are considered statistically significantly associated with the trait variance. Since traits are quantile-normalized, the cutoff value is the same across all traits. QTLs are determined by scanning each chromosome for at least a SNP that exceeds the calculated permutation-derived threshold.
+The genomic significance threshold is the genome-wide significance threshold calculated using permutation test, and the genotypes at the SNPs with p-values exceeding that threshold are considered statistically significantly associated with the trait variance. Since traits are quantile-normalized, the cutoff value is the same across all traits. QTLs are determined by scanning each chromosome for at least a SNP that exceeds the calculated permutation-derived threshold.
 
-To control type I error, we estimated the significance threshold by a permutation test, as described in (Cheng and Palmer, 2013). The SNP set was LD-pruned at r2 < 0.99, which removed redundant SNPs to reduce computational load without impacting results. The genotypic data was randomly shuffled by assigning genotype to a different individual. This random assignment scrambled the relationship between the phenotypes and genotypes while preserving the structure within each individual genotype. GWAS was performed on the permuted data, and the maximum of the -log10 (p-values) was recorded. This process was repeated 2,500 times. The thresholds at the genome-wide significance levels 0.05 and 0.1 were respectively estimated by 95% and 90% quantiles of the 2,500 recorded maxima. 
-
-
-The title includes the number of animals used in this specific analysis.
-  
+To control type I error, we estimated the significance threshold by a permutation test, as described in (Cheng and Palmer, 2013).
 
 
 ```{r test plotting GWAS per qtl,message=F,warning=F,eval=T,include=T,results = 'asis',echo=F}
 
-for (t in gsub("regressedlr_", "", qtls$trait)){
+for (t in gsub("regressedlr_", "", unique(qtls$trait))){
     cat(str_interp("## ${t} \n\n![](../images/manhattan/regressedlr_${t}.png)\n\n\n"))
-    pretify2(qtls %>% filter(trait == t)%>% select(-c('trait_description')))
+    pretify2(qtls %>% filter(trait == t)) #%>% select(-c('trait_description'))
     }
 
 ```
@@ -298,10 +318,10 @@ These Manhattan plots are for all traits. For Manhattan plots for traits with si
 
 
 ```{r test plotting GWAS for all traits,message=F,warning=F,eval=T,include=T,results = 'asis',echo=F}
-
-for (trait in gsub("regressedlr_", "", qtls$trait)){
+    
+for (trait in (df %>% filter(!trait %in% qtls$trait))$trait){
     cat(str_interp("## ${trait} \n\n![](../images/manhattan/regressedlr_${trait}.png)\n\n\n"))
-    }
+}
 
 ```
 
@@ -309,91 +329,119 @@ for (trait in gsub("regressedlr_", "", qtls$trait)){
 # **Regional Association plots**
 
 
-Where Manhattan Plots show SNPs associated with all the chromosomes, a Regional Association Plot zooms in on particular regions of a chromosome that contains a QTL for a given trait. The x-axis represents the position on a chromosome (in Mb) and the y-axis shows the significance of the association (-log10 p-value). The individual points represent SNPs, where the SNP with the lowest p-value (“top SNP”) is highlighted in purple. The colors represent the correlation, or level of linkage disequilibrium (LD), between the topSNP and the other SNPs. The LD was measured with [plink](https://www.cog-genomics.org/plink/1.9/ld) (raw inter-variant allele count squared correlations). The genes listed below the plot are found in that interval of the chromosome and, thus, may be associated with the phenotype. Note: the genes in the plot are from [RefSeq](https://www.ncbi.nlm.nih.gov/refseq/), while the list of genes below are from [RGD](https://rgd.mcw.edu/) (Rat Genome Database), so the two lists of candidate genes may not always be the same.
+Where Manhattan Plots show SNPs associated with all the chromosomes, a Regional Association Plot zooms in on particular regions of a chromosome that contains a QTL for a given trait. The x-axis represents the position on a chromosome (in Mb) and the y-axis shows the significance of the association (-log10 p-value). The individual points represent SNPs, where the SNP with the lowest p-value (“top SNP”) is highlighted in purple. The colors represent the correlation, or level of linkage disequilibrium (LD), between the topSNP and the other SNPs. The LD was measured with [plink](https://www.cog-genomics.org/plink/1.9/ld) (raw inter-variant allele count squared correlations).
+
+Linkage disequilibrium intervals for the remaining QTLs are determined by finding markers with at least r2=0.6 correlation with the peak marker.
 
 
-Linkage disequilibrium intervals for the remaining QTLs are determined by finding markers with at least r2=0.6 correlation with the peak marker. Credible set analysis is conducted to calculate the posterior probability for each SNP (probability of being causal), and the final set of SNP for each QTL is determined by the smallest set of SNPs that account for at least 99% of posterior probability. 
+## Phenotype Wide Association Study (PheWAS): 
 
 
-Defining columns: 
+These tables report the correlation between the topSNP and traits from other studies in HS rats conducted by the center. Use information from these tables to better understand what additional phenotypes this interval may be associated with. 
 
-
-* af: allele frequency, expressed in terms of the minor allele
-* se: standard error of minor allele frequency
-* beta: effect size
-* allele 1: minor allele of the top SNP
-* allele 2: major allele of the top SNP
-* Remaining columns are the genotypes of the 8 founder strains at a given SNP
-
-
-Phenotype Wide Association Study (PheWAS): 
-
-
-  These tables report the correlation between the topSNP and traits from other studies in HS rats conducted by the center. Use information from these tables to better understand what additional phenotypes this interval may be associated with. 
-  The first PheWAS table shows information about any other phenotypes that are associated with this topSNP, from all studies conducted in HS rats by the center.
+The first PheWAS table shows information about any other phenotypes that are associated with this topSNP, from all studies conducted in HS rats by the center.
 
 
 Defining columns: 
 
 
-* center: when/where the associated study was conducted
-* trait: trait from the associated study with the same topSNP
-* log10P:  -log10(p-value) for trait from the associated study
-* trait description: trait definition
+* -Log10(p)PheDb: -log10(p-value) for another trait present in the PheWAS database
+* trait_PheDb: trait from the associated study with the same topSNP
+* project: project from which the trait was studied
+* trait_description_PheDb: trait definition
 
 
-The second PheWAS table examines the association between the topSNP for this phenotype and all other topSNPs that were mapped within a 3 Mb window of the topSNP from the current study. Instead of showing association of the topSNP with other traits like in the first table, the second table shows significant association identified for other traits within the nearby chromosomal interval.
+The second PheWAS table examines the association between the topSNP for this phenotype and all other topSNPs that were mapped within a 3 Mb window of the topSNP from the current study and a correlation above 0.6. Instead of showing association of the topSNP with other traits like in the first table, the second table shows significant association identified for other traits within the nearby chromosomal interval.
 
 
 Defining columns: 
 
 
-* center: when/where the associated study was conducted
-* trait: trait from associated study with a topSNP in the 3 Mb window
-* trait topSNP: location of the topSNP for the trait from the associated study
-* log10P: -log10(p-value) for the trait topSNP from the associated study
-* r2: correlation between the trait topSNP genotype from the associated study and the topSNP for the current study
-* dprime: measure of linkage disequilibrium
-* trait description: trait definition
+* SNP_PheDb: SNP from Phewas database in LD with topSNP detected from GWAS  
+* -Log10(p)PheDb: -log10(p-value) for trait from the associated study
+* trait_PheDb: trait from the associated study with the same topSNP
+* project: project from which the trait was studied
+* trait_description_PheDb: trait definition
+* R2: correlation between SNP from phewas database (P-value threshold of 1e-4) and the topSNP for the current study
+* DP: Dprime measure of linkage disequilibrium (correlation between the SNPs adjusted by the maximum possible correlation between those SNPs)
+
+## Gene Expression changes:
+
+### expression QTL (eQTLs) 
+We examine if the identified SNP does significant alter the gene expression of genes in cis, possibly describing a pathway in which the SNP impact the phenotype. We also examine SNPs within 3 Mb window and a correlation above 0.6 of the topSNP from the current study, in case the selected SNP is in high LD with another SNP that can alter the gene expression in cis.
+
+Defining columns:
 
 
-U01 projects included in the PheWAS analysis (see project_name column in PheWAS tables). 
+* SNP_eqtldb: SNP from eQTL database in LD with topSNP detected from GWAS 
+* -Log10(p)_eqtldb: -log10(p-value) for the association between the eqtlSNP and the gene in cis described in the column Ensembl_gene
+* tissue: tissue in which the gene expression patterns were measured
+* R2: correlation between SNP from eQTL database (P-value threshold of 1e-4) and the topSNP for the current study
+* DP: Dprime measure of linkage disequilibrium (correlation between the SNPs adjusted by the maximum possible correlation between those SNPs)
+* gene: Gene where the SNP_eqtldb influences the gene expression
+* slope: Effect size of the SNP_eqtldb onto the Ensembl_gene
+* af: allele frequency of the SNP_eqtldb
+
+
+### splice QTL (sQTLs) 
+We examine if the identified SNP does significant alter the splicing patterns of genes in cis, possibly describing a pathway in which the SNP impact the phenotype. We also examine SNPs within 3 Mb window and a correlation above 0.6 of the topSNP from the current study, in case the selected SNP is in high LD with another SNP that can alter the splicing in cis.
+
+Defining columns:
+* SNP_sqtldb: SNP from sQTL database in LD with topSNP detected from GWAS 
+* -Log10(p)_sqtldb: -log10(p-value) for the association between the sqtlSNP and the gene in cis described in the column Ensembl_gene
+* tissue: tissue in which the splice patterns were measured
+* R2: correlation between SNP from sQTL database (P-value threshold of 1e-4) and the topSNP for the current study
+* DP: Dprime measure of linkage disequilibrium (correlation between the SNPs adjusted by the maximum possible correlation between those SNPs)
+* gene: Gene where the SNP_sqtldb influences the gene expression
+* slope: Effect size of the SNP_sqtldb onto the Ensembl_gene
+* af: allele frequency of the SNP_sqtldb
+
+Projects included in the PheWAS analysis (see project_name column in PheWAS tables). 
 
 PROJECTLIST
 
 ```{r dynamic chunks,message=F,warning=F,eval=T,include=T,results = 'asis',echo=F,cache=T}
 
 for( i in rownames(qtls) ){
-   cat(str_interp("  \n  \n## ${qtls[i, 'trait']}\n"))
-   cat(str_interp("Size of interval : ${qtls[i, 'interval_size']}\n\n"))
+   cat(str_interp("  \n  \n## Trait: ${qtls[i, 'trait']} SNP: ${qtls[i, 'SNP']}\n"))
+   pretify2(qtls_v2 %>% filter(TopSNP == qtls[i, 'SNP']) %>% filter(trait == qtls[i, 'trait']))
    snp_new_name = gsub(':', '_', qtls[i, 'SNP'] )
    cat(str_interp("\n![](../images/lz/lz__${qtls[i, 'trait']}__${snp_new_name}.png)\n\n\n"))
    cat(str_interp("\n![](../images/boxplot/boxplot${snp_new_name}__${qtls[i, 'trait']}.png)\n\n\n"))
     
-   cat(str_interp("  \n### Putatively causal coding variants: ${qtls[i, 'trait']} ${qtls[i, 'SNP']}   \n"))
-   tempcausal = ann %>% filter(SNP_qtl == qtls[i, 'SNP']) %>% filter(trait == qtls[i, 'trait'])
-   if (nrow(tempcausal)){pretify2(tempcausal) }
-   else{cat("  \n HIGH or MODERATE impact variants absent \n   \n")}
-    
+   tryCatch(
+    expr = {
+       cat(str_interp("  \n### Putatively causal coding variants: ${qtls[i, 'trait']} ${qtls[i, 'SNP']}   \n"))
+       tempcausal = ann %>% filter(SNP_qtl == qtls[i, 'SNP']) %>% filter(trait == qtls[i, 'trait'])  %>% select(c('SNP','Freq','b','p','R2','DP','annotation','putative_impact','gene','HGVS.c','HGVS.p')) %>% distinct()
+       if (nrow(tempcausal)){pretify2(tempcausal) }
+       else{cat("  \n HIGH or MODERATE impact variants absent \n   \n")}
+    },
+    error = function(e){ 
+       cat(str_interp("  \n### Putatively causal coding variants: ${qtls[i, 'trait']} ${qtls[i, 'SNP']}   \n"))
+       tempcausal = ann %>% filter(SNP_qtl == qtls[i, 'SNP']) %>% filter(trait == qtls[i, 'trait'])  %>% distinct()
+       if (nrow(tempcausal)){pretify2(tempcausal) }
+       else{cat("  \n HIGH or MODERATE impact variants absent \n   \n")}
+    })
+   
    cat(str_interp("  \n### PheWAS: P-values for other phenotypes at trait topSNP ${qtls[i, 'trait']} ${qtls[i, 'SNP']}   \n"))
-   phetemp = phewas_exact %>% filter(SNP == qtls[i, 'SNP']) %>% filter(trait_QTL == qtls[i, 'trait'])
+   phetemp = phewas_exact %>% filter(SNP == qtls[i, 'SNP']) %>% filter(trait_QTL == qtls[i, 'trait']) %>% select(c('-Log10(p)PheDb' ,'trait_PheDb', 'project', 'trait_description_PheDb')) %>% distinct()
    if (nrow(phetemp)){pretify2(phetemp) }
-   else{cat("  \n No information for other phenotypes at this SNP \n   \n")}
+   else{cat("  \n SNPS were not detected for other phenotypes at this SNP \n   \n")}
     
    cat(str_interp("  \n### PheWAS: Lowest P-values for other phenotypes in a 3Mb window ${qtls[i, 'trait']} ${qtls[i, 'SNP']}   \n"))
-   phetemp = phewas %>% filter(SNP_QTL == qtls[i, 'SNP']) %>% filter(trait_QTL == qtls[i, 'trait'])
+   phetemp = phewas %>% filter(SNP_QTL == qtls[i, 'SNP']) %>% filter(trait_QTL == qtls[i, 'trait'])  %>% select(c('SNP_PheDb','-Log10(p)PheDb','R2', 'DP' ,'trait_PheDb', 'project', 'trait_description_PheDb')) %>% distinct() 
    if (nrow(phetemp)){pretify2(phetemp) }
-   else{cat("  \n No information for other phenotypes in 3Mb window of trait topSNP \n   \n")}
+   else{cat("  \n SNPS were not detected for other phenotypes in 3Mb window of trait topSNP \n   \n")}
     
-   cat(str_interp("  \n### eQTL: Lowest P-values for other eqtls in a 3Mb window of ${qtls[i, 'trait']} ${qtls[i, 'SNP']}   \n"))
-   eqtltemp = eqtl %>% filter(SNP == paste0('chr',qtls[i, 'SNP'])) %>% filter(trait == qtls[i, 'trait'])
+   cat(str_interp("  \n### eQTL: Lowest P-values for eqtls in a 3Mb window of ${qtls[i, 'trait']} ${qtls[i, 'SNP']}   \n"))
+   eqtltemp = eqtl %>% filter(SNP == paste0('chr',qtls[i, 'SNP'])) %>% filter(trait == qtls[i, 'trait'])  %>% select(c('SNP_eqtldb', '-Log10(p)_eqtldb', 'tissue', 'R2', 'DP', 'Ensembl_gene', 'slope', 'af', 'slope'))%>% rename( 'gene' = 'Ensembl_gene') %>% distinct()  # 'presence_samples'
    if (nrow(eqtltemp)){pretify2(eqtltemp) }
-   else{cat("  \n No information for eQTLs in 3Mb window of trait topSNP \n   \n")}
+   else{cat("  \n SNPS were not detected for eQTLs in 3Mb window of trait topSNP \n   \n")}
     
-   cat(str_interp("  \n### sQTL: Lowest P-values for other splice qtls in a 3Mb window of ${qtls[i, 'trait']} ${qtls[i, 'SNP']}   \n"))
-   sqtltemp = sqtl %>% filter(SNP == paste0('chr',qtls[i, 'SNP'])) %>% filter(trait == qtls[i, 'trait'])
+   cat(str_interp("  \n### sQTL: Lowest P-values for splice qtls in a 3Mb window of ${qtls[i, 'trait']} ${qtls[i, 'SNP']}   \n"))
+   sqtltemp = sqtl %>% filter(SNP == paste0('chr',qtls[i, 'SNP'])) %>% filter(trait == qtls[i, 'trait'])  %>% select(c('SNP_sqtldb', '-Log10(p)_sqtldb', 'tissue','R2', 'DP', 'Ensembl_gene',  'slope', 'af', 'slope')) %>% rename( 'gene' = 'Ensembl_gene') %>% distinct()   #'presence_samples',
    if (nrow(sqtltemp)){pretify2(sqtltemp)}
-   else{cat("  \n No information for sQTLs in 3Mb window of trait topSNP \n   \n")}
+   else{cat("  \n SNPS were not detected for sQTLs in 3Mb window of trait topSNP \n   \n")}
 }
 
 ```
@@ -401,13 +449,10 @@ for( i in rownames(qtls) ){
 
 # **FAQ**
 
-These are histograms for each trait broken down by sex. This allows you to see the trait distributions before we quantile normalize them. 
-
-
 Do the traits look approximately normally distributed? 
 
 
-* Our pipeline performs a quantile normalization, which is a transformation that preserves the rank of each subject but reassigns values such that the final distribution is perfectly normally distributed. When two or more subjects have identical values, the ‘tie’ is broken randomly, if there is a large proportion of ties, then that part of the distribution is random noise, which is bad (however, in our defense, there are no good solutions when multiple values are ties). 
+* Our pipeline performs a quantile normalization, which is a transformation that preserves the rank of each subject but reassigns values such that the final distribution is perfectly normally distributed. When two or more subjects have identical values, the ‘tie’ is broken randomly (with a spefic random seed of 42), if there is a large proportion of ties, then that part of the distribution is random noise, which is bad (however, in our defense, there are no good solutions when multiple values are ties). 
 
 
 Are there extreme outliers that might be errors? 
@@ -422,10 +467,8 @@ Are there sex differences?
 
 Which traits are included in the PheWAS database:
 
-
-
 ```{r test plotting G phewas,message=F,warning=F,eval=T,include=T,results = 'asis',echo=F}
-pretify(read.csv("../temp/phewas_t_temp.csv",header=T,stringsAsFactors = F )  )
+pretify(read.csv("../temp/phewas_t_temp.csv",header=T,stringsAsFactors = F ) %>% select(c('project', 'trait')) )
 ```
 
 
