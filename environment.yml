@@ -15,7 +15,6 @@ dependencies:
   - plink
   - snpeff
   - gcta
-  - pandas-profiling
   - plotly
   - biopython
   - pdf2image
@@ -24,3 +23,8 @@ dependencies:
   - pytables
   - h5py
   - pandas-plink
+  - hdbscan
+  - pandas-profiling
+  - ydata-profiling
+  - arviz
+  - matplotlib-venn
