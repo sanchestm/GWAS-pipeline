@@ -1,4 +1,5 @@
 channels:
+  - conda-forge
   - defaults
 dependencies:
   - pandas
@@ -24,7 +25,6 @@ dependencies:
   - h5py
   - pandas-plink
   - hdbscan
-  - pandas-profiling
   - ydata-profiling
   - arviz
   - matplotlib-venn
