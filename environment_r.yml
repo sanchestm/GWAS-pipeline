@@ -1,0 +1,17 @@
+name: r-environment
+channels:
+  - defaults
+dependencies:
+  - r-base
+  - r-essentials
+  - r-chron
+  - r-vctrs
+  - r-kableextra
+  - r-rjsonio
+  - r-dt
+  - r-htmltools
+  - r-httr
+  - r-openxlsx
+  - r-rmarkdown
+  - r-plyr
+  - r-readxl
