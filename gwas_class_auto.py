@@ -53,6 +53,7 @@ from sklearn.linear_model import LinearRegression#, RobustRegression
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.preprocessing import OneHotEncoder
 import warnings
+from IPython.display import display
 mg = mygene.MyGeneInfo()
 #import sleep
 warnings.filterwarnings('ignore')
@@ -121,8 +122,13 @@ def bash(call, verbose = 0, return_stdout = True, print_call = True):
     out = subprocess.run(call.split(' '), capture_output = True) 
     if verbose and not return_stdout: print(out.stdout)
     
-    if out.stderr: print(out.stderr.decode('ascii'))
-    if return_stdout: return out.stdout.decode('ascii').strip().split('\n')
+    if out.stderr: 
+        try:print(out.stderr.decode('ascii'))
+        except: print(out.stderr.decode('utf-8'))
+    if return_stdout: 
+        try: oo =  out.stdout.decode('ascii').strip().split('\n')
+        except: oo =  out.stdout.decode('utf-8').strip().split('\n')
+        return oo
     return out
 
 def qsub(call: str, queue = 'condo', walltime = 8, ppn = 12, out = 'log/', err = 'logerr/', project_dir = ''):
@@ -245,7 +251,7 @@ class gwas_pipe:
         self.founder_genotypes = founder_genotypes
         self.snpeff_path = snpeff_path
         
-        bash(f'rm -r {self.path}temp')
+        if os.path.exists(f'{self.path}temp'): bash(f'rm -r {self.path}temp')
         
         if type(data) == str: df = pd.read_csv(data, dtype={'rfid': str})
         else: df = data
@@ -325,7 +331,7 @@ class gwas_pipe:
                 display(stR.plot_var_distribution(targets=variables, covariates = list(categorical)))
             partial_explained_vars = statsReport.stat_check(dfohe).explained_variance(variables,all_covariates)
             melted_variances = partial_explained_vars.reset_index().melt(id_vars = ['index'], 
-                                                                  value_vars=partial_explained_vars.columns[1:])\
+                                                                  value_vars=partial_explained_vars.columns[:])\
                                                                   .rename({'index':'group'}, axis =1 ).query(f'value > {covariates_threshold}')
             all_explained_vars += [melted_variances]
         all_explained_vars = pd.concat(all_explained_vars).drop_duplicates(subset = ['group', 'variable'])
@@ -1435,7 +1441,13 @@ class gwas_pipe:
         #### make pretty tables
         eqtl_info = pd.read_csv(self.eqtl_path).rename({'p':'-log10(P-value)'}, axis = 1)
         eqtl_info['-log10(pval_nominal)'] = -np.log10(eqtl_info['pval_nominal'])
-        eqtl_info['Ensembl_gene'] = [defaultdict(lambda: '', x)['symbol'] for x in  mg.querymany(eqtl_info.gene_id , scopes='ensembl.gene', fields='symbol', species='rat')];
+        gene_conv_table = pd.DataFrame([(x['query'], defaultdict(lambda: '', x)['symbol']) for x \
+                                in  mg.querymany(eqtl_info.gene_id , scopes='ensembl.gene', fields='symbol', species='rat')],
+                              columns = ['gene_id','Ensembl_gene'])
+        gene_conv_table= gene_conv_table.groupby('gene_id').agg(lambda df: ' | '.join(df.drop_duplicates())).reset_index()
+        eqtl_info = eqtl_info.merge(gene_conv_table, how = 'left', on = 'gene_id')
+        eqtl_info.Ensembl_gene = eqtl_info.Ensembl_gene.fillna('')
+        #eqtl_info['Ensembl_gene'] = [defaultdict(lambda: '', x)['symbol'] for x in  mg.querymany(eqtl_info.gene_id , scopes='ensembl.gene', fields='symbol', species='rat')];
         eqtl_info = eqtl_info.loc[:,  ['trait','SNP_QTL','-log10(P-value)','R2','SNP_eqtldb','tissue', '-log10(pval_nominal)','DP' ,
                                        'Ensembl_gene','gene_id', 'slope' ,'tss_distance', 'af', 'presence_samples']].rename(lambda x: x.replace('_QTL', ''), axis = 1)
         eqtl_info.SNP = 'chr' + eqtl_info.SNP
@@ -1506,6 +1518,20 @@ class gwas_pipe:
                   .query(f'R2 > {r2_thresh} and pval_nominal < {pval_thresh}')\
                   .nsmallest(nreturn, 'pval_nominal').assign(sQTLtype = typ)
                   for  _, row in qtltable.iterrows() ])]
+            
+        #tempdf = pd.read_csv(f'https://ratgtex.org/data/splice/rn7.top_assoc_splice.txt', sep = '\t').rename({'variant_id': 'SNP', 'pval': 'pval_nominal'}, axis = 1)
+        #out += [pd.concat([ 
+        #           self.plink(bfile = self.genotypes_subset, chr = row.Chr,ld_snp = row.name,r2 = 'dprime',\
+        #           ld_window = ld_window, thread_num = 12, nonfounders = '')\
+        #          .drop(['CHR_A', 'BP_A', 'CHR_B'], axis = 1)\
+        #          .rename({'SNP_A': 'SNP', 'SNP_B': 'NearbySNP', 'BP_B': 'NearbyBP'}, axis = 1)\
+        #          .assign(**row.to_dict())\
+        #          .merge(tempdf, right_on= 'SNP',  left_on='NearbySNP', how = 'inner', suffixes = ('_QTL', '_sqtldb'))\
+        #          .query(f'R2 > {r2_thresh} and pval_nominal < {pval_thresh}')\
+        #          .nsmallest(nreturn, 'pval_nominal').assign(sQTLtype = 'cis')
+        #          for  _, row in qtltable.iterrows() ])]
+        #https://ratgtex.org/data/splice/IL.rn7.splice.cis_qtl_signif.txt.gz
+
 
         out = pd.concat(out).reset_index(drop=True)
         out['gene_id'] = out.phenotype_id.str.extract('(ENSRNOG\d+)')
@@ -1517,7 +1543,12 @@ class gwas_pipe:
         #### make pretty tables
         sqtl_info = pd.read_csv(self.sqtl_path).rename({'p':'-log10(P-value)'}, axis = 1)
         sqtl_info['-log10(pval_nominal)'] = -np.log10(sqtl_info['pval_nominal'])
-        sqtl_info['Ensembl_gene'] = [defaultdict(lambda: '', x)['symbol'] for x in  mg.querymany(sqtl_info.gene_id , scopes='ensembl.gene', fields='symbol', species='rat')];
+        gene_conv_table = pd.DataFrame([(x['query'], defaultdict(lambda: '', x)['symbol']) for x \
+                                in  mg.querymany(sqtl_info.gene_id , scopes='ensembl.gene', fields='symbol', species='rat')],
+                              columns = ['gene_id','Ensembl_gene'])
+        gene_conv_table= gene_conv_table.groupby('gene_id').agg(lambda df: ' | '.join(df.drop_duplicates())).reset_index()
+        sqtl_info = sqtl_info.merge(gene_conv_table, how = 'left', on = 'gene_id')
+        #sqtl_info['Ensembl_gene'] = [defaultdict(lambda: '', x)['symbol'] for x in  mg.querymany(sqtl_info.gene_id , scopes='ensembl.gene', fields='symbol', species='rat')];
         sqtl_info = sqtl_info.loc[:,  ['trait','SNP_QTL','-log10(P-value)','R2','SNP_sqtldb','tissue', '-log10(pval_nominal)','DP' ,
                                        'Ensembl_gene','gene_id', 'slope' , 'af', 'sQTLtype', 'presence_samples']].rename(lambda x: x.replace('_QTL', ''), axis = 1)
         sqtl_info.SNP = 'chr' + sqtl_info.SNP
@@ -1559,7 +1590,7 @@ class gwas_pipe:
             fig2.add_hline(y=threshold, line_width=2,  line_color="red")
             fig2.add_hline(y=suggestive_threshold, line_width=2, line_color="blue")
 
-            fig2.update_layout(yaxis_range=[0,max(6, -np.log10(df_gwas.p.min()+.5))], xaxis_range = df_gwas.Chromosome.agg(['min', 'max']),
+            fig2.update_layout(yaxis_range=[0,max(6, -np.log10(df_gwas.p.min())+.5)], xaxis_range = df_gwas.Chromosome.agg(['min', 'max']),
                                template='simple_white',width = 1920, height = 800, showlegend=False, xaxis_title="Chromosome", yaxis_title="-log10(p)")
             #fig2.layout['title'] = 'Manhattan Plot'
             fig2.update_xaxes(ticktext = [str(i) if i!=21 else 'X' for i in range(1,22)],
@@ -1609,7 +1640,7 @@ class gwas_pipe:
         fig2.add_hline(y=threshold, line_width=2,  line_color="red")
         fig2.add_hline(y=suggestive_threshold, line_width=2, line_color="blue")
 
-        fig2.update_layout(yaxis_range=[0,max(6, -np.log10(df_gwas.p.min()+.5))], xaxis_range = df_gwas.Chromosome.agg(['min', 'max']),
+        fig2.update_layout(yaxis_range=[0,max(6, -np.log10(df_gwas.p.min())+.5)], xaxis_range = df_gwas.Chromosome.agg(['min', 'max']),
                            template='simple_white',width = 1920, height = 800, showlegend=False, xaxis_title="Chromosome", yaxis_title="-log10(p)")
         df_gwas.trait = df_gwas.trait.str.replace('regressedlr_', '')
         df_gwas.query('annotate == True').apply(lambda x: fig2.add_annotation(x=x.Chromosome, y=-np.log10(x.p),text=f"{x.trait}",showarrow=True,arrowhead=2), axis = 1)
@@ -1698,8 +1729,9 @@ class gwas_pipe:
         with open(f'{self.path}results/gwas_report.rmd', 'w') as f: f.write(report_txt)
         try:bash(f'rm -r {self.path}results/gwas_report_cache')
         except:pass
-        os.system(f'''conda run -n r-environment Rscript -e "rmarkdown::render('{self.path}results/gwas_report.rmd')"''') #> /dev/null 2>&1
-        bash(f'''cp {self.path}results/gwas_report.html {self.path}results/gwas_report_round{round_version}_threshold{threshold}_n{self.df.shape[0]}_date{datetime.today().strftime('%Y-%m-%d')}.html''')
+        os.system(f'''conda run -n r-environment Rscript -e "rmarkdown::render('{self.path}results/gwas_report.rmd')" | grep -oP 'Output created: gwas_report.html' '''); #> /dev/null 2>&1
+        bash(f'''cp {self.path}results/gwas_report.html {self.path}results/gwas_report_{self.project_name}_round{round_version}_threshold{threshold}_n{self.df.shape[0]}_date{datetime.today().strftime('%Y-%m-%d')}.html''')
+        #print('Output created: gwas_report.html') if 'Output created: gwas_report.html' in ''.join(repout) else print(''.join(repout))
         try:bash(f'rm -r {self.path}results/gwas_report_cache')
         except:pass
     
@@ -1741,3 +1773,14 @@ class gwas_pipe:
     def qsub_phewas(self, queue = 'condo', walltime = 8, ppn = 12, out = 'log/', err = 'logerr/', project_dir = ''):
         qsub( queue = queue, walltime = walltime, ppn = ppn, out = 'log/', err = 'logerr/', call = 'phewas_cli.py')
         
+
+def get_trait_descriptions_f(data_dic, traits):
+    out = []
+    for trait in traits:
+        try: out +=  [data_dic[data_dic.measure == trait.replace('regressedlr_', '')].description.iloc[0]]
+        except: out +=  ['UNK']
+    return out
+        
+        
+
+    
