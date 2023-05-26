@@ -14,8 +14,7 @@ if dictionary['researcher'] == 'dont': dictionary['researcher'] = 'tsanches'
 if dictionary['round'] == 'dont': dictionary['round'] = '10.0.0'
 if dictionary['gwas_version'] == 'dont': dictionary['gwas_version'] = '0.1.2'
     
-if dictionary['snpeff_path'] == 'dont':
-    dictionary['snpeff_path'] = '/projects/ps-palmer/tsanches/gwaspipeline/gwas/snpEff/'
+if dictionary['snpeff_path'] == 'dont': dictionary['snpeff_path'] = 'snpEff/'
     
 if dictionary['phewas_path'] == 'dont': dictionary['phewas_path'] = 'phewasdb.parquet.gz'
     
@@ -29,7 +28,7 @@ if dictionary['regressout'] == 'dont':
     else: traits_ = dictionary['traits'].split(',')
     traits_d = get_trait_descriptions_f(pd.read_csv(f'{pj}/data_dict_{pj}.csv'), traits_)
 else:
-    rawdata = dictionary['regressout'] if dictionary['regressout'] != '1' else f'{pj}/raw_data.csv'
+    rawdata = dictionary['regressout'] if dictionary['regressout'] != '' else f'{pj}/raw_data.csv'
     df = pd.read_csv(rawdata, dtype = {'rfid': str}).drop_duplicates(subset = 'rfid') 
     traits_, traits_d = [], []
 
@@ -65,4 +64,5 @@ if dictionary['sqtl']!= 'dont':gwas.sQTL(pd.read_csv(f'{gwas.path}results/qtls/f
 if dictionary['report']!= 'dont':gwas.report(round_version=dictionary['round'])
 if dictionary['store']!= 'dont':gwas.store(researcher=dictionary['researcher'],round_version=dictionary['round'] , gwas_version=dictionary['gwas_version'],  remove_folders=False)
 try: if dictionary['publish']!= 'dont':gwas.copy_results()
+except: print('setting up the minio is necessary')
 gwas.print_watermark()
