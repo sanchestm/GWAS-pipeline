@@ -9,8 +9,15 @@ pj = dictionary['project']
 if dictionary['genotypes'] == 'dont' :
     dictionary['genotypes'] = '/projects/ps-palmer/tsanches/gwaspipeline/gwas/zzplink_genotypes/round10'
 
-if dictionary['researcher'] == 'dont':
-    dictionary['researcher'] = 'tsanches'
+if dictionary['researcher'] == 'dont': dictionary['researcher'] = 'tsanches'
+    
+if dictionary['round'] == 'dont': dictionary['round'] = '10.0.0'
+if dictionary['gwas_version'] == 'dont': dictionary['gwas_version'] = '0.1.2'
+    
+if dictionary['snpeff_path'] == 'dont':
+    dictionary['snpeff_path'] = '/projects/ps-palmer/tsanches/gwaspipeline/gwas/snpEff/'
+    
+if dictionary['phewas_path'] == 'dont': dictionary['phewas_path'] = 'phewasdb.parquet.gz'
     
 if dictionary['regressout'] == 'dont':
     df = pd.read_csv(f'{pj}/processed_data_ready.csv', dtype = {'rfid': str}).drop_duplicates(subset = 'rfid') 
@@ -22,7 +29,8 @@ if dictionary['regressout'] == 'dont':
     else: traits_ = dictionary['traits'].split(',')
     traits_d = get_trait_descriptions_f(pd.read_csv(f'{pj}/data_dict_{pj}.csv'), traits_)
 else:
-    df = pd.read_csv(f'{pj}/raw_data.csv', dtype = {'rfid': str}).drop_duplicates(subset = 'rfid') 
+    rawdata = dictionary['regressout'] if dictionary['regressout'] != '1' else f'{pj}/raw_data.csv'
+    df = pd.read_csv(rawdata, dtype = {'rfid': str}).drop_duplicates(subset = 'rfid') 
     traits_, traits_d = [], []
 
 gwas = gwas_pipe(path = f'{pj}/',
@@ -30,6 +38,8 @@ gwas = gwas_pipe(path = f'{pj}/',
              data = df,
              project_name = pj,
              traits = traits_ ,
+             snpeff_path= dictionary['snpeff_path'],
+             phewas_db = dictionary['phewas_path'],
              trait_descriptions= traits_d,
              threads = dictionary['threads'])
 
@@ -40,7 +50,7 @@ if dictionary['h2']!= 'dont': gwas.snpHeritability()
 if dictionary['BLUP'] != 'dont': gwas.BLUP()
 if dictionary['BLUP_predict'] != 'dont': gwas.BLUP_predict(dictionary['BLUP_predict']);
 if dictionary['gwas']!= 'dont': gwas.GWAS()
-if dictionary['db']!= 'dont': gwas.addGWASresultsToDb(researcher='tsanches', round_version='10.0.0', gwas_version='0.1.1')
+if dictionary['db']!= 'dont': gwas.addGWASresultsToDb(researcher=dictionary['researcher'], round_version=dictionary['round'], gwas_version=dictionary['gwas_version'])
 if dictionary['qtl']!= 'dont': 
     qtls = gwas.callQTLs( NonStrictSearchDir=False)
     gwas.annotate(qtls)
@@ -52,8 +62,7 @@ if dictionary['porcupineplot'] != 'dont': gwas.porcupineplot(pd.read_csv(f'{gwas
 if dictionary['phewas']!= 'dont':gwas.phewas(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), annotate=True, pval_threshold = 1e-4, nreturn = 1, r2_threshold = .4) 
 if dictionary['eqtl']!= 'dont':gwas.eQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), annotate= True)
 if dictionary['sqtl']!= 'dont':gwas.sQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'))
-if dictionary['report']!= 'dont':gwas.report( round_version='10.0.0')
-if dictionary['store']!= 'dont':gwas.store(researcher=dictionary['researcher'],round_version='10.0.0', gwas_version='0.1.1',  remove_folders=False)
+if dictionary['report']!= 'dont':gwas.report(round_version=dictionary['round'])
+if dictionary['store']!= 'dont':gwas.store(researcher=dictionary['researcher'],round_version=dictionary['round'] , gwas_version=dictionary['gwas_version'],  remove_folders=False)
 try: if dictionary['publish']!= 'dont':gwas.copy_results()
-except: print('s3 links have to be set up check on minio website.')
 gwas.print_watermark()
