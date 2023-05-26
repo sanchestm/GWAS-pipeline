@@ -9,19 +9,22 @@ pj = dictionary['project']
 if dictionary['genotypes'] == 'dont' :
     dictionary['genotypes'] = '/projects/ps-palmer/tsanches/gwaspipeline/gwas/zzplink_genotypes/round10'
 
-def get_trait_descriptions_f(project, traits):
-    qq =  pd.read_csv(f'{project}/data_dict_{project}.csv')
-    out = []
-    for trait in traits:
-        try: 
-            out +=  [qq[qq.measure == trait.replace('regressedlr_', '')].description.iloc[0]]
-        except:
-            out +=  ['UNK']
-    return out
+if dictionary['researcher'] == 'dont':
+    dictionary['researcher'] = 'tsanches'
+    
+if dictionary['regressout'] == 'dont':
+    df = pd.read_csv(f'{pj}/processed_data_ready.csv', dtype = {'rfid': str}).drop_duplicates(subset = 'rfid') 
+    if dictionary['traits'] == 'dont':
+        traits_ = df.columns[df.columns.str.startswith('regressedlr_')]#cluster_bysex
+    elif 'prefix_' in dictionary['traits']: 
+        pref = dictionary['traits'].replace('prefix_', '')
+        traits_ = df.columns[df.columns.str.startswith(f'regressedlr_{pref}')]
+    else: traits_ = dictionary['traits'].split(',')
+    traits_d = get_trait_descriptions_f(pd.read_csv(f'{pj}/data_dict_{pj}.csv'), traits_)
+else:
+    df = pd.read_csv(f'{pj}/raw_data.csv', dtype = {'rfid': str}).drop_duplicates(subset = 'rfid') 
+    traits_, traits_d = [], []
 
-df = pd.read_csv(f'{pj}/processed_data_ready.csv').drop_duplicates(subset = 'rfid') 
-traits_ = df.columns[df.columns.str.contains('regressedlr_')]#cluster_bysex
-traits_d = get_trait_descriptions_f(pj, traits_)
 gwas = gwas_pipe(path = f'{pj}/',
              all_genotypes = dictionary['genotypes'], #'round9_1.vcf.gz',
              data = df,
@@ -29,6 +32,8 @@ gwas = gwas_pipe(path = f'{pj}/',
              traits = traits_ ,
              trait_descriptions= traits_d,
              threads = dictionary['threads'])
+
+if dictionary['regressout']!= 'dont': gwas.regressout(data_dictionary= pd.read_csv(f'{pj}/data_dict_{pj}.csv'))
 if dictionary['subset']!= 'dont': gwas.subsetSamplesFromAllGenotypes(sourceFormat = 'plink')
 if dictionary['grm']!= 'dont':gwas.generateGRM()
 if dictionary['h2']!= 'dont': gwas.snpHeritability()
@@ -37,16 +42,18 @@ if dictionary['BLUP_predict'] != 'dont': gwas.BLUP_predict(dictionary['BLUP_pred
 if dictionary['gwas']!= 'dont': gwas.GWAS()
 if dictionary['db']!= 'dont': gwas.addGWASresultsToDb(researcher='tsanches', round_version='10.0.0', gwas_version='0.1.1')
 if dictionary['qtl']!= 'dont': 
-    qtls = gwas.callQTLs()
+    qtls = gwas.callQTLs( NonStrictSearchDir=False)
     gwas.annotate(qtls)
-if dictionary['locuszoom'] != 'dont': gwas.locuszoom(pd.read_csv(f'{pj}/results/qtls/finalqtl.csv')) 
-if dictionary['effect'] != 'dont': gwas.effectsize(pd.read_csv(f'{pj}/results/qtls/finalqtl.csv')) 
+if dictionary['locuszoom'] != 'dont': gwas.locuszoom(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv')) 
+if dictionary['effect'] != 'dont': gwas.effectsize(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv')) 
 if dictionary['gcorr'] != 'dont': gwas.genetic_correlation_matrix()
 if dictionary['manhattanplot'] != 'dont': gwas.manhattanplot(display = False)
-if dictionary['porcupineplot'] != 'dont': gwas.porcupineplot(pd.read_csv(f'{pj}/results/qtls/finalqtl.csv'), display = False)
-if dictionary['phewas']!= 'dont':gwas.phewas(pd.read_csv(f'{pj}/results/qtls/finalqtl.csv').set_index('SNP'), annotate=True, pval_threshold = 1e-4, nreturn = 1, r2_threshold = .4) 
-if dictionary['eqtl']!= 'dont':gwas.eQTL(pd.read_csv(f'{pj}/results/qtls/finalqtl.csv').set_index('SNP'), annotate= True)
-if dictionary['sqtl']!= 'dont':gwas.sQTL(pd.read_csv(f'{pj}/results/qtls/finalqtl.csv').set_index('SNP'))
-if dictionary['store']!= 'dont':gwas.store(researcher='tsanches',round_version='10.0.0', gwas_version='0.1.1',  remove_folders=False)
-if dictionary['publish']!= 'dont':gwas.copy_results()
+if dictionary['porcupineplot'] != 'dont': gwas.porcupineplot(pd.read_csv(f'{gwas.path}/results/qtls/finalqtl.csv'), display = False)
+if dictionary['phewas']!= 'dont':gwas.phewas(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), annotate=True, pval_threshold = 1e-4, nreturn = 1, r2_threshold = .4) 
+if dictionary['eqtl']!= 'dont':gwas.eQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), annotate= True)
+if dictionary['sqtl']!= 'dont':gwas.sQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'))
+if dictionary['report']!= 'dont':gwas.report( round_version='10.0.0')
+if dictionary['store']!= 'dont':gwas.store(researcher=dictionary['researcher'],round_version='10.0.0', gwas_version='0.1.1',  remove_folders=False)
+try: if dictionary['publish']!= 'dont':gwas.copy_results()
+except: print('s3 links have to be set up check on minio website.')
 gwas.print_watermark()
