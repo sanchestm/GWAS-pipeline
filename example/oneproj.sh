@@ -5,8 +5,8 @@
 #PBS -N GWAS_example
 #PBS -j oe
 #PBS -q hotel
-#PBS -o /projects/ps-palmer/tsanches/gwaspipeline/gwas/example/$PBS_JOBNAME.out       
-#PBS -e /projects/ps-palmer/tsanches/gwaspipeline/gwas/example/$PBS_JOBNAME.err    
+#PBS -o /projects/ps-palmer/$codepath$PBS_JOBNAME.out       
+#PBS -e /projects/ps-palmer/$codepath$PBS_JOBNAME.err    
 
 source activate gwaspipe
 cd *code_path*
