@@ -63,6 +63,8 @@ if dictionary['eqtl']!= 'dont':gwas.eQTL(pd.read_csv(f'{gwas.path}results/qtls/f
 if dictionary['sqtl']!= 'dont':gwas.sQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'))
 if dictionary['report']!= 'dont':gwas.report(round_version=dictionary['round'])
 if dictionary['store']!= 'dont':gwas.store(researcher=dictionary['researcher'],round_version=dictionary['round'] , gwas_version=dictionary['gwas_version'],  remove_folders=False)
-try: if dictionary['publish']!= 'dont':gwas.copy_results()
-except: print('setting up the minio is necessary')
+try: 
+    if dictionary['publish']!= 'dont':gwas.copy_results()
+except: 
+    print('setting up the minio is necessary')
 gwas.print_watermark()
