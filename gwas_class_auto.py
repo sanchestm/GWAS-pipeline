@@ -1,61 +1,46 @@
-import pandas as pd
-import subprocess
-from glob import glob
-from datetime import datetime
-import numpy as np
-import re
-from glob import glob
-import matplotlib.pyplot as plt
-import seaborn as sns
-from scipy.stats import pearsonr
-import matplotlib.pyplot as plt 
-import gzip
-import dask.dataframe as dd
-from tqdm import tqdm
-import gc
-from collections import Counter, defaultdict
-from sklearn.decomposition import PCA
-from umap import UMAP
-from pathlib import Path
-import os
-import inspect
-from time import sleep
-import sys
-import itertools
-from IPython.utils import io
-import psycopg2
-import warnings
-import requests
-from io import StringIO
-import requests
-import goatools
-from pdf2image import convert_from_path
-from goatools.base import download_ncbi_associations
-from collections import defaultdict, namedtuple
-from goatools.anno.genetogo_reader import Gene2GoReader
-#gene2go = download_ncbi_associations()
-#geneid2gos_rat= Gene2GoReader(gene2go, taxids=[10116])
-import mygene
-import seaborn as sns
+from collections import Counter, defaultdict, namedtuple
 import dash_bio as dashbio
+import dask.dataframe as dd
+from datetime import datetime
+import gc
+from glob import glob
+import goatools
+import gzip
+import inspect
+from io import StringIO
+from IPython.display import display
+from IPython.utils import io
+import itertools
 import matplotlib.pyplot as plt
-tqdm.pandas()
-import plotly.graph_objects as go
-from  os.path import dirname, basename
-from itertools import product
-from scipy.spatial import distance
-from scipy.cluster.hierarchy import ward, dendrogram, leaves_list, linkage
-from sklearn.preprocessing import QuantileTransformer, MinMaxScaler
+import mygene
+mg = mygene.MyGeneInfo()
 import numpy as np
+import os
+from os.path import dirname, basename
+import pandas as pd
+from pathlib import Path
+from pdf2image import convert_from_path
+import plotly.graph_objects as go
+import psycopg2
+import re
+import requests
+from scipy.cluster.hierarchy import ward, dendrogram, leaves_list, linkage
+from scipy.spatial import distance
+from scipy.stats import pearsonr
+import seaborn as sns
+from sklearn.decomposition import PCA
 from sklearn.impute import KNNImputer
-from sklearn.pipeline import make_pipeline
 from sklearn.linear_model import LinearRegression#, RobustRegression
 from sklearn.multioutput import MultiOutputRegressor
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import OneHotEncoder, QuantileTransformer, MinMaxScaler
+import subprocess
+import sys
+from time import sleep
+from tqdm import tqdm
+tqdm.pandas()
+from umap import UMAP
 import warnings
-from IPython.display import display
-mg = mygene.MyGeneInfo()
-#import sleep
 warnings.filterwarnings('ignore')
 #conda create --name gpipe -c conda-forge openjdk=17 ipykernel pandas seaborn scikit-learn umap-learn psycopg2 dask
 #conda activate gpipe
@@ -1503,7 +1488,7 @@ class gwas_pipe:
         out = []
         loop_str = [('cis','cis_qtl_signif')] if just_cis else [('cis','cis_qtl_signif'), ('trans','trans_qtl_pairs')]
         
-        for tissue, (typ, prefix) in tqdm(list(product(tissue_list, loop_str)),  position=0, desc="tissue+CisTrans", leave=True):
+        for tissue, (typ, prefix) in tqdm(list(itertools.product(tissue_list, loop_str)),  position=0, desc="tissue+CisTrans", leave=True):
 
             tempdf = pd.read_csv(f'https://ratgtex.org/data/splice/{tissue}.{genome}.splice.{prefix}.txt.gz', sep = '\t').assign(tissue = tissue)\
                                                                                                              .rename({'variant_id': 'SNP', 'pval': 'pval_nominal'}, axis = 1)  
