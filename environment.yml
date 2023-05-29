@@ -30,6 +30,7 @@ dependencies:
   - arviz
   - matplotlib-venn
   - goatools
+  - prophet
   - pip
   - pip:
     - goatools
