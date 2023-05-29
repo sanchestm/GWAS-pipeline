@@ -67,11 +67,6 @@ import pandas_plink
 import dask.array as da
 
 class vcf_manipulation:
-    def corrfunc(x, y, ax=None, **kws):
-        r, _ = pearsonr(x, y)
-        ax = ax or plt.gca()
-        ax.annotate(f'ρ = {r:.2f}', xy=(.1, .9), xycoords=ax.transAxes)
-
     def get_vcf_header(vcf_path):
         with gzip.open(vcf_path, "rt") as ifile:
             for num, line in enumerate(ifile):
