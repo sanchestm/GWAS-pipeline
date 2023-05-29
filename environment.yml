@@ -29,3 +29,4 @@ dependencies:
   - ydata-profiling
   - arviz
   - matplotlib-venn
+  - goatools
