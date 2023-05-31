@@ -1103,6 +1103,12 @@ class gwas_pipe:
                 out = pd.concat([out,
                                  maxp.to_frame().T.assign(QTL= qtl, interval_size = '{:.2f} Mb'.format(ldSNPS_LEN))],
                                  axis = 0)
+                
+        if not len(out):
+            print('no SNPS were found, returning an empty dataframe')
+            out.to_csv(f'{self.path}results/qtls/allQTLS.csv', index = False)
+            return out
+            
 
         out =  out.reset_index().rename({'index': 'bp'}, axis = 1).sort_values('trait')#.assign(project = self.project_name)
         out['trait_description'] = out.trait.apply(lambda x: self.get_trait_descriptions[x])
