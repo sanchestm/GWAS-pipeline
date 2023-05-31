@@ -10,5 +10,5 @@
 
 source activate gwaspipe
 cd *code_path*
-python gwas_cli.py project=example threads=30 regressout=example/raw_data.csv phewas_path=/projects/ps-palmer/tsanches/gwaspipeline/gwas/phewasdb.parquet.gz subset h2 \ 
+python gwas_cli.py project=example threads=30 regressout=example/raw_data.csv phewas_path=/projects/ps-palmer/tsanches/gwaspipeline/gwas/phewasdb.parquet.gz subset h2 grm\ 
 db gwas qtl phewas store BLUP eqtl gcorr locuszoom sqtl manhattanplot porcupineplot effect report
