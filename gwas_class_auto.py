@@ -137,8 +137,8 @@ def qsub(call: str, queue = 'condo', walltime = 8, ppn = 12, out = 'log/', err =
     call_path = f'{project_dir}{call}'
     return bash(f'qsub -q {queue} -l nodes=1:ppn={ppn} -j oe -o {out_path} -e {err_path} -l walltime={walltime}:00:00 {call_path}')
 
-def vcf2plink(vcf = 'round9_1.vcf.gz', out_path = 'zzplink_genotypes/allgenotypes_r9.1'):
-    bash(f'plink --thread-num 16 --vcf {vcf} --chr-set 20 no-xy --set-missing-var-ids @:# --make-bed --out {out_path}')
+def vcf2plink(vcf = 'round9_1.vcf.gz', nchr = 20, out_path = 'zzplink_genotypes/allgenotypes_r9.1'):
+    bash(f'plink --thread-num 16 --vcf {vcf} --chr-set {nchr} no-xy --set-missing-var-ids @:# --make-bed --out {out_path}')
     
 class gwas_pipe:
     '''
@@ -1787,6 +1787,3 @@ def get_trait_descriptions_f(data_dic, traits):
         except: out +=  ['UNK']
     return out
         
-        
-
-    
