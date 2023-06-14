@@ -1,4 +1,4 @@
-name: GWAS-pipeline2
+name: GWAS-pipeline
 channels:
   - conda-forge
   - defaults
