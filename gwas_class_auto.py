@@ -115,8 +115,6 @@ class vcf_manipulation:
             vcf.write(header)
         df.to_csv(filename, sep="\t", mode='a', index=False)
 
-    
-
 def bash(call, verbose = 0, return_stdout = True, print_call = True):
     if print_call: print(call+'\n')
     out = subprocess.run(call.split(' '), capture_output = True) 
@@ -268,9 +266,8 @@ class gwas_pipe:
                  use_tscc_modules: list = [],
                  threads: int = os.cpu_count()): 
 
-        
         if use_tscc_modules: bash(f'module load {" ".join(use_tscc_modules)}')
-        self.gtca = 'gcta64' if not gtca_path else gtca_path
+        self.gcta = 'gcta64' if not gtca_path else gtca_path
         self.path = path
         self.all_genotypes = all_genotypes
         self.founder_genotypes = founder_genotypes
@@ -316,7 +313,6 @@ class gwas_pipe:
         self.thrflag = f'--thread-num {threads}'
         self.threadnum = threads
         self.print_call = True
-        # self.chrList = ['x' if x == 21 else x for x in range(1,22)]
         self.chrList = chrList
         self.failed_full_grm = False
         
@@ -439,7 +435,7 @@ class gwas_pipe:
         --make-grm use make_grm = ''
         '''
         
-        call = f'{self.gtca} ' + ' '.join([f'--{k.replace("_", "-")} {v}'
+        call = f'{self.gcta} ' + ' '.join([f'--{k.replace("_", "-")} {v}'
                                     for k,v in kwargs.items()])
         bash(call + f' --out {outfile}', print_call=False)
         return
@@ -536,7 +532,6 @@ class gwas_pipe:
         
         '''
         Function to subset and refilter the genotypes given a set of geno, maf and hwe.
-        
         
         Parameters
         ----------
@@ -663,21 +658,21 @@ class gwas_pipe:
             auto_flags = f'--autosome-num {int(len(autosome_list))} --autosome' if just_autosomes else ''
             sex_flags = f'--update-sex {self.sample_sex_path_gcta} --dc 1' #f' --sex {self.sample_sex_path}'
             
-            self.bashLog(f'{self.gtca} {self.thrflag} --bfile {self.genotypes_subset} {sex_flags}\
+            self.bashLog(f'{self.gcta} {self.thrflag} --bfile {self.genotypes_subset} {sex_flags}\
                            --make-grm-bin {auto_flags} --out {self.autoGRM}_allatonce',
-                           funcName, print_call = print_call) # 
+                           funcName, print_call = print_call) 
             
         all_filenames_partial_grms = pd.DataFrame(columns = ['filename'])
-        
+
         if 'xchr' in extra_chrs:
-            self.bashLog(f'{self.gtca} {self.thrflag} --bfile {self.genotypes_subset} --autosome-num {nchr} \
+            self.bashLog(f'{self.gcta} {self.thrflag} --bfile {self.genotypes_subset} --autosome-num {nchr} \
                            --make-grm-xchr --out {self.xGRM}',
                         f'{funcName}_chrX', print_call = False)
 
-        all_filenames_partial_grms.loc[len(all_filenames_partial_grms), 'filename'] = self.xGRM
+            all_filenames_partial_grms.loc[len(all_filenames_partial_grms), 'filename'] = self.xGRM
 
         for c in tqdm(autosome_list):
-            self.bashLog(f'{self.gtca} {self.thrflag} --bfile {self.genotypes_subset} --chr {c} --autosome-num {nchr}\
+            self.bashLog(f'{self.gcta} {self.thrflag} --bfile {self.genotypes_subset} --chr {c} --autosome-num {nchr}\
                          --make-grm-bin --out {self.path}grm/{c}chrGRM',
                         f'{funcName}_chr{c}',  print_call = False)
 
@@ -685,7 +680,7 @@ class gwas_pipe:
 
         all_filenames_partial_grms.to_csv(f'{self.path}grm/listofchrgrms.txt', index = False, sep = ' ', header = None)
 
-        self.bashLog(f'{self.gtca} {self.thrflag} --mgrm {self.path}grm/listofchrgrms.txt \
+        self.bashLog(f'{self.gcta} {self.thrflag} --mgrm {self.path}grm/listofchrgrms.txt \
                        --make-grm-bin --out {self.autoGRM}', f'{funcName}_mergedgrms',  print_call = False )
 
         #if os.path.exists(f'{self.autoGRM}.grm.bin'): 
@@ -734,11 +729,11 @@ class gwas_pipe:
             self.df[['rfid', 'rfid', trait]].fillna('NA').astype(str).to_csv(trait_file,  index = False, sep = ' ', header = None)
             
             if self.failed_full_grm:
-                self.bashLog(f'{self.gtca} --reml {self.thrflag} --reml-no-constrain --autosome-num {nchr}\
+                self.bashLog(f'{self.gcta} --reml {self.thrflag} --reml-no-constrain --autosome-num {nchr}\
                                            --pheno {trait_file} --mgrm {self.path}grm/listofchrgrms.txt --out {out_file}',
                             f'snpHeritability_{trait}', print_call = print_call) 
             else:
-                self.bashLog(f'{self.gtca} --reml {self.thrflag}  --autosome-num {nchr}\
+                self.bashLog(f'{self.gcta} --reml {self.thrflag}  --autosome-num {nchr}\
                                            --pheno {trait_file} --grm {self.autoGRM} --out {out_file}',
                             f'snpHeritability_{trait}', print_call = print_call) #--autosome
             
@@ -774,7 +769,7 @@ class gwas_pipe:
         outp = pd.DataFrame()
         genetic_table = pd.DataFrame()
         for trait1, trait2 in tqdm(list(itertools.combinations(traitlist, 2))):
-            self.bashLog(f'''{self.gtca} --reml-bivar {d_[trait1]} {d_[trait2]} {self.thrflag} \
+            self.bashLog(f'''{self.gcta} --reml-bivar {d_[trait1]} {d_[trait2]} {self.thrflag} \
                 --grm {self.autoGRM} --pheno {self.path}data/allpheno.txt --reml-maxit 1000 \
                 --reml-bivar-lrt-rg 0 --out {self.path}temp/gencorr.temp''', 'genetic_correlation', print_call=False)
             temp = pd.read_csv(f'{self.path}temp/gencorr.temp.hsq', sep = '\t',dtype= {'Variance': float}, index_col=0 ,skipfooter=6)
@@ -834,13 +829,13 @@ class gwas_pipe:
             tempdf = self.df.sample(frac = frac) if frac < .999 else self.df.copy()
             tempdf[['rfid', 'rfid', trait]].fillna('NA').astype(str).to_csv(trait_file,  index = False, sep = ' ', header = None)
             tempdf[['rfid', 'rfid']].to_csv(trait_rfids, header = None, index = False, sep = ' ')
-            self.bashLog(f'{self.gtca} --grm {self.autoGRM} --autosome-num {nchr}  --keep {trait_rfids} \
+            self.bashLog(f'{self.gcta} --grm {self.autoGRM} --autosome-num {nchr}  --keep {trait_rfids} \
                                         --make-grm  --out {out_file}_GRMsubset',
                         f'BLUP_{trait}_GRM', print_call = print_call)
-            self.bashLog(f'{self.gtca} --reml {self.thrflag} \
+            self.bashLog(f'{self.gcta} --reml {self.thrflag} \
                                        --pheno {trait_file} --grm {out_file}_GRMsubset --reml-pred-rand --out {out_file}_BV',
                         f'BLUP_{trait}_BV', print_call = print_call) #--autosome
-            self.bashLog(f'{self.gtca} --bfile {self.genotypes_subset} {self.thrflag} --blup-snp {out_file}_BV.indi.blp \
+            self.bashLog(f'{self.gcta} --bfile {self.genotypes_subset} {self.thrflag} --blup-snp {out_file}_BV.indi.blp \
                            --autosome --autosome-num {nchr} --out {out_file}_snpscores',
                         f'BLUP_{trait}_snpscores', print_call = print_call) #--autosome
 
@@ -930,7 +925,7 @@ class gwas_pipe:
             for trait in tqdm(traitlist):
                 grm_flag = f'--grm {self.path}grm/AllchrGRM ' if subtract_grm else ''
                 loco_flag = '-loco' if loco else ''
-                self.bashLog(f"{self.gtca} {self.thrflag} {grm_flag} \
+                self.bashLog(f"{self.gcta} {self.thrflag} {grm_flag} \
                 --autosome-num {nchr}\
                 --pheno {self.path}data/pheno/{trait}.txt \
                 --bfile {self.genotypes_subset} \
@@ -949,7 +944,7 @@ class gwas_pipe:
         for trait, chrom in tqdm(list(itertools.product(traitlist,ranges))):
             if chrom == 21: chromp2 = 'x'
             else: chromp2 = chrom
-            self.bashLog(f'{self.gtca} {self.thrflag} --pheno {self.path}data/pheno/{trait}.txt --bfile {self.genotypes_subset} \
+            self.bashLog(f'{self.gcta} {self.thrflag} --pheno {self.path}data/pheno/{trait}.txt --bfile {self.genotypes_subset} \
                                        --grm {self.path}grm/AllchrGRM \
                                        --autosome-num {nchr}\
                                        --chr {chrom} \
@@ -960,8 +955,6 @@ class gwas_pipe:
                 
                 
         return 1
-
-    
     
     def addGWASresultsToDb(self, researcher: str , round_version: str, gwas_version: str,filenames: list = [],
                            pval_thresh: float = 1e-4, safe_rebuild: bool = True,**kwards):
@@ -1039,8 +1032,8 @@ class gwas_pipe:
         #/RattacaG01_QC_Sex_Het_pass_n971.vcf.gz.tbi rattaca_genotypes.vcf.gz.tbi
         
         
-    def callQTLs(self, threshold: float = 5.3591, suggestive_threshold: float = 5.58, window: int = 2e6, subterm: int = 2,  annotate_genome: str = 'rn7', add_founder_genotypes: bool = True,
-                 ldwin = 7e6, ldkb = 7000, ldr2 = .4, qtl_dist = 7*1e6, nchr: int = 21, NonStrictSearchDir = True, **kwards):
+    def callQTLs(self, threshold: float = 5.3591, suggestive_threshold: float = 5.58, window: int = 2e6, subterm: int = 2,  add_founder_genotypes: bool = True,
+                 ldwin = 7e6, ldkb = 7000, ldr2 = .4, qtl_dist = 7*1e6, nchr: int = 21, NonStrictSearchDir = True, **kwards): # annotate_genome: str = 'rn7',
         
         '''
         The function callQTLs() is used to call quantitative trait loci (QTLs) from GWAS results. 
@@ -1074,7 +1067,7 @@ class gwas_pipe:
         '''
         print(f'starting call qtl ... {self.project_name}') 
         thresh = 10**(-threshold)
-        chr_list = ['x' if x == 21 else x for x in range(1,nchr+1)]
+        # chr_list = ['x' if x == 21 else x for x in range(1,nchr+1)]
         
         if not NonStrictSearchDir:
             topSNPs = pd.DataFrame()
@@ -1109,6 +1102,11 @@ class gwas_pipe:
                 qtl = True if correlated_snps.shape[0] > 2 else False
 
                 ldfilename = f'{self.path}temp/r2/temp_qtl_n_{t}'
+                print(f'plink --bfile {self.genotypes_subset} --chr {c} --ld-snp {maxp.SNP} \
+                                     --ld-window {ldwin} {self.thrflag} \
+                                     --nonfounders --r2 \
+                                     --ld-window-r2 {ldr2} --out {ldfilename}',\
+                             f'qlt_{t}')
                 self.bashLog(f'plink --bfile {self.genotypes_subset} --chr {c} --ld-snp {maxp.SNP} \
                                      --ld-window {ldwin} {self.thrflag} \
                                      --nonfounders --r2 \
@@ -1175,7 +1173,7 @@ class gwas_pipe:
             print(f'running conditional analysis for trait {trait} and all snps below threshold {snpstring}')
 
         pbimtemp = self.pbim.assign(n = self.df.count()[trait] ).rename({'snp': 'SNP', 'n':'N'}, axis = 1)[['SNP', 'N']] #- da.isnan(pgen).sum(axis = 1)
-        tempdf = pd.concat([pd.read_csv(f'{self.path}results/gwas/{trait}.loco.mlma', sep = '\t'),
+        tempdf = pd.concat([pd.read_csv(f'{self.path}_report_/{trait}.loco.mlma', sep = '\t'),
                            pd.read_csv(f'{self.path}results/gwas/{trait}_chrgwasx.mlma', sep = '\t')]).rename({'Freq': 'freq'}, axis =1 )
         tempdf = tempdf.merge(pbimtemp, on = 'SNP')[['SNP','A1','A2','freq','b','se','p','N' ]]
         mafile, snpl = f'{self.path}temp/cojo/tempmlma.ma', f'{self.path}temp/cojo/temp.snplist'
@@ -1187,7 +1185,7 @@ class gwas_pipe:
             tempdf[-np.log10(tempdf.p) > threshold][['SNP']].to_csv(snpl, index = False, header = None,sep = '\t')
         else: snpdf[['SNP']].to_csv(snpl, index = False, header = None,sep = '\t')
         cojofile = f'{self.path}temp/cojo/tempcojo'
-        self.bashLog(f'{self.gtca} {self.thrflag} --bfile {self.genotypes_subset} --cojo-slct --cojo-collinear 0.99 --cojo-p {10**-threshold} \
+        self.bashLog(f'{self.gcta} {self.thrflag} --bfile {self.genotypes_subset} --cojo-slct --cojo-collinear 0.99 --cojo-p {10**-threshold} \
                     --cojo-file {mafile} --cojo-cond {snpl} --out {cojofile}', f'cojo_test', print_call=False)
         return pd.read_csv(f'{cojofile}.jma.cojo', sep = '\t')
 
@@ -1695,8 +1693,8 @@ class gwas_pipe:
 
         qtltable: pd.DataFrame
             the QTL table to be annotated
-        genome: str = 'rn6'
-            the genome to use for annotation (default is 'rn6')
+        genome: str = 'rn7'
+            the genome to use for annotation (default is 'rn7')
         snpcol: str = 'SNP'
             the column name for the SNP column in the QTL table (default is 'SNP')
         save: bool = True
@@ -1712,9 +1710,10 @@ class gwas_pipe:
         The function returns the final annotated table.
         '''
         if qtltable.shape == (0,0): qtltable = pd.read_csv(self.allqtlspath).set_index('SNP')
-        d = {'rn6': 'Rnor_6.0.99', 'rn7':'mRatBN7.2.105'}[genome]
-        #bash('java -jar snpEff/snpEff.jar download -v Rnor_6.0.99')
-        #bash('java -jar snpEff/snpEff.jar download -v mRatBN7.2.105')    
+        d = {'rn6': 'Rnor_6.0.99', 'rn7':'mRatBN7.2.105', 'cfw': 'GRCm39.105'}[genome]
+        #bash('java -jar /projects/ps-palmer/tsanches/gwaspipeline/gwas/snpEff/snpEff.jar download -v Rnor_6.0.99')
+        #bash('java -jar /projects/ps-palmer/tsanches/gwaspipeline/gwas/snpEff/snpEff.jar download -v mRatBN7.2.105')
+        #bash('java -jar /projects/ps-palmer/tsanches/gwaspipeline/gwas/snpEff/snpEff.jar download -v GRCm39.105')  
         
         temp  = qtltable.reset_index()\
                         .loc[:,[ 'Chr', 'bp', snpcol, 'A1', 'A2']]\
