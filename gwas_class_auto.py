@@ -155,57 +155,80 @@ class gwas_pipe:
     ----------
     path: str = f'{Path().absolute()}/'
         path to the project we will use as a base directory
-
-    use_tscc_modules: list = []
-        list of strings to load modules from a HPC using 'module load'
-
-    all_genotypes: str = '/projects/ps-palmer/apurva/riptide/genotypes/round9_1'
-        path to file with all genotypes, we are currently at the round 9.1 
-
-    gtca_path: str = ''
-        path to gcta64 program for GWAS, if not provided will use the gcta64 dowloaded with conda
-
-    data: pd.DataFrame() = pd.DataFrame()
-        pandas dataframe that contains all the phenotypic data necessary to run gcta, 
-        genomic identity of a sample has to be provided in the 'rfid' column
-
-    traits: list = []
-        list of strings of the phenotype columns that will be used for the GWAS analysis
-        this could be integrated with the data dictionaries of the project in the future
-
+    
     project_name: str = 'test'
         name of the project being ran, 
         do not include date, run identifiers 
         this will be used for the phewas db, so remember to follow the naming conventions in
         https://docs.google.com/spreadsheets/d/1S7_ZIGpMkNmIjhAKUjHBAmcieDihFS-47-_XsgGTls8/edit#gid=1440209927
+    
+    raw: pd.DataFrame() = pd.DataFrame()
+        pandas dataframe that contains all the phenotypic data before regression, 
+        genomic identity of a sample has to be provided in the 'rfid' column
+    
+    data: pd.DataFrame() = pd.DataFrame()
+        pandas dataframe that contains all the phenotypic data necessary to run gcta, 
+        genomic identity of a sample has to be provided in the 'rfid' column
+    
+    traits: list = []
+        list of strings of the phenotype columns that will be used for the GWAS analysis
+        this could be integrated with the data dictionaries of the project in the future
+    
+    trait_descriptions: list = []
+        list of strings that describe the phenotype columns
+        
+    all_genotypes: str = '/projects/ps-palmer/apurva/riptide/genotypes/round9_1'
+        path to file with all genotypes, we are currently at the round 9.1 
+    
+    chrList: list = []
+        list of chromosomes to be included in genetic analysis
+    
+    snpeff_path: str = ''
+        path to snpeff program for GWAS
+    
+    threads: int = os.cpu_count()
+        number of threads when running multithread code
+        default is the number of cpus in the machine
+        
+    use_tscc_modules: list = []
+        list of strings to load modules from a HPC using 'module load'
+
+    gtca_path: str = ''
+        path to gcta64 program for GWAS, if not provided will use the gcta64 dowloaded with conda
 
     phewas_db: str = 'phewasdb.parquet.gz'
         path to the phewas database file 
         The phewas db will be maintained in the parquet format but we are considering using apache feather for saving memory
         this could be integrated with tscc by using scp of the dataframe
-        curretly we are using just one large file, but we should consider breaking it up in the future
+        currently we are using just one large file, but we should consider breaking it up in the future
 
-    threads: int = os.cpu_count()
-        number of threads when running multithread code
-        default is the number of cpus in the machine
-
-    Atributes
+    Attributes
     ---------
-    gcta
     path
-    all_genotypes
+    project_name
+    raw
     df
     traits
+    get_trait_descriptions
+    chrList
+    all_genotypes
+    failed_full_grm
+    founder_genotypes
+    heritability_path
     phewas_db
-    project_name
     sample_path
     genotypes_subset
     genotypes_subset_vcf
     autoGRM
     xGRM
     log
+    threadnum
     thrflag
-    chrList
+    sample_sex_path
+    sample_sex_path_gcta
+    gcta
+    snpeff_path
+    print_call
 
     Examples
     --------
@@ -231,17 +254,19 @@ class gwas_pipe:
     
     def __init__(self, 
                  path: str = f'{Path().absolute()}/', 
-                 use_tscc_modules: list = [],
-                 all_genotypes: str = 'round10.vcf.gz',
-                 gtca_path: str = '',
-                 data: pd.DataFrame() = pd.DataFrame(),
+                 project_name: str = 'test',
+                 raw: pd.DataFrame() = pd.DataFrame(),
+                 regressed: pd.DataFrame() = pd.DataFrame(), 
                  traits: list = [],
                  trait_descriptions: list = [],
-                 project_name: str = 'test',
-                 phewas_db: str = 'phewasdb.parquet.gz',
-                 threads: int = os.cpu_count(),
+                 chrList: list = ['x' if x == 21 else x for x in range(1,22)], 
+                 all_genotypes: str = 'round10.vcf.gz',
+                 founder_genotypes: str = '/projects/ps-palmer/hs_rats/Ref_panel_mRatBN7.2/Ref_panel_mRatBN7_2_chr_GT', 
+                 gtca_path: str = '',
                  snpeff_path: str =  'snpEff/',
-                 founder_genotypes: str = '/projects/ps-palmer/hs_rats/Ref_panel_mRatBN7.2/Ref_panel_mRatBN7_2_chr_GT'):
+                 phewas_db: str = 'phewasdb.parquet.gz',
+                 use_tscc_modules: list = [],
+                 threads: int = os.cpu_count()): 
 
         
         if use_tscc_modules: bash(f'module load {" ".join(use_tscc_modules)}')
@@ -250,31 +275,31 @@ class gwas_pipe:
         self.all_genotypes = all_genotypes
         self.founder_genotypes = founder_genotypes
         self.snpeff_path = snpeff_path
+        self.df = regressed
         
         if os.path.exists(f'{self.path}temp'): bash(f'rm -r {self.path}temp')
         
-        if type(data) == str: df = pd.read_csv(data, dtype={'rfid': str})
-        else: df = data
+        if type(raw) == str: df = pd.read_csv(raw, dtype={'rfid': str})
+        else: df = raw
         df.columns = df.columns.str.lower()
         if 'vcf' in self.all_genotypes:
             sample_list_inside_genotypes = vcf_manipulation.get_vcf_header(self.all_genotypes)
         else:
             sample_list_inside_genotypes = pd.read_csv(self.all_genotypes+'.fam', header = None, sep='\s+', dtype = str)[0].to_list()
         df = df.sort_values('rfid').reset_index(drop = True).dropna(subset = 'rfid').drop_duplicates(subset = ['rfid'])
-        self.df = df[df.astype(str).rfid.isin(sample_list_inside_genotypes)].copy()
+        self.raw = df[df.astype(str).rfid.isin(sample_list_inside_genotypes)].copy()
         
-        if self.df.shape[0] != df.shape[0]:
-            missing = set(df.rfid.astype(str).unique()) - set(self.df.rfid.astype(str).unique())
+        if self.raw.shape[0] != df.shape[0]:
+            missing = set(df.rfid.astype(str).unique()) - set(self.raw.rfid.astype(str).unique())
             print(f"missing {len(missing)} rfids for project {project_name}")
             
         
         self.traits = [x.lower() for x in traits]
-        print(self.df[self.traits].count())
+        print(self.raw[self.traits].count())
         self.make_dir_structure()
         for trait in self.traits:
             trait_file = f'{self.path}data/pheno/{trait}.txt'            
-            self.df[['rfid', 'rfid', trait]].fillna('NA').astype(str).to_csv(trait_file,  index = False, sep = ' ', header = None)
-        
+            self.raw[['rfid', 'rfid', trait]].fillna('NA').astype(str).to_csv(trait_file, index = False, sep = ' ', header = None)
             
         self.get_trait_descriptions = defaultdict(lambda: 'UNK', {k:v for k,v in zip(traits, trait_descriptions)})
         
@@ -291,7 +316,8 @@ class gwas_pipe:
         self.thrflag = f'--thread-num {threads}'
         self.threadnum = threads
         self.print_call = True
-        self.chrList = ['x' if x == 21 else x for x in range(1,22)]
+        # self.chrList = ['x' if x == 21 else x for x in range(1,22)]
+        self.chrList = chrList
         self.failed_full_grm = False
         
         self.sample_path = f'{self.path}genotypes/sample_rfids.txt'
