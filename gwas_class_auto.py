@@ -328,7 +328,7 @@ class gwas_pipe:
     def regressout(self, data_dictionary: pd.DataFrame(), covariates_threshold: float = 0.02, verbose = False):
         import statsReport
         if type(data_dictionary) == str: data_dictionary = pd.read_csv(data_dictionary)
-        df, datadic = self.df.copy(), data_dictionary
+        df, datadic = self.raw.copy(), data_dictionary
         datadic = datadic[datadic.measure.isin(df.columns)].drop_duplicates(subset = ['measure'])
         def getcols(df, string): return df.columns[df.columns.str.contains(string)].to_list()
         dfohe = df.copy()
@@ -480,7 +480,7 @@ class gwas_pipe:
             
             
     def subsetSamplesFromAllGenotypes(self,samplelist: list = [], sexfmt: str = 'F|M',  sexColumn: str = 'sex',
-                                      use_rfid_from_df = True, sourceFormat = 'plink', 
+                                      use_rfid_from_df = True, sourceFormat = 'plink', nchr = 20, 
                                       geno: float = .1, maf: float = .005, hwe: float = 1e-10,hwex: float = 1e-20, **kwards ):
         
         '''
@@ -517,7 +517,7 @@ class gwas_pipe:
         
         fmt_call = {'vcf': 'vcf', 'plink': 'bfile'}[sourceFormat]        
         
-        extra_params = f'--geno {geno} --maf {maf} --hwe {hwe} --set-missing-var-ids @:# --chr-set 20 no-xy --keep-allele-order' #--double-id 
+        extra_params = f'--geno {geno} --maf {maf} --hwe {hwe} --set-missing-var-ids @:# --chr-set {nchr} no-xy --keep-allele-order' #--double-id 
         
         sex_flags = f'--update-sex {self.sample_sex_path}'
         
@@ -530,7 +530,7 @@ class gwas_pipe:
         tempfam.drop(['rfid', 'plink_sex'], axis = 1).to_csv(self.genotypes_subset+ '.fam', header = None, sep = '\t', index = False)
         
         
-    def SubsampleMissMafHweFilter(self, sexfmt: str = 'M|F',  sexColumn: str = 'sex',  
+    def SubsampleMissMafHweFilter(self, sexfmt: str = 'M|F',  sexColumn: str = 'sex', nchr = 20, 
                                   geno: float = .1, maf: float = .005, hwe: float = 1e-10,
                                   sourceFormat = 'vcf', remove_dup: bool = True, print_call: bool = False, **kwards):
         
@@ -610,12 +610,12 @@ class gwas_pipe:
             extra_flags = f'--not-chr X'  if num == 1 else ''
             sex_flags = f'--update-sex {self.samples_sex[sx]}'
             
-            self.bashLog(f'plink --{fmt_call} {self.all_genotypes} --keep {self.samples[sx]}  --chr-set 20 no-xy \
+            self.bashLog(f'plink --{fmt_call} {self.all_genotypes} --keep {self.samples[sx]}  --chr-set {nchr} no-xy \
                           {sex_flags} {filtering_flags} {rmv} {extra_flags} {self.thrflag} --make-bed --out {sub}_{sx}',
-                        f'{funcName}_subseting_{sx}', print_call=print_call)#--autosome-num 20
+                        f'{funcName}_subseting_{sx}', print_call=print_call)#--autosome-num {nchr}
             
             if num == 1:
-                self.bashLog(f'plink --bfile {self.all_genotypes} --keep {self.samples[sx]}  --chr-set 20 no-xy\
+                self.bashLog(f'plink --bfile {self.all_genotypes} --keep {self.samples[sx]}  --chr-set {nchr} no-xy\
                                 --chr x {self.thrflag} --geno {geno} --maf {maf} --make-bed --out {sub}_{sx}_xchr',
                         f'{funcName}_maleXsubset{sx}',  print_call=print_call) #--out {sub}_{sx}_xchr {sub}_{sx} 
                 male_1_x_filenames = [aa for aa in [f'{sub}_{sx}', f'{sub}_{sx}_xchr'] if len(glob(aa+'.*')) >= 5]
@@ -625,7 +625,7 @@ class gwas_pipe:
                 
         print('merging sexes')        
         self.bashLog(f'plink --bfile {female_hwe} --merge-list {male_gen_filenames} {self.thrflag} \
-                       --geno {geno} --maf {maf} --chr-set 20 no-xy --make-bed --out {sub}',
+                       --geno {geno} --maf {maf} --chr-set {nchr} no-xy --make-bed --out {sub}',
                         f'{funcName}_mergeSexes', print_call=print_call) # {filtering_flags}
         
         self.genotypes_subset = f'{sub}'
@@ -636,7 +636,7 @@ class gwas_pipe:
         tempfam.drop(['rfid', 'plink_sex'], axis = 1).to_csv(self.genotypes_subset+ '.fam', header = None, sep = '\t', index = False)
         
         
-    def generateGRM(self, autosome_list: list = list(range(1,21)), print_call: bool = True, allatonce: bool = False,
+    def generateGRM(self, autosome_list: list = list(range(1,21)), nchr = 20, print_call: bool = True, allatonce: bool = False,
                     extra_chrs: list = ['xchr'], just_autosomes: bool = True, just_full_grm: bool = True,
                    full_grm: bool = True, **kwards):
         
@@ -670,14 +670,14 @@ class gwas_pipe:
         all_filenames_partial_grms = pd.DataFrame(columns = ['filename'])
         
         if 'xchr' in extra_chrs:
-            self.bashLog(f'{self.gtca} {self.thrflag} --bfile {self.genotypes_subset} --autosome-num 20 \
+            self.bashLog(f'{self.gtca} {self.thrflag} --bfile {self.genotypes_subset} --autosome-num {nchr} \
                            --make-grm-xchr --out {self.xGRM}',
                         f'{funcName}_chrX', print_call = False)
 
         all_filenames_partial_grms.loc[len(all_filenames_partial_grms), 'filename'] = self.xGRM
 
         for c in tqdm(autosome_list):
-            self.bashLog(f'{self.gtca} {self.thrflag} --bfile {self.genotypes_subset} --chr {c} --autosome-num 20\
+            self.bashLog(f'{self.gtca} {self.thrflag} --bfile {self.genotypes_subset} --chr {c} --autosome-num {nchr}\
                          --make-grm-bin --out {self.path}grm/{c}chrGRM',
                         f'{funcName}_chr{c}',  print_call = False)
 
@@ -702,7 +702,7 @@ class gwas_pipe:
             p.map_lower(sns.kdeplot, levels=4, color=".2")
             plt.savefig(f'{self.path}images/scattermatrix/prefix{i}.png')
             
-    def snpHeritability(self, print_call: bool = False, save: bool = True, **kwards):
+    def snpHeritability(self, nchr = 20, print_call: bool = False, save: bool = True, **kwards):
         '''
         The snpHeritability function is used to calculate the heritability of a set of traits in a dataset.
         
@@ -734,11 +734,11 @@ class gwas_pipe:
             self.df[['rfid', 'rfid', trait]].fillna('NA').astype(str).to_csv(trait_file,  index = False, sep = ' ', header = None)
             
             if self.failed_full_grm:
-                self.bashLog(f'{self.gtca} --reml {self.thrflag} --reml-no-constrain --autosome-num 20\
+                self.bashLog(f'{self.gtca} --reml {self.thrflag} --reml-no-constrain --autosome-num {nchr}\
                                            --pheno {trait_file} --mgrm {self.path}grm/listofchrgrms.txt --out {out_file}',
                             f'snpHeritability_{trait}', print_call = print_call) 
             else:
-                self.bashLog(f'{self.gtca} --reml {self.thrflag}  --autosome-num 20\
+                self.bashLog(f'{self.gtca} --reml {self.thrflag}  --autosome-num {nchr}\
                                            --pheno {trait_file} --grm {self.autoGRM} --out {out_file}',
                             f'snpHeritability_{trait}', print_call = print_call) #--autosome
             
@@ -811,7 +811,7 @@ class gwas_pipe:
         plt.savefig(f'{self.path}images/genetic_correlation_matrix.png', dpi = 400)
         return outmixed
         
-    def BLUP(self, print_call: bool = False, save: bool = True, frac: float = 1.,**kwards):
+    def BLUP(self, nchr = 20, print_call: bool = False, save: bool = True, frac: float = 1.,**kwards):
         '''
         Create a blup model to get SNP effects and breeding values.
         
@@ -834,14 +834,14 @@ class gwas_pipe:
             tempdf = self.df.sample(frac = frac) if frac < .999 else self.df.copy()
             tempdf[['rfid', 'rfid', trait]].fillna('NA').astype(str).to_csv(trait_file,  index = False, sep = ' ', header = None)
             tempdf[['rfid', 'rfid']].to_csv(trait_rfids, header = None, index = False, sep = ' ')
-            self.bashLog(f'{self.gtca} --grm {self.autoGRM} --autosome-num 20  --keep {trait_rfids} \
+            self.bashLog(f'{self.gtca} --grm {self.autoGRM} --autosome-num {nchr}  --keep {trait_rfids} \
                                         --make-grm  --out {out_file}_GRMsubset',
                         f'BLUP_{trait}_GRM', print_call = print_call)
             self.bashLog(f'{self.gtca} --reml {self.thrflag} \
                                        --pheno {trait_file} --grm {out_file}_GRMsubset --reml-pred-rand --out {out_file}_BV',
                         f'BLUP_{trait}_BV', print_call = print_call) #--autosome
             self.bashLog(f'{self.gtca} --bfile {self.genotypes_subset} {self.thrflag} --blup-snp {out_file}_BV.indi.blp \
-                           --autosome --autosome-num 20 --out {out_file}_snpscores',
+                           --autosome --autosome-num {nchr} --out {out_file}_snpscores',
                         f'BLUP_{trait}_snpscores', print_call = print_call) #--autosome
 
         BVtable = pd.concat([pd.read_csv(f'{self.path}results/BLUP/{trait}_BV.indi.blp',sep = '\t',  header = None)\
@@ -931,7 +931,7 @@ class gwas_pipe:
                 grm_flag = f'--grm {self.path}grm/AllchrGRM ' if subtract_grm else ''
                 loco_flag = '-loco' if loco else ''
                 self.bashLog(f"{self.gtca} {self.thrflag} {grm_flag} \
-                --autosome-num 20\
+                --autosome-num {nchr}\
                 --pheno {self.path}data/pheno/{trait}.txt \
                 --bfile {self.genotypes_subset} \
                 --mlma{loco_flag} \
@@ -941,7 +941,7 @@ class gwas_pipe:
                     print(f"couldn't run trait: {trait}")
                     self.GWAS(traitlist = traitlist, run_per_chr = True, print_call= print_call)
                     return 2
-            ranges = [21]
+            ranges = [{nchr}]
         else:
             print('running gwas per chr per trait...')
             ranges =  range(1,nchr+1)
@@ -951,7 +951,7 @@ class gwas_pipe:
             else: chromp2 = chrom
             self.bashLog(f'{self.gtca} {self.thrflag} --pheno {self.path}data/pheno/{trait}.txt --bfile {self.genotypes_subset} \
                                        --grm {self.path}grm/AllchrGRM \
-                                       --autosome-num 20\
+                                       --autosome-num {nchr}\
                                        --chr {chrom} \
                                        --mlma-subtract-grm {self.path}grm/{chromp2}chrGRM \
                                        --mlma \
