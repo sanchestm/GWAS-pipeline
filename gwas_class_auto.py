@@ -1273,13 +1273,13 @@ class gwas_pipe:
             os.system(f'chmod +x {lzpvalname}')
             os.system(f'chmod +x {lzr2name}')
             for filest in glob(f'{self.path}temp/{qtl_row.trait}*{qtl_row.SNP}'): os.system(f'rm -r {filest}')
-            os.system(f'''module load R && module load python && \
-                locuszoomfiles/bin/locuszoom \
+            os.system(f'''conda run -n lzenv && \
+                locuszoomfiles/bin/locuszoom \ 
                 --metal {lzpvalname} --ld {lzr2name} \
-                --refsnp {qtl_row.SNP} --chr {int(topsnpchr)} --start {int(range_interest["min"] - padding)} --end {int(range_interest["max"] + padding)} \
-                --db locuszoomfiles/databases/{genome_lz_path}.db \
+                --refsnp {qtl_row.SNP} --chr {int(topsnpchr)} --start {int(range_interest["min"] - padding)} --end {int(range_interest["max"] + padding)} --build manual \
+                --db /projects/ps-palmer/gwas/databases/databases_lz/{genome_lz_path}.db \
                 --plotonly showRecomb=FALSE showAnnot=FALSE --prefix {self.path}temp/{qtl_row.trait} signifLine="{threshold},{suggestive_threshold}" signifLineColor="red,blue" \
-                title = "{qtl_row.trait} SNP {qtl_row.SNP}" > /dev/null 2>&1 ''') #--build u01_peter_kalivas_v7 
+                title = "{qtl_row.trait} SNP {qtl_row.SNP}" > /dev/null 2>&1 ''') #--build u01_peter_kalivas_v7 module load R && module load python
             path = glob(f'{self.path}temp/{qtl_row.trait}*{qtl_row.SNP}/*.pdf'.replace(':', '_'))[0]
             for num,image in enumerate(convert_from_path(path)):
                 bn = basename(path).replace('.pdf', '.png')
@@ -1766,7 +1766,7 @@ class gwas_pipe:
         with open(f'{self.path}results/gwas_report.rmd', 'w') as f: f.write(report_txt)
         try:bash(f'rm -r {self.path}results/gwas_report_cache')
         except:pass
-        os.system(f'''conda run -n r-environment Rscript -e "rmarkdown::render('{self.path}results/gwas_report.rmd')" | grep -oP 'Output created: gwas_report.html' '''); #> /dev/null 2>&1
+        os.system(f'''conda run -n lzenv Rscript -e "rmarkdown::render('{self.path}results/gwas_report.rmd')" | grep -oP 'Output created: gwas_report.html' '''); #> /dev/null 2>&1 r-environment
         bash(f'''cp {self.path}results/gwas_report.html {self.path}results/gwas_report_{self.project_name}_round{round_version}_threshold{threshold}_n{self.df.shape[0]}_date{datetime.today().strftime('%Y-%m-%d')}.html''')
         #print('Output created: gwas_report.html') if 'Output created: gwas_report.html' in ''.join(repout) else print(''.join(repout))
         try:bash(f'rm -r {self.path}results/gwas_report_cache')
