@@ -1,0 +1,39 @@
+name: GWAS-pipeline
+channels:
+  - conda-forge
+  - defaults
+  - bioconda
+dependencies:
+  - pandas
+  - fastparquet
+  - seaborn
+  - umap-learn
+  - ipywidgets
+  - dask
+  - psycopg2
+  - scikit-learn
+  - openjdk
+  - ipykernel
+  - pyarrow
+  - plink
+  - snpeff
+  - gcta
+  - plotly
+  - biopython
+  - pdf2image
+  - poppler
+  - mygene
+  - pytables
+  - h5py
+  - pandas-plink
+  - hdbscan
+  - ydata-profiling
+  - arviz
+  - matplotlib-venn
+  - goatools
+  - prophet
+  - pip
+  - pip:
+    - goatools
+    - dash-bio==1.0.1
+    - kaleido

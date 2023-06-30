@@ -1,7 +1,8 @@
-name: r-environment
+name: lzenv
 channels:
   - defaults
 dependencies:
+  - python=2.7 
   - r-base
   - r-essentials
   - r-chron

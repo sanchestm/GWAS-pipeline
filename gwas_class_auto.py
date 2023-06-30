@@ -259,7 +259,7 @@ class gwas_pipe:
                  trait_descriptions: list = [],
                  chrList: list = ['x' if x == 21 else x for x in range(1,22)], 
                  all_genotypes: str = 'round10.vcf.gz',
-                 founder_genotypes: str = '/projects/ps-palmer/hs_rats/Ref_panel_mRatBN7.2/Ref_panel_mRatBN7_2_chr_GT', 
+                 founder_genotypes: str = 'founder_genotypes/Ref_panel_mRatBN7_2_chr_GT', 
                  gtca_path: str = '',
                  snpeff_path: str =  'snpEff/',
                  phewas_db: str = 'phewasdb.parquet.gz',
@@ -1250,6 +1250,10 @@ class gwas_pipe:
             
         causal_snps = pd.concat(causal_snps).to_csv(f'{self.path}results/qtls/possible_causal_snps.tsv', sep = '\t')
         
+        genome_lz_path = {'rn6': 'rn6', 
+                          'rn7':'rn7', 
+                          'cfw': 'm38',
+                          'm38': 'm38'}[annotate_genome]
 
         for num, (_, qtl_row) in tqdm(list(enumerate(qtltable.reset_index().iterrows()))):
             topsnpchr, topsnpbp = qtl_row.SNP.split(':')
@@ -1270,12 +1274,12 @@ class gwas_pipe:
             os.system(f'chmod +x {lzr2name}')
             for filest in glob(f'{self.path}temp/{qtl_row.trait}*{qtl_row.SNP}'): os.system(f'rm -r {filest}')
             os.system(f'''module load R && module load python && \
-                /projects/ps-palmer/software/local/src/locuszoom/bin/locuszoom \
+                locuszoomfiles/bin/locuszoom \
                 --metal {lzpvalname} --ld {lzr2name} \
-                --refsnp {qtl_row.SNP} --chr {int(topsnpchr)} --start {int(range_interest["min"] - padding)} --end {int(range_interest["max"] + padding)} --build u01_peter_kalivas_v7 \
-                --db /projects/ps-palmer/software/local/src/locuszoom/bin/u01_peter_kalivas_v7.db \
+                --refsnp {qtl_row.SNP} --chr {int(topsnpchr)} --start {int(range_interest["min"] - padding)} --end {int(range_interest["max"] + padding)} \
+                --db locuszoomfiles/databases/{genome_lz_path}.db \
                 --plotonly showRecomb=FALSE showAnnot=FALSE --prefix {self.path}temp/{qtl_row.trait} signifLine="{threshold},{suggestive_threshold}" signifLineColor="red,blue" \
-                title = "{qtl_row.trait} SNP {qtl_row.SNP}" > /dev/null 2>&1 ''')
+                title = "{qtl_row.trait} SNP {qtl_row.SNP}" > /dev/null 2>&1 ''') #--build u01_peter_kalivas_v7 
             path = glob(f'{self.path}temp/{qtl_row.trait}*{qtl_row.SNP}/*.pdf'.replace(':', '_'))[0]
             for num,image in enumerate(convert_from_path(path)):
                 bn = basename(path).replace('.pdf', '.png')
@@ -1443,6 +1447,7 @@ class gwas_pipe:
         '''
         print(f'starting eqtl ... {self.project_name}') 
         #d =  {'rn6': '', 'rn7': '.rn7.2'}[genome]
+        mygene_species = {'rn6': 'rat', 'rn7': 'rat', 'm38': 'mouse', 'cfw': 'mouse'}[genome]
         if qtltable.shape == (0,0): qtltable = pd.read_csv(self.annotatedtablepath).set_index('SNP')
         out = []
         for tissue in tqdm(tissue_list,  position=0, desc="tissue", leave=True):
@@ -1472,7 +1477,7 @@ class gwas_pipe:
         eqtl_info = pd.read_csv(self.eqtl_path).rename({'p':'-log10(P-value)'}, axis = 1)
         eqtl_info['-log10(pval_nominal)'] = -np.log10(eqtl_info['pval_nominal'])
         gene_conv_table = pd.DataFrame([(x['query'], defaultdict(lambda: '', x)['symbol']) for x \
-                                in  mg.querymany(eqtl_info.gene_id , scopes='ensembl.gene', fields='symbol', species='rat')],
+                                in  mg.querymany(eqtl_info.gene_id , scopes='ensembl.gene', fields='symbol', species=mygene_species)],
                               columns = ['gene_id','Ensembl_gene'])
         gene_conv_table= gene_conv_table.groupby('gene_id').agg(lambda df: ' | '.join(df.drop_duplicates())).reset_index()
         eqtl_info = eqtl_info.merge(gene_conv_table, how = 'left', on = 'gene_id')
@@ -1574,7 +1579,7 @@ class gwas_pipe:
         sqtl_info = pd.read_csv(self.sqtl_path).rename({'p':'-log10(P-value)'}, axis = 1)
         sqtl_info['-log10(pval_nominal)'] = -np.log10(sqtl_info['pval_nominal'])
         gene_conv_table = pd.DataFrame([(x['query'], defaultdict(lambda: '', x)['symbol']) for x \
-                                in  mg.querymany(sqtl_info.gene_id , scopes='ensembl.gene', fields='symbol', species='rat')],
+                                in  mg.querymany(sqtl_info.gene_id , scopes='ensembl.gene', fields='symbol', species=mygene_species)],
                               columns = ['gene_id','Ensembl_gene'])
         gene_conv_table= gene_conv_table.groupby('gene_id').agg(lambda df: ' | '.join(df.drop_duplicates())).reset_index()
         sqtl_info = sqtl_info.merge(gene_conv_table, how = 'left', on = 'gene_id')
@@ -1710,10 +1715,11 @@ class gwas_pipe:
         The function returns the final annotated table.
         '''
         if qtltable.shape == (0,0): qtltable = pd.read_csv(self.allqtlspath).set_index('SNP')
-        d = {'rn6': 'Rnor_6.0.99', 'rn7':'mRatBN7.2.105', 'cfw': 'GRCm39.105'}[genome]
-        #bash('java -jar /projects/ps-palmer/tsanches/gwaspipeline/gwas/snpEff/snpEff.jar download -v Rnor_6.0.99')
-        #bash('java -jar /projects/ps-palmer/tsanches/gwaspipeline/gwas/snpEff/snpEff.jar download -v mRatBN7.2.105')
-        #bash('java -jar /projects/ps-palmer/tsanches/gwaspipeline/gwas/snpEff/snpEff.jar download -v GRCm39.105')  
+        d = {'rn6': 'Rnor_6.0.99', 'rn7':'mRatBN7.2.105', 'cfw': 'GRCm38.99','m38': 'GRCm38.99'}[genome]
+        #bash('java -jar snpEff/snpEff.jar download -v Rnor_6.0.99')
+        #bash('java -jar snpEff/snpEff.jar download -v mRatBN7.2.105')
+        #bash('java -jar snpEff/snpEff.jar download -v GRCm39.105') 
+        #bash('java -jar snpEff/snpEff.jar download -v GRCm38.99') 
         
         temp  = qtltable.reset_index()\
                         .loc[:,[ 'Chr', 'bp', snpcol, 'A1', 'A2']]\
@@ -1788,7 +1794,7 @@ class gwas_pipe:
         os.makedirs(f'{destination}', exist_ok = True)
         bash(f'cp -r {self.path} {destination}')
         if make_public:
-            bash('../../mc anonymous set public myminio/tsanches_dash_genotypes --recursive')
+            bash('/projects/ps-palmer/tsanches/mc anonymous set public myminio/tsanches_dash_genotypes --recursive')
 
 
     def print_watermark(self):

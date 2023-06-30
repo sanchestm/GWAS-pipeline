@@ -36,7 +36,7 @@ gwas = gwas_pipe(path = f'{pj}/',
              all_genotypes = dictionary['genotypes'], #'round9_1.vcf.gz',
              data = df,
              project_name = pj,
-             traits = traits_ ,
+             traits = traits_,
              snpeff_path= dictionary['snpeff_path'],
              phewas_db = dictionary['phewas_path'],
              trait_descriptions= traits_d,
@@ -62,7 +62,7 @@ if dictionary['phewas']!= 'dont':gwas.phewas(pd.read_csv(f'{gwas.path}results/qt
 if dictionary['eqtl']!= 'dont':gwas.eQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), annotate= True)
 if dictionary['sqtl']!= 'dont':gwas.sQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'))
 if dictionary['report']!= 'dont':gwas.report(round_version=dictionary['round'])
-if dictionary['store']!= 'dont':gwas.store(researcher=dictionary['researcher'],round_version=dictionary['round'] , gwas_version=dictionary['gwas_version'],  remove_folders=False)
+if dictionary['store']!= 'dont':gwas.store(researcher=dictionary['researcher'],round_version=dictionary['round'], gwas_version=dictionary['gwas_version'],  remove_folders=False)
 try: 
     if dictionary['publish']!= 'dont':gwas.copy_results()
 except: 

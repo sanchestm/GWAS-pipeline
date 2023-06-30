@@ -1,0 +1,18 @@
+name: lzenv
+channels:
+  - defaults
+dependencies:
+  - python=2.7 
+  - r-base
+  - r-essentials
+  - r-chron
+  - r-vctrs
+  - r-kableextra
+  - r-rjsonio
+  - r-dt
+  - r-htmltools
+  - r-httr
+  - r-openxlsx
+  - r-rmarkdown
+  - r-plyr
+  - r-readxl
