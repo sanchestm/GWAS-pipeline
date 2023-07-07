@@ -253,8 +253,8 @@ class gwas_pipe:
     def __init__(self, 
                  path: str = f'{Path().absolute()}/', 
                  project_name: str = 'test',
-                 raw: pd.DataFrame() = pd.DataFrame(),
-                 regressed: pd.DataFrame() = pd.DataFrame(), 
+                 data: pd.DataFrame() = pd.DataFrame(),
+                 #regressed: pd.DataFrame() = pd.DataFrame(), 
                  traits: list = [],
                  trait_descriptions: list = [],
                  chrList: list = ['x' if x == 21 else x for x in range(1,22)], 
@@ -272,31 +272,31 @@ class gwas_pipe:
         self.all_genotypes = all_genotypes
         self.founder_genotypes = founder_genotypes
         self.snpeff_path = snpeff_path
-        self.df = regressed
+        #self.df = regressed
         
         if os.path.exists(f'{self.path}temp'): bash(f'rm -r {self.path}temp')
         
-        if type(raw) == str: df = pd.read_csv(raw, dtype={'rfid': str})
-        else: df = raw
+        if type(data) == str: df = pd.read_csv(data, dtype={'rfid': str})
+        else: df = data
         df.columns = df.columns.str.lower()
         if 'vcf' in self.all_genotypes:
             sample_list_inside_genotypes = vcf_manipulation.get_vcf_header(self.all_genotypes)
         else:
             sample_list_inside_genotypes = pd.read_csv(self.all_genotypes+'.fam', header = None, sep='\s+', dtype = str)[0].to_list()
         df = df.sort_values('rfid').reset_index(drop = True).dropna(subset = 'rfid').drop_duplicates(subset = ['rfid'])
-        self.raw = df[df.astype(str).rfid.isin(sample_list_inside_genotypes)].copy()
+        self.df = df[df.astype(str).rfid.isin(sample_list_inside_genotypes)].copy()
         
-        if self.raw.shape[0] != df.shape[0]:
-            missing = set(df.rfid.astype(str).unique()) - set(self.raw.rfid.astype(str).unique())
+        if self.df.shape[0] != df.shape[0]:
+            missing = set(df.rfid.astype(str).unique()) - set(self.df.rfid.astype(str).unique())
             print(f"missing {len(missing)} rfids for project {project_name}")
             
         
         self.traits = [x.lower() for x in traits]
-        print(self.raw[self.traits].count())
+        print(self.df[self.traits].count())
         self.make_dir_structure()
         for trait in self.traits:
             trait_file = f'{self.path}data/pheno/{trait}.txt'            
-            self.raw[['rfid', 'rfid', trait]].fillna('NA').astype(str).to_csv(trait_file, index = False, sep = ' ', header = None)
+            self.df[['rfid', 'rfid', trait]].fillna('NA').astype(str).to_csv(trait_file, index = False, sep = ' ', header = None)
             
         self.get_trait_descriptions = defaultdict(lambda: 'UNK', {k:v for k,v in zip(traits, trait_descriptions)})
         
@@ -324,7 +324,7 @@ class gwas_pipe:
     def regressout(self, data_dictionary: pd.DataFrame(), covariates_threshold: float = 0.02, verbose = False):
         import statsReport
         if type(data_dictionary) == str: data_dictionary = pd.read_csv(data_dictionary)
-        df, datadic = self.raw.copy(), data_dictionary
+        df, datadic = self.df.copy(), data_dictionary
         datadic = datadic[datadic.measure.isin(df.columns)].drop_duplicates(subset = ['measure'])
         def getcols(df, string): return df.columns[df.columns.str.contains(string)].to_list()
         dfohe = df.copy()
@@ -434,7 +434,7 @@ class gwas_pipe:
         if writing a flag that doesn't require a variable e.g.
         --make-grm use make_grm = ''
         '''
-        
+        outfile = 'out.out'
         call = f'{self.gcta} ' + ' '.join([f'--{k.replace("_", "-")} {v}'
                                     for k,v in kwargs.items()])
         bash(call + f' --out {outfile}', print_call=False)
@@ -691,7 +691,7 @@ class gwas_pipe:
     def scattermatrix(self, traitlist: list = []):
         if not traitlist: traitlist = self.traits
         for i in np.unique([x.replace('regressedlr_', '').split('_')[0] for x in traitlist] ):
-            p = sns.PairGrid(df, vars=[x.replace('regressedlr_', '') for x in traitlist if i in x], hue="sex")
+            p = sns.PairGrid(self.df, vars=[x.replace('regressedlr_', '') for x in traitlist if i in x], hue="sex")
             p.map_diag(sns.distplot, hist=True) #kde=True, hist_kws={'alpha':0.5})
             p.map_upper(sns.scatterplot)
             p.map_lower(sns.kdeplot, levels=4, color=".2")
@@ -1081,7 +1081,7 @@ class gwas_pipe:
                     filename = f'{self.path}results/gwas/{t}.loco.mlma'
                     if os.path.exists(filename):
                         topSNPs = pd.concat([topSNPs, pd.read_csv(filename, sep = '\t').query(f'p < {thresh}').assign(trait=t)])
-                    else: pass #print(f'could not locate {filename}')
+                    else: print(f'could not locate {filename}')
                     
 
         else:
@@ -1098,7 +1098,7 @@ class gwas_pipe:
             while df.query('p > @threshold').shape[0]:
                 idx = df.p.idxmax()
                 maxp = df.loc[idx]
-                correlated_snps = df.loc[idx- window//2: idx + window//2].query('p > @maxp.p - @subterm')
+                correlated_snps = df.loc[int(idx- window//2): int(idx + window//2)].query('p > @maxp.p - @subterm')
                 qtl = True if correlated_snps.shape[0] > 2 else False
 
                 ldfilename = f'{self.path}temp/r2/temp_qtl_n_{t}'
@@ -1635,9 +1635,10 @@ class gwas_pipe:
             
     
     def porcupineplot(self, qtltable: pd.DataFrame(), traitlist: list = [], threshold: float = 5.3591, run_only_qtls = True,
-                      suggestive_threshold: float = 5.58, save_fmt: list = ['html', 'png'], display: bool = True):
+                      suggestive_threshold: float = 5.58, save_fmt: list = ['html', 'png'], display: bool = True, low_mem = False):
 
         print(f'starting porcupineplot ... {self.project_name} reading files')
+        samplen = int(1e5/30) if low_mem else int(1e5) 
         if len(traitlist) == 0: 
             if run_only_qtls: traitlist = list(qtltable.trait.unique())
             else: traitlist = self.traits

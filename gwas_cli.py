@@ -3,15 +3,18 @@ from gwas_class_auto import *
 import sys
 import pandas as pd
 
-dictionary = {k.replace('-', ''):v for k,v in [(x + '=1' if '=' not in x else x).split('=') for x in sys.argv[1:]] }
-dictionary = defaultdict(lambda: 'dont', dictionary)
+dictionary = defaultdict(lambda: 'dont', {k.replace('-', ''):v for k,v in [(x + '=1' if '=' not in x else x).split('=') for x in sys.argv[1:]] })
+    
 pj = dictionary['project']
 if dictionary['genotypes'] == 'dont' :
     dictionary['genotypes'] = '/projects/ps-palmer/tsanches/gwaspipeline/gwas/zzplink_genotypes/round10'
 
+if dictionary['genome'] == 'dont' : dictionary['genome'] = 'rn7'
+    
 if dictionary['researcher'] == 'dont': dictionary['researcher'] = 'tsanches'
     
 if dictionary['round'] == 'dont': dictionary['round'] = '10.0.0'
+
 if dictionary['gwas_version'] == 'dont': dictionary['gwas_version'] = '0.1.2'
     
 if dictionary['snpeff_path'] == 'dont': dictionary['snpeff_path'] = 'snpEff/'
@@ -35,7 +38,7 @@ else:
 gwas = gwas_pipe(path = f'{pj}/',
              all_genotypes = dictionary['genotypes'], #'round9_1.vcf.gz',
              data = df,
-             project_name = pj,
+             project_name = pj.split('/')[-1],
              traits = traits_,
              snpeff_path= dictionary['snpeff_path'],
              phewas_db = dictionary['phewas_path'],
@@ -52,15 +55,15 @@ if dictionary['gwas']!= 'dont': gwas.GWAS()
 if dictionary['db']!= 'dont': gwas.addGWASresultsToDb(researcher=dictionary['researcher'], round_version=dictionary['round'], gwas_version=dictionary['gwas_version'])
 if dictionary['qtl']!= 'dont': 
     qtls = gwas.callQTLs( NonStrictSearchDir=False)
-    gwas.annotate(qtls)
-if dictionary['locuszoom'] != 'dont': gwas.locuszoom(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv')) 
+    gwas.annotate(qtls, genome = dictionary['genome'] )
+if dictionary['locuszoom'] != 'dont': gwas.locuszoom(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv'), annotate_genome = dictionary['genome']) 
 if dictionary['effect'] != 'dont': gwas.effectsize(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv')) 
 if dictionary['gcorr'] != 'dont': gwas.genetic_correlation_matrix()
 if dictionary['manhattanplot'] != 'dont': gwas.manhattanplot(display = False)
 if dictionary['porcupineplot'] != 'dont': gwas.porcupineplot(pd.read_csv(f'{gwas.path}/results/qtls/finalqtl.csv'), display = False)
-if dictionary['phewas']!= 'dont':gwas.phewas(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), annotate=True, pval_threshold = 1e-4, nreturn = 1, r2_threshold = .4) 
-if dictionary['eqtl']!= 'dont':gwas.eQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), annotate= True)
-if dictionary['sqtl']!= 'dont':gwas.sQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'))
+if dictionary['phewas']!= 'dont':gwas.phewas(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), annotate=True, pval_threshold = 1e-4, nreturn = 1, r2_threshold = .4, annotate_genome = dictionary['genome']) 
+if dictionary['eqtl']!= 'dont':gwas.eQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), annotate= True, genome = dictionary['genome'])
+if dictionary['sqtl']!= 'dont':gwas.sQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), genome = dictionary['genome'])
 if dictionary['report']!= 'dont':gwas.report(round_version=dictionary['round'])
 if dictionary['store']!= 'dont':gwas.store(researcher=dictionary['researcher'],round_version=dictionary['round'], gwas_version=dictionary['gwas_version'],  remove_folders=False)
 try: 
