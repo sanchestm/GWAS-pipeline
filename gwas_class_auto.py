@@ -1639,6 +1639,7 @@ class gwas_pipe:
 
         print(f'starting porcupineplot ... {self.project_name} reading files')
         samplen = int(1e5/30) if low_mem else int(1e5) 
+        rangen = range(160,180) if low_mem else range(80,90)
         if len(traitlist) == 0: 
             if run_only_qtls: traitlist = list(qtltable.trait.unique())
             else: traitlist = self.traits
@@ -1651,7 +1652,7 @@ class gwas_pipe:
                 try: 
                     g = pd.read_csv(f'{self.path}results/gwas/{opt}', sep = '\t', dtype = {'Chr': int, 'bp': int}).assign(trait = t)
                     g['inv_prob'] = 1/np.clip(g.p, 1e-6, 1)
-                    g = pd.concat([g.query('p < 0.001'), g.query('p > 0.001').sample(int(1e5), weights='inv_prob'),
+                    g = pd.concat([g.query('p < 0.001'), g.query('p > 0.001').sample(samplen, weights='inv_prob'),
                                    g[::np.random.choice(range(80,90))]] ).sort_values(['Chr', 'bp']).reset_index(drop = True).dropna()
                     df_gwas += [g]
                 except: pass
