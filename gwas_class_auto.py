@@ -1653,7 +1653,7 @@ class gwas_pipe:
                     g = pd.read_csv(f'{self.path}results/gwas/{opt}', sep = '\t', dtype = {'Chr': int, 'bp': int}).assign(trait = t)
                     g['inv_prob'] = 1/np.clip(g.p, 1e-6, 1)
                     g = pd.concat([g.query('p < 0.001'), g.query('p > 0.001').sample(samplen, weights='inv_prob'),
-                                   g[::np.random.choice(range(80,90))]] ).sort_values(['Chr', 'bp']).reset_index(drop = True).dropna()
+                                   g[::np.random.choice(rangen)]] ).sort_values(['Chr', 'bp']).reset_index(drop = True).dropna()
                     df_gwas += [g]
                 except: pass
         df_gwas = pd.concat(df_gwas).sort_values(['Chr', 'bp']).reset_index(drop = True)
