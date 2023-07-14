@@ -1280,14 +1280,6 @@ class gwas_pipe:
             dffounder = pd.read_csv(self.founder_genotypes, sep = '\t')
             dffounder['SNP'] = dffounder['chr'].astype('str')+ ':'+dffounder.pos.astype('str')
             out = out.merge(dffounder.drop(['chr', 'pos'], axis = 1), on = 'SNP', how = 'left')
-            #usnps = out.SNP.unique()
-            #aa = ','.join(usnps)
-            #try: self.bashLog(f'plink --bfile {self.founder_genotypes} --snps {aa} --recode --alleleACGT --out {self.path}temp/founderinfo', 'founderinfo', print_call=False)
-            #snporder = list(pd.read_csv(f'{self.path}temp/stripplot.map', sep = '\s+', header = None)[1])
-            #temp = pd.read_csv(f'{self.path}temp/stripplot.ped', sep = '\s+', index_col = [0,1,2,3,4,5], header = None)
-            #temp = temp.iloc[:, 1::2].set_axis(snporder, axis = 1) + temp.iloc[:, 0::2].set_axis(snporder, 1)
-            #temp = temp.reset_index().drop([1,2,3,4,5], axis = 1).rename({0:'founders'},axis = 1).set_index('founders').T.rename_axis('SNP').reset_index()
-            #out = out.merge(temp, on = 'SNP', how = 'left')
             
         out['significance_level'] = out.p.apply(lambda x: '5%' if x > suggestive_threshold else '10%')
         
