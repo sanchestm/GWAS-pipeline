@@ -62,6 +62,7 @@ from prophet.plot import plot_plotly, plot_components_plotly
 from prophet.utilities import regressor_coefficients 
 import plotly.express as px
 from statsReport import quantileTrasformEdited as quantiletrasform
+import statsReport
 import pandas_plink
 import dask.array as da
 #conda create --name gpipe -c conda-forge openjdk=17 ipykernel pandas seaborn scikit-learn umap-learn psycopg2 dask
@@ -237,18 +238,18 @@ def regressout_timeseries(dataframe = '', data_dictionary = '', covariates_thres
     ddtraits = dd[dd.trait_covariate == 'trait']
     if ds_column not in dataframe.columns:
         dataframe[ds_column] = 0
-    if save_explained_vars: pd.DataFrame().to_csv('melted_explained_variances.csv', index = False)
+    if save_explained_vars: pd.DataFrame().to_csv(f'{path}melted_explained_variances.csv', index = False)
     ddtraits.covariates = ddtraits.covariates.str.replace('|'.join(groupby_columns), '').str.replace(',+', ',').str.strip(',')
     get_covs = lambda tipe, cov:  dd[(dd.trait_covariate == tipe) 
                                 & (dd.measure.isin(cov.split(',')))
-                                & (dd.measure.isin(df.columns))
+                                & (dd.measure.isin(dataframe.columns))
                                 & (~dd.measure.isin(groupby_columns))].measure.to_list()
     
     datadic_regress_df = lambda X, label: pd.concat(ddtraits.apply(lambda row: _prophet_reg(X, row.measure,
                                         categorical_regressors = get_covs('covariate_categorical', row.covariates),
                                         regressors = get_covs('covariate_continuous', row.covariates),
                                         threshold=covariates_threshold, ds_column = ds_column,
-                                        save_explained_vars = save_explained_vars,
+                                        save_explained_vars = save_explained_vars, path = path,
                                         extra_label = label), axis = 1,
                                         ).to_list(), axis = 1)
     
@@ -257,7 +258,7 @@ def regressout_timeseries(dataframe = '', data_dictionary = '', covariates_thres
                           datadic_regress_df(dataframe, '')], axis = 1)
     
     else: outdf = pd.concat([dataframe.loc[:, ~dataframe.columns.str.contains('regressedlr_')].set_index('rfid').drop(groupby_columns, axis = 1),
-                      dataframe.groupby(groupby_columns).apply(lambda df: datadic_regress_df(df, df.name)).reset_index().set_index('rfid')], axis = 1)
+                      dataframe.groupby(groupby_columns).apply(lambda df: datadic_regress_df(df, df.name)).reset_index().set_index('rfid')], axis = 1)#drop = True
     
     if save_explained_vars:
         piv = pd.DataFrame(pd.read_csv(f'{path}melted_explained_variances.csv').groupby('variable')['group'].apply(list)).reset_index()
@@ -412,7 +413,7 @@ class gwas_pipe:
         if 'vcf' in self.all_genotypes:
             sample_list_inside_genotypes = vcf_manipulation.get_vcf_header(self.all_genotypes)
         else:
-            sample_list_inside_genotypes = pd.read_csv(self.all_genotypes+'.fam', header = None, sep='\s+', dtype = str)[0].to_list()
+            sample_list_inside_genotypes = pd.read_csv(self.all_genotypes+'.fam', header = None, sep='\s+', dtype = str)[1].to_list()
         df = df.sort_values('rfid').reset_index(drop = True).dropna(subset = 'rfid').drop_duplicates(subset = ['rfid'])
         self.df = df[df.astype(str).rfid.isin(sample_list_inside_genotypes)].copy()
         
@@ -452,7 +453,6 @@ class gwas_pipe:
         self.heritability_path = f'{self.path}results/heritability/heritability.tsv'
         
     def regressout(self, data_dictionary: pd.DataFrame(), covariates_threshold: float = 0.02, verbose = False):
-        import statsReport
         if type(data_dictionary) == str: data_dictionary = pd.read_csv(data_dictionary)
         df, datadic = self.df.copy(), data_dictionary
         datadic = datadic[datadic.measure.isin(df.columns)].drop_duplicates(subset = ['measure'])
@@ -522,11 +522,29 @@ class gwas_pipe:
                               verbose = False, groupby_columns = ['sex'], ds_column = 'age', save = True):
         if type(data_dictionary) == str: data_dictionary = pd.read_csv(data_dictionary)
         df, datadic = self.df.copy(), data_dictionary
+        display(df.count())
+        #display(datadic.count())
         datadic = datadic[datadic.measure.isin(df.columns)].drop_duplicates(subset = ['measure'])
-        return regressout_timeseries(df, datadic, covariates_threshold = covariates_threshold,
+        self.df = regressout_timeseries(df, datadic, covariates_threshold = covariates_threshold,
                                      groupby_columns = groupby_columns, ds_column = ds_column,
                                     save_explained_vars = save, path = self.path)
         
+        self.df.columns = self.df.columns.str.lower()
+        self.df = self.df.loc[:,~self.df.columns.duplicated()]
+        strcomplete = statsReport.stat_check(self.df.reset_index(drop = True))
+        self.df.to_csv(f'{self.path}processed_data_ready.csv')
+        strcomplete.make_report(f'{self.path}data_distributions.html')
+        self.traits = [x.lower() for x in self.df.columns[self.df.columns.str.contains('regressedlr_')]]
+        simplified_traits = [x.replace('regressedlr_', '') for x in self.traits]
+        display(self.df[self.traits].count())
+        self.df = self.df.reset_index()
+        for trait in self.traits:
+            self.df[['rfid', 'rfid', trait]].fillna('NA').astype(str).to_csv(f'{self.path}data/pheno/{trait}.txt' ,  index = False, sep = ' ', header = None)
+            
+        trait_descriptions = [datadic.set_index('measure').loc[x, 'description'] if (x in datadic.measure.values) else 'UNK' for x in simplified_traits]
+        self.get_trait_descriptions = defaultdict(lambda: 'UNK', {k:v for k,v in zip(self.traits, trait_descriptions)})
+        
+        return self.df.copy()
         
     def plink2Df(self, call, temp_out_filename = 'temp/temp', dtype = 'ld'):
         '''
@@ -632,7 +650,7 @@ class gwas_pipe:
         if sourceFormat == 'vcf':
             sample_list_inside_genotypes = vcf_manipulation.get_vcf_header(self.all_genotypes)
         elif sourceFormat in ['bfile', 'plink']:
-            sample_list_inside_genotypes = pd.read_csv(self.all_genotypes+'.fam', header = None, sep='\s+', dtype = str)[0].to_list()
+            sample_list_inside_genotypes = pd.read_csv(self.all_genotypes+'.fam', header = None, sep='\s+', dtype = str)[1].to_list()
         
         dff = self.df[self.df.astype(str).rfid.isin(sample_list_inside_genotypes)].copy()
         dff.rfid = dff.rfid.astype(str)
