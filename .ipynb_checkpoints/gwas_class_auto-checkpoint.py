@@ -57,14 +57,20 @@ from IPython.display import display
 mg = mygene.MyGeneInfo()
 #import sleep
 warnings.filterwarnings('ignore')
+import prophet
+from prophet.plot import plot_plotly, plot_components_plotly
+from prophet.utilities import regressor_coefficients 
+import plotly.express as px
+from statsReport import quantileTrasformEdited as quantiletrasform
+import pandas_plink
+import dask.array as da
 #conda create --name gpipe -c conda-forge openjdk=17 ipykernel pandas seaborn scikit-learn umap-learn psycopg2 dask
 #conda activate gpipe
 #conda install -c bioconda gcta plink snpeff mygene
 #pip install goatools
 #wget https://snpeff.blob.core.windows.net/versions/snpEff_latest_core.zip
 
-import pandas_plink
-import dask.array as da
+
 
 class vcf_manipulation:
     def corrfunc(x, y, ax=None, **kws):
@@ -137,6 +143,130 @@ def qsub(call: str, queue = 'condo', walltime = 8, ppn = 12, out = 'log/', err =
 
 def vcf2plink(vcf = 'round9_1.vcf.gz', nchr = 20, out_path = 'zzplink_genotypes/allgenotypes_r9.1'):
     bash(f'plink --thread-num 16 --vcf {vcf} --chr-set {nchr} no-xy --set-missing-var-ids @:# --make-bed --out {out_path}')
+    
+def _prophet_reg(dforiginal = "",y_column = 'y', 
+                 categorical_regressors=[], regressors = [], 
+                 ds_column= 'age', rolling_avg_days: float = 0, seasonality: list = [],
+                 growth = 'logistic', removed_months = [], removed_weekday =[], removed_hours =[], index_col = 'rfid',
+                 return_full_df = False, save_explained_vars = False, threshold = 0.00, path = '', extra_label = ''):
+    
+    df = dforiginal.copy().set_index(index_col)
+    
+    if df[ds_column].dtype in [int, float]:
+        df[ds_column] =(df[ds_column]*1e9*24*3600).apply(pd.to_datetime)
+    elif df[ds_column].dtype in [int, float]: pass
+    else: raise TypeError('datime_column not int, float or pandas datetime')
+    df = df.sort_values(ds_column)
+    
+    #### rolling average if requested
+    if rolling_avg_days > 0.1:
+        df = df.set_index(ds_column)
+        df = df.rolling(window= str(int(rolling_avg_days *24))+'H').mean().reset_index()
+    df = df[[ds_column, y_column]+ regressors + categorical_regressors].dropna() ### added dropna()
+    df.columns = ['ds', 'y']+ regressors + categorical_regressors
+    
+    ### onehot_encoding
+    ohe = OneHotEncoder()
+    oheencoded = ohe.fit_transform(df[categorical_regressors].astype(str)).todense()
+    df[[f'OHE_{x}'for x in ohe.get_feature_names_out(categorical_regressors)]] = oheencoded
+    
+    ### prophet seasonality
+    season_true_kwards = {x: 25 for x in seasonality} 
+    season_false_kwards = {x: False for x in ['yearly_seasonality', 'weekly_seasonality', 'daily_seasonality'] if x not in seasonality}
+    
+    ###setting prophet growth strategy
+    cap = df.y.max() + df.y.std()*.1
+    floor = 0
+    if growth == 'logistic':
+        df['cap'] = cap
+        df['floor'] = floor
+     
+    #remove months, weekdays, hours
+    df = df[~(df['ds'].dt.month.isin(removed_months))]
+    df = df[~(df['ds'].dt.weekday.isin(removed_weekday))]
+    df = df.query('ds.dt.hour not in @removed_hours')  
+    
+    ### explained_var_threshold
+    covs = df.columns[df.columns.str.contains('OHE')].to_list() + [x for x in regressors if x!= ds_column]
+    temp = (df[['y']+covs].corr()**2).loc[['y'], covs].rename({'y': y_column})
+    approved_cols = temp[temp > threshold].dropna(axis = 1).columns.to_list()
+    if save_explained_vars:
+        try: prev = pd.read_csv(f'{path}melted_explained_variances.csv')
+        except: prev = pd.DataFrame()
+        temp2 = temp.melt().assign(group = temp.index[0])[['group','variable','value']].set_axis(['variable', 'group', 'value'], axis = 1)
+        if extra_label: temp2.variable = temp2.variable +'_'+extra_label 
+        pd.concat([prev,temp2]).to_csv(f'{path}melted_explained_variances.csv', index = False)
+    
+    #### fit model 
+    fbmodel = prophet.Prophet(growth = growth,seasonality_mode ='additive', seasonality_prior_scale =10.,
+              n_changepoints= 25, changepoint_prior_scale=10 , changepoint_range = .8,
+              **season_true_kwards, **season_false_kwards) #mcmc_samples=100
+    for i in approved_cols: fbmodel.add_regressor(i)
+    fbmodel.fit(df)
+    future = pd.DataFrame()
+    forecast = fbmodel.predict(pd.concat([df, future], axis = 0).reset_index()).set_index(df.index)
+    
+    #### make preprocessing plots
+    graphlist = []
+    graphlist += [plot_plotly(fbmodel,forecast, figsize = (1240, 960),  xlabel=ds_column, ylabel=y_column)]
+    graphlist += [plot_components_plotly(fbmodel,forecast, figsize = (1240, 340))]
+    if len(approved_cols):
+        regressor_coefs = regressor_coefficients(fbmodel)
+        regressor_coefs['coef_abs'] = regressor_coefs.coef.apply(abs)
+        regressor_coefs = regressor_coefs.sort_values('coef_abs', ascending=False)
+        graphlist += [px.bar(regressor_coefs, x="regressor", y="coef", hover_data=regressor_coefs.columns, template='plotly',height=800, width=1240)]
+        
+    def stack_graphs(g):
+        a = '<html>\n<head><meta charset="utf-8" /></head>\n<body>'
+        b = '\n'.join([y[y.find('<body>')+len('<body>'): y.find('</body>')] for x in g if (y:= x.to_html())])
+        c = '\n</body>\n</html>'
+        return a+b+c
+    
+    os.makedirs(f'{path}results/preprocessing/', exist_ok=True)
+    with open(f'{path}results/preprocessing/test_{y_column}{extra_label}.html', 'w') as f: 
+        f.write(stack_graphs(graphlist))
+    
+    outdf = pd.concat([dforiginal.set_index('rfid'), forecast[['yhat']]], axis =1)    
+    outdf[f'regressedlr_{y_column}'] = outdf[y_column] - outdf['yhat']
+    if return_full_df: return outdf
+    return outdf[[f'regressedlr_{y_column}']]
+
+def regressout_timeseries(dataframe = '', data_dictionary = '', covariates_threshold = 0.02, groupby_columns = ['sex'],  
+                          ds_column= 'age', save_explained_vars = True, path = ''):
+    dd = data_dictionary.copy()
+    ddtraits = dd[dd.trait_covariate == 'trait']
+    if ds_column not in dataframe.columns:
+        dataframe[ds_column] = 0
+    if save_explained_vars: pd.DataFrame().to_csv('melted_explained_variances.csv', index = False)
+    ddtraits.covariates = ddtraits.covariates.str.replace('|'.join(groupby_columns), '').str.replace(',+', ',').str.strip(',')
+    get_covs = lambda tipe, cov:  dd[(dd.trait_covariate == tipe) 
+                                & (dd.measure.isin(cov.split(',')))
+                                & (dd.measure.isin(df.columns))
+                                & (~dd.measure.isin(groupby_columns))].measure.to_list()
+    
+    datadic_regress_df = lambda X, label: pd.concat(ddtraits.apply(lambda row: _prophet_reg(X, row.measure,
+                                        categorical_regressors = get_covs('covariate_categorical', row.covariates),
+                                        regressors = get_covs('covariate_continuous', row.covariates),
+                                        threshold=covariates_threshold, ds_column = ds_column,
+                                        save_explained_vars = save_explained_vars,
+                                        extra_label = label), axis = 1,
+                                        ).to_list(), axis = 1)
+    
+    if not len(groupby_columns):
+        outdf =  pd.concat([dataframe.loc[:, ~dataframe.columns.str.contains('regressedlr_')].set_index('rfid'),
+                          datadic_regress_df(dataframe, '')], axis = 1)
+    
+    else: outdf = pd.concat([dataframe.loc[:, ~dataframe.columns.str.contains('regressedlr_')].set_index('rfid').drop(groupby_columns, axis = 1),
+                      dataframe.groupby(groupby_columns).apply(lambda df: datadic_regress_df(df, df.name)).reset_index().set_index('rfid')], axis = 1)
+    
+    if save_explained_vars:
+        piv = pd.DataFrame(pd.read_csv(f'{path}melted_explained_variances.csv').groupby('variable')['group'].apply(list)).reset_index()
+        piv.to_csv(f'{path}pivot_explained_variances.csv', index = False)
+    
+    outdf['regressedlr_'+ddtraits.measure] = quantiletrasform(outdf,'regressedlr_'+ ddtraits.measure)
+    if save_explained_vars: outdf.to_csv(f'{path}processed_data_ready.csv', index = False)
+    return outdf
+    
     
 class gwas_pipe:
     '''
@@ -387,6 +517,15 @@ class gwas_pipe:
         self.get_trait_descriptions = defaultdict(lambda: 'UNK', {k:v for k,v in zip(self.traits, trait_descriptions)})
         
         return dfcomplete
+    
+    def regressout_timeseries(self, data_dictionary: pd.DataFrame(), covariates_threshold: float = 0.02,
+                              verbose = False, groupby_columns = ['sex'], ds_column = 'age', save = True):
+        if type(data_dictionary) == str: data_dictionary = pd.read_csv(data_dictionary)
+        df, datadic = self.df.copy(), data_dictionary
+        datadic = datadic[datadic.measure.isin(df.columns)].drop_duplicates(subset = ['measure'])
+        return regressout_timeseries(df, datadic, covariates_threshold = covariates_threshold,
+                                     groupby_columns = groupby_columns, ds_column = ds_column,
+                                    save_explained_vars = save, path = self.path)
         
         
     def plink2Df(self, call, temp_out_filename = 'temp/temp', dtype = 'ld'):
@@ -464,7 +603,7 @@ class gwas_pipe:
             #raise ValueError(f'found possible error in log, check the file {self.path}/log{loc}/{func}.log')
             
     def make_dir_structure(self, folders: list = ['data', 'genotypes', 'grm', 'log', 'logerr', 
-                                            'results', 'temp', 'data/pheno', 'results/heritability', 
+                                            'results', 'temp', 'data/pheno', 'results/heritability', 'results/preprocessing',
                                              'results/gwas',  'results/loco', 'results/qtls','results/eqtl','results/sqtl',
                                                   'results/phewas', 'temp/r2', 'results/lz/', 'images/', 'images/scattermatrix/', 'images/manhattan/']):
         
@@ -1653,7 +1792,7 @@ class gwas_pipe:
                     g = pd.read_csv(f'{self.path}results/gwas/{opt}', sep = '\t', dtype = {'Chr': int, 'bp': int}).assign(trait = t)
                     g['inv_prob'] = 1/np.clip(g.p, 1e-6, 1)
                     g = pd.concat([g.query('p < 0.001'), g.query('p > 0.001').sample(samplen, weights='inv_prob'),
-                                   g[::np.random.choice(range(80,90))]] ).sort_values(['Chr', 'bp']).reset_index(drop = True).dropna()
+                                   g[::np.random.choice(rangen)]] ).sort_values(['Chr', 'bp']).reset_index(drop = True).dropna()
                     df_gwas += [g]
                 except: pass
         df_gwas = pd.concat(df_gwas).sort_values(['Chr', 'bp']).reset_index(drop = True)
@@ -1746,7 +1885,7 @@ class gwas_pipe:
         return out 
     
     def report(self, round_version: str = '10', threshold: float = 5.3591, suggestive_threshold: float = 5.58, reportpath: str = 'gwas_report_auto.rmd',
-               covariate_explained_var_threshold: float = 0.02):
+               covariate_explained_var_threshold: float = 0.02, gwas_version='current'):
         pqfile = pd.read_parquet(self.phewas_db)
         pqfile.value_counts(['project','trait']).reset_index().rename({0:'number of SNPS below 1e-4 Pvalue'}, axis = 1).to_csv(f'{self.path}temp/phewas_t_temp.csv', index = False)
         PROJECTLIST = '* '+' \n* '.join(pqfile.project.unique())
@@ -1769,7 +1908,7 @@ class gwas_pipe:
         try:bash(f'rm -r {self.path}results/gwas_report_cache')
         except:pass
         os.system(f'''conda run -n lzenv Rscript -e "rmarkdown::render('{self.path}results/gwas_report.rmd')" | grep -oP 'Output created: gwas_report.html' '''); #> /dev/null 2>&1 r-environment
-        bash(f'''cp {self.path}results/gwas_report.html {self.path}results/gwas_report_{self.project_name}_round{round_version}_threshold{threshold}_n{self.df.shape[0]}_date{datetime.today().strftime('%Y-%m-%d')}.html''')
+        bash(f'''cp {self.path}results/gwas_report.html {self.path}results/gwas_report_{self.project_name}_round{round_version}_threshold{threshold}_n{self.df.shape[0]}_date{datetime.today().strftime('%Y-%m-%d')}_gwasversion_{gwas_version}.html''')
         #print('Output created: gwas_report.html') if 'Output created: gwas_report.html' in ''.join(repout) else print(''.join(repout))
         try:bash(f'rm -r {self.path}results/gwas_report_cache')
         except:pass

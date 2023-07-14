@@ -4,8 +4,9 @@ import sys
 import pandas as pd
 
 dictionary = defaultdict(lambda: 'dont', {k.replace('-', ''):v for k,v in [(x + '=1' if '=' not in x else x).split('=') for x in sys.argv[1:]] })
-    
-pj = dictionary['project']
+
+path = dictionary['path'].strip('/') if (dictionary['path'] != 'dont') else ''
+pj = dictionary['project'].strip('/')  if (dictionary['project'] != 'dont') else 'test'
 if dictionary['genotypes'] == 'dont' :
     dictionary['genotypes'] = '/projects/ps-palmer/tsanches/gwaspipeline/gwas/zzplink_genotypes/round10'
 
@@ -22,20 +23,20 @@ if dictionary['snpeff_path'] == 'dont': dictionary['snpeff_path'] = 'snpEff/'
 if dictionary['phewas_path'] == 'dont': dictionary['phewas_path'] = 'phewasdb.parquet.gz'
     
 if dictionary['regressout'] == 'dont':
-    df = pd.read_csv(f'{pj}/processed_data_ready.csv', dtype = {'rfid': str}).drop_duplicates(subset = 'rfid') 
+    df = pd.read_csv(f'{path}/{pj}/processed_data_ready.csv', dtype = {'rfid': str}).drop_duplicates(subset = 'rfid') 
     if dictionary['traits'] == 'dont':
         traits_ = df.columns[df.columns.str.startswith('regressedlr_')]#cluster_bysex
     elif 'prefix_' in dictionary['traits']: 
         pref = dictionary['traits'].replace('prefix_', '')
         traits_ = df.columns[df.columns.str.startswith(f'regressedlr_{pref}')]
     else: traits_ = dictionary['traits'].split(',')
-    traits_d = get_trait_descriptions_f(pd.read_csv(f'{pj}/data_dict_{pj}.csv'), traits_)
+    traits_d = get_trait_descriptions_f(pd.read_csv(f'{path}/{pj}/data_dict_{pj}.csv'), traits_)
 else:
-    rawdata = dictionary['regressout'] if dictionary['regressout'] != '' else f'{pj}/raw_data.csv'
+    rawdata = dictionary['regressout'] if dictionary['regressout'] != '' else f'{path}/{pj}/raw_data.csv'
     df = pd.read_csv(rawdata, dtype = {'rfid': str}).drop_duplicates(subset = 'rfid') 
     traits_, traits_d = [], []
 
-gwas = gwas_pipe(path = f'{pj}/',
+gwas = gwas_pipe(path = f'{path}/{pj}/',
              all_genotypes = dictionary['genotypes'], #'round9_1.vcf.gz',
              data = df,
              project_name = pj.split('/')[-1],
@@ -45,7 +46,9 @@ gwas = gwas_pipe(path = f'{pj}/',
              trait_descriptions= traits_d,
              threads = dictionary['threads'])
 
-if dictionary['regressout']!= 'dont': gwas.regressout(data_dictionary= pd.read_csv(f'{pj}/data_dict_{pj}.csv'))
+if dictionary['regressout']!= 'dont': 
+    if dictionary['timeseries']== 'dont':  gwas.regressout(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'))
+    else:  gwas.regressout_timeseries(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'))
 if dictionary['subset']!= 'dont': gwas.subsetSamplesFromAllGenotypes(sourceFormat = 'plink')
 if dictionary['grm']!= 'dont':gwas.generateGRM()
 if dictionary['h2']!= 'dont': gwas.snpHeritability()
@@ -64,7 +67,7 @@ if dictionary['porcupineplot'] != 'dont': gwas.porcupineplot(pd.read_csv(f'{gwas
 if dictionary['phewas']!= 'dont':gwas.phewas(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), annotate=True, pval_threshold = 1e-4, nreturn = 1, r2_threshold = .4, annotate_genome = dictionary['genome']) 
 if dictionary['eqtl']!= 'dont':gwas.eQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), annotate= True, genome = dictionary['genome'])
 if dictionary['sqtl']!= 'dont':gwas.sQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), genome = dictionary['genome'])
-if dictionary['report']!= 'dont':gwas.report(round_version=dictionary['round'])
+if dictionary['report']!= 'dont':gwas.report(round_version=dictionary['round'], gwas_version=dictionary['gwas_version'])
 if dictionary['store']!= 'dont':gwas.store(researcher=dictionary['researcher'],round_version=dictionary['round'], gwas_version=dictionary['gwas_version'],  remove_folders=False)
 try: 
     if dictionary['publish']!= 'dont':gwas.copy_results()

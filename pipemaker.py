@@ -259,7 +259,7 @@ class pipemaker2:
         end_time = time.time()
         palette = sns.color_palette('deep', np.unique(classsification).max() + 1)
         colors = [palette[x] if x >= 0 else (0.0, 0.0, 0.0) for x in classsification]
-        plt.scatter(transformed.T[0], transformed.T[1], c=colors, s = MinMaxScaler(feature_range=(30, 300)).fit_transform(self.df[self.TG].values.reshape(-1, 1)) , **{'alpha' : 0.5,  'linewidths':0})
+        plt.scatter(transformed.T[0], transformed.T[1], c=colors, s = MinMaxScaler(feature_range=(30, 300)).fit_transform(self.df[self.TG].values.reshape(-1, 1)) , **{'alpha' : 0.3,  'linewidths':1})
         frame = plt.gca() 
         for num, spine in enumerate(frame.spines.values()):
             if num == 1 or num == 3: spine.set_visible(False)
@@ -309,15 +309,18 @@ class pipemaker2:
             ax[0].set(xlim=[-0.05, 1.05], ylim=[-0.05, 1.05])
             #       title="Receiver operating characteristic example")
             ax[0].legend(loc="lower right")
-        except: print('non-binary classifier')
+        except: 
+            print('non-binary classifier')
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=.2)
         try:
             ConfusionMatrixDisplay.from_estimator(clf.fit(X_train, y_train), X_test, y_test,
                                          display_labels=['negative detection', 'positive detection'],
                                          cmap=plt.cm.Blues, ax = ax[1])
             ax[1].grid(False)
-        except: print('is it a regressor?')
-        fig.tight_layout()
+            fig.tight_layout()
+        except: 
+            print('is it a regressor?')
+            plt.close()
         try: 
             report = classification_report(clf.predict(X_test), y_test, output_dict=True) # target_names=['Negative detection', 'Positive detection']
         except: #### report for regression
@@ -326,7 +329,7 @@ class pipemaker2:
             report = cross_validate(clf, X, y, cv=5,  scoring=('neg_mean_absolute_percentage_error','r2','explained_variance', 'max_error', 'neg_mean_absolute_error', 'neg_mean_squared_error'))
             fig, ax = plt.subplots(1, 1, figsize = (10,10))
             fig.tight_layout()
-        return report, fig
+        return pd.DataFrame(report), fig
         
     def named_preprocessor(self):  
         naming_features = []
@@ -335,27 +338,71 @@ class pipemaker2:
             if transformed.shape[1] == len(transformer[2]):
                 naming_features += list(transformer[2])
             else:
-                naming_features += [transformer[0] +'__'+ str(i) for i in range(transformed.shape[1]) ]
+                naming_features += [transformer[0] +'.'+ str(i) for i in range(transformed.shape[1]) ]
         if self.optimized_pipe[1] == 0: clf = self.Pipe()
         else: clf = self.optimized_pipe[0]
         return pd.DataFrame(clf['preprocessing'].fit_transform(self.df), columns = naming_features)
 
-    def Shapley_feature_importance(self):
+    def Shapley_feature_importance(self, clustering_cutoff = -1, forceplot = 'matplotlib'):
         if self.optimized_pipe[1] == 0: clf = self.Pipe()
         else: clf = self.optimized_pipe[0]
         shap.initjs()
         dat_trans = self.named_preprocessor()
-        explainer = shap.TreeExplainer(clf['classifier'].fit(dat_trans, self.df[self.TG])) #,feature_perturbation = "tree_path_dependent"
-        shap_values = explainer.shap_values(dat_trans)
+        #explainer = shap.TreeExplainer(clf['classifier'].fit(dat_trans, self.df[self.TG])) #,feature_perturbation = "tree_path_dependent"
+        #shap_values = explainer.shap_values(dat_trans)
+        
+        #try: 
+        #    explainer = shap.TreeExplainer(clf['classifier'].fit(dat_trans, self.df[self.TG]), dat_trans) 
+        #    shap_values = explainer.shap_values(dat_trans, check_additivity=False) 
+        #    failhere
+        #except: 
+        #    explainer = shap.Explainer(clf['classifier'].fit(dat_trans, self.df[self.TG]), dat_trans) 
+        #    shap_values = explainer.shap_values(dat_trans)   
+        try: 
+            explainer = shap.TreeExplainer(clf['classifier'].fit(dat_trans, self.df[self.TG]), dat_trans) 
+            shap_values = explainer.shap_values(dat_trans, check_additivity=False) 
+        except: 
+            explainer = shap.Explainer(clf['classifier'].fit(dat_trans, self.df[self.TG]), dat_trans) 
+            shap_values = explainer.shap_values(dat_trans)
+
+        try : shap.plots.heatmap(explainer(dat_trans), show= False) 
+        except : shap.plots.heatmap(explainer(dat_trans), show= False, check_additivity=False)
+        fig1 = plt.gcf()
+        fig1.set_figheight(15)
+        fig1.set_figwidth(15)
+        fig1.tight_layout()
+        fig1.show()   
         
         #### force-plot
-        a = [_force_plot_html(explainer.expected_value[i], shap_values[i], dat_trans) for i in len(shap_values)]
+        print('doing forceplot')
+        try: a = [shap.force_plot(explainer.expected_value[i], shap_values[i], dat_trans, matplotlib=False, figsize=(18, 18)) \
+                  for i in range(len(shap_values))]
+        except: a = [shap.force_plot(explainer.expected_value, shap_values, dat_trans, matplotlib=False, figsize=(18, 18)) ]
         
         ### dependence matrix
-        ivalues = explainer.shap_interaction_values(dat_trans)
         figdm, axdm = plt.subplots(len( dat_trans.columns),  len(dat_trans.columns), figsize=(15, 15))
-        d = {i: name for i,name in enumerate(dat_trans.columns)}
-        for i in d.keys():
-            for j in d.keys():
-                shap.dependence_plot((d[i], d[j]), ivalues[1], dat_trans, ax = axdm[i,j], show = False)
+        try:
+            ivalues = explainer.shap_interaction_values(dat_trans)
+            d = {i: name for i,name in enumerate(dat_trans.columns)}
+            for i in d.keys():
+                for j in d.keys():
+                    shap.dependence_plot((d[i], d[j]), ivalues[1], dat_trans, ax = axdm[i,j], show = False)
+        except: print('failed at dependence matrix')
+                
+        if clustering_cutoff < 0:
+            fig_summary, ax = plt.subplots(figsize=(15, 15))
+            shap.summary_plot(shap_values,dat_trans,plot_size=(10,10), max_display=40,show= True)
+            
+            fig_summary, ax = plt.subplots(figsize=(15, 15))
+            shap.summary_plot(shap_values,dat_trans, plot_type='bar',plot_size=(10,10), max_display=40,show= True)
+        if clustering_cutoff > 0 :
+            clustering = shap.utils.hclust(dat_trans, self.df[self.TG])
+            shap.plots.bar(explainer(dat_trans),  clustering=clustering_cutoff,  clustering_cutoff=0.9, check_additivity=False)
+            
+        try:
+            shap.plots.scatter(explainer(dat_trans[:])[:,abs(interaction_shap_values.values).sum(axis=0).argsort()[-8:][::-1]])
+        except:
+            print('didnt make shap scatterplot')
+             
+                
         return (a,  figdm) #fig,
