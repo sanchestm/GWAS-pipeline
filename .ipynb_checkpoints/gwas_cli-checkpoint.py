@@ -42,7 +42,7 @@ gwas = gwas_pipe(path = f'{path}{pj}/',
              all_genotypes = dictionary['genotypes'], #'round9_1.vcf.gz',
              data = df,
              project_name = pj.split('/')[-1],
-             n_autosome = int(dictionary['n_autosome'])
+             n_autosome = int(dictionary['n_autosome']),
              traits = traits_,
              founder_genotypes = dictionary['founder_genotypes'],
              snpeff_path= dictionary['snpeff_path'],
@@ -62,7 +62,7 @@ if dictionary['gwas']: gwas.GWAS()
 if dictionary['db']: gwas.addGWASresultsToDb(researcher=dictionary['researcher'], round_version=dictionary['round'], gwas_version=dictionary['gwas_version'])
 if dictionary['qtl']: 
     qtl_add_founder = True if ((dictionary['genome'] in ['rn7', 'rn6']) 
-                               and (dictionary['founder_genotypes'] not in ['dont', 'none'])) else False
+                               and (dictionary['founder_genotypes'] not in [ 'none', 'None', 0])) else False
     try: qtls = gwas.callQTLs( NonStrictSearchDir=False, add_founder_genotypes = qtl_add_founder)
     except: qtls = gwas.callQTLs( NonStrictSearchDir=True)
     gwas.annotate(qtls, genome = dictionary['genome'] )

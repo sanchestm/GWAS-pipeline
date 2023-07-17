@@ -390,7 +390,7 @@ class gwas_pipe:
                  traits: list = [],
                  trait_descriptions: list = [],
                  chrList: list = [], 
-                 n_autosome: int = 20
+                 n_autosome: int = 20,
                  all_genotypes: str = 'round10.vcf.gz',
                  founder_genotypes: str = 'founder_genotypes/Ref_panel_mRatBN7_2_chr_GT', 
                  gtca_path: str = '',
