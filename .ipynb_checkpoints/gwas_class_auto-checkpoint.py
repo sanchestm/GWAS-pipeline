@@ -142,8 +142,8 @@ def qsub(call: str, queue = 'condo', walltime = 8, ppn = 12, out = 'log/', err =
     call_path = f'{project_dir}{call}'
     return bash(f'qsub -q {queue} -l nodes=1:ppn={ppn} -j oe -o {out_path} -e {err_path} -l walltime={walltime}:00:00 {call_path}')
 
-def vcf2plink(vcf = 'round9_1.vcf.gz', nchr = 20, out_path = 'zzplink_genotypes/allgenotypes_r9.1'):
-    bash(f'plink --thread-num 16 --vcf {vcf} --chr-set {nchr} no-xy --set-missing-var-ids @:# --make-bed --out {out_path}')
+def vcf2plink(vcf = 'round9_1.vcf.gz', n_autosome = 20, out_path = 'zzplink_genotypes/allgenotypes_r9.1'):
+    bash(f'plink --thread-num 16 --vcf {vcf} --chr-set {n_autosome} no-xy --set-missing-var-ids @:# --make-bed --out {out_path}')
     
 def _prophet_reg(dforiginal = "",y_column = 'y', 
                  categorical_regressors=[], regressors = [], 
@@ -310,7 +310,8 @@ class gwas_pipe:
         path to file with all genotypes, we are currently at the round 9.1 
     
     chrList: list = []
-        list of chromosomes to be included in genetic analysis
+        list of chromosomes to be included in genetic analysis in not provided will use all autosomes and the x,
+        x should be lowercase and values should be strings
     
     snpeff_path: str = ''
         path to snpeff program for GWAS
@@ -388,7 +389,8 @@ class gwas_pipe:
                  #regressed: pd.DataFrame() = pd.DataFrame(), 
                  traits: list = [],
                  trait_descriptions: list = [],
-                 chrList: list = ['x' if x == 21 else x for x in range(1,22)], 
+                 chrList: list = [], 
+                 n_autosome: int = 20
                  all_genotypes: str = 'round10.vcf.gz',
                  founder_genotypes: str = 'founder_genotypes/Ref_panel_mRatBN7_2_chr_GT', 
                  gtca_path: str = '',
@@ -403,7 +405,7 @@ class gwas_pipe:
         self.all_genotypes = all_genotypes
         self.founder_genotypes = founder_genotypes
         self.snpeff_path = snpeff_path
-        #self.df = regressed
+        self.n_autosome = n_autosome
         
         if os.path.exists(f'{self.path}temp'): bash(f'rm -r {self.path}temp')
         
@@ -444,7 +446,8 @@ class gwas_pipe:
         self.thrflag = f'--thread-num {threads}'
         self.threadnum = threads
         self.print_call = True
-        self.chrList = chrList
+        if not chrList:
+            self.chrList = [str(i) if i!=(self.n_autosome+1) else 'x' for i in range(1,self.n_autosome+2)]
         self.failed_full_grm = False
         
         self.sample_path = f'{self.path}genotypes/sample_rfids.txt'
@@ -633,7 +636,7 @@ class gwas_pipe:
             
             
     def subsetSamplesFromAllGenotypes(self,samplelist: list = [], sexfmt: str = 'F|M',  sexColumn: str = 'sex',
-                                      use_rfid_from_df = True, sourceFormat = 'plink', nchr = 20, 
+                                      use_rfid_from_df = True, sourceFormat = 'plink',  
                                       geno: float = .1, maf: float = .005, hwe: float = 1e-10,hwex: float = 1e-20, **kwards ):
         
         '''
@@ -670,7 +673,7 @@ class gwas_pipe:
         
         fmt_call = {'vcf': 'vcf', 'plink': 'bfile'}[sourceFormat]        
         
-        extra_params = f'--geno {geno} --maf {maf} --hwe {hwe} --set-missing-var-ids @:# --chr-set {nchr} no-xy --keep-allele-order' #--double-id 
+        extra_params = f'--geno {geno} --maf {maf} --hwe {hwe} --set-missing-var-ids @:# --chr-set {self.n_autosome} no-xy --keep-allele-order' #--double-id 
         
         sex_flags = f'--update-sex {self.sample_sex_path}'
         
@@ -683,7 +686,7 @@ class gwas_pipe:
         tempfam.drop(['rfid', 'plink_sex'], axis = 1).to_csv(self.genotypes_subset+ '.fam', header = None, sep = '\t', index = False)
         
         
-    def SubsampleMissMafHweFilter(self, sexfmt: str = 'M|F',  sexColumn: str = 'sex', nchr = 20, 
+    def SubsampleMissMafHweFilter(self, sexfmt: str = 'M|F',  sexColumn: str = 'sex',
                                   geno: float = .1, maf: float = .005, hwe: float = 1e-10,
                                   sourceFormat = 'vcf', remove_dup: bool = True, print_call: bool = False, **kwards):
         
@@ -762,12 +765,12 @@ class gwas_pipe:
             extra_flags = f'--not-chr X'  if num == 1 else ''
             sex_flags = f'--update-sex {self.samples_sex[sx]}'
             
-            self.bashLog(f'plink --{fmt_call} {self.all_genotypes} --keep {self.samples[sx]}  --chr-set {nchr} no-xy \
+            self.bashLog(f'plink --{fmt_call} {self.all_genotypes} --keep {self.samples[sx]}  --chr-set {self.n_autosome} no-xy \
                           {sex_flags} {filtering_flags} {rmv} {extra_flags} {self.thrflag} --make-bed --out {sub}_{sx}',
-                        f'{funcName}_subseting_{sx}', print_call=print_call)#--autosome-num {nchr}
+                        f'{funcName}_subseting_{sx}', print_call=print_call)#--autosome-num {self.n_autosome}
             
             if num == 1:
-                self.bashLog(f'plink --bfile {self.all_genotypes} --keep {self.samples[sx]}  --chr-set {nchr} no-xy\
+                self.bashLog(f'plink --bfile {self.all_genotypes} --keep {self.samples[sx]}  --chr-set {self.n_autosome} no-xy\
                                 --chr x {self.thrflag} --geno {geno} --maf {maf} --make-bed --out {sub}_{sx}_xchr',
                         f'{funcName}_maleXsubset{sx}',  print_call=print_call) #--out {sub}_{sx}_xchr {sub}_{sx} 
                 male_1_x_filenames = [aa for aa in [f'{sub}_{sx}', f'{sub}_{sx}_xchr'] if len(glob(aa+'.*')) >= 5]
@@ -777,7 +780,7 @@ class gwas_pipe:
                 
         print('merging sexes')        
         self.bashLog(f'plink --bfile {female_hwe} --merge-list {male_gen_filenames} {self.thrflag} \
-                       --geno {geno} --maf {maf} --chr-set {nchr} no-xy --make-bed --out {sub}',
+                       --geno {geno} --maf {maf} --chr-set {self.n_autosome} no-xy --make-bed --out {sub}',
                         f'{funcName}_mergeSexes', print_call=print_call) # {filtering_flags}
         
         self.genotypes_subset = f'{sub}'
@@ -788,7 +791,7 @@ class gwas_pipe:
         tempfam.drop(['rfid', 'plink_sex'], axis = 1).to_csv(self.genotypes_subset+ '.fam', header = None, sep = '\t', index = False)
         
         
-    def generateGRM(self, autosome_list: list = list(range(1,21)), nchr = 20, print_call: bool = True, allatonce: bool = False,
+    def generateGRM(self, autosome_list: list = [], print_call: bool = True, allatonce: bool = False,
                     extra_chrs: list = ['xchr'], just_autosomes: bool = True, just_full_grm: bool = True,
                    full_grm: bool = True, **kwards):
         
@@ -797,8 +800,8 @@ class gwas_pipe:
         
         Parameters
         ----------
-        autosome_list: list = list(range(1,21))
-            list of chromosomes that will be used
+        autosome_list: list = []
+            list of chromosomes that will be used, if not provided will use all autosomes + X
         print_call: bool = True
             prints every gcta call, doesn't work well with tqdm if all grms are done for all chrs
         extra_chrs: list = ['xchr']
@@ -811,6 +814,10 @@ class gwas_pipe:
         print('generating GRM...')
         funcName = inspect.getframeinfo(inspect.currentframe()).function
         
+        if not autosome_list:
+            autosome_list = list(range(1,self.n_autosome+1))
+            
+        
         if allatonce:
             auto_flags = f'--autosome-num {int(len(autosome_list))} --autosome' if just_autosomes else ''
             sex_flags = f'--update-sex {self.sample_sex_path_gcta} --dc 1' #f' --sex {self.sample_sex_path}'
@@ -822,14 +829,14 @@ class gwas_pipe:
         all_filenames_partial_grms = pd.DataFrame(columns = ['filename'])
 
         if 'xchr' in extra_chrs:
-            self.bashLog(f'{self.gcta} {self.thrflag} --bfile {self.genotypes_subset} --autosome-num {nchr} \
+            self.bashLog(f'{self.gcta} {self.thrflag} --bfile {self.genotypes_subset} --autosome-num {self.n_autosome} \
                            --make-grm-xchr --out {self.xGRM}',
                         f'{funcName}_chrX', print_call = False)
 
             all_filenames_partial_grms.loc[len(all_filenames_partial_grms), 'filename'] = self.xGRM
 
         for c in tqdm(autosome_list):
-            self.bashLog(f'{self.gcta} {self.thrflag} --bfile {self.genotypes_subset} --chr {c} --autosome-num {nchr}\
+            self.bashLog(f'{self.gcta} {self.thrflag} --bfile {self.genotypes_subset} --chr {c} --autosome-num {self.n_autosome}\
                          --make-grm-bin --out {self.path}grm/{c}chrGRM',
                         f'{funcName}_chr{c}',  print_call = False)
 
@@ -854,7 +861,7 @@ class gwas_pipe:
             p.map_lower(sns.kdeplot, levels=4, color=".2")
             plt.savefig(f'{self.path}images/scattermatrix/prefix{i}.png')
             
-    def snpHeritability(self, nchr = 20, print_call: bool = False, save: bool = True, **kwards):
+    def snpHeritability(self,  print_call: bool = False, save: bool = True, **kwards):
         '''
         The snpHeritability function is used to calculate the heritability of a set of traits in a dataset.
         
@@ -886,11 +893,11 @@ class gwas_pipe:
             self.df[['rfid', 'rfid', trait]].fillna('NA').astype(str).to_csv(trait_file,  index = False, sep = ' ', header = None)
             
             if self.failed_full_grm:
-                self.bashLog(f'{self.gcta} --reml {self.thrflag} --reml-no-constrain --autosome-num {nchr}\
+                self.bashLog(f'{self.gcta} --reml {self.thrflag} --reml-no-constrain --autosome-num {self.n_autosome}\
                                            --pheno {trait_file} --mgrm {self.path}grm/listofchrgrms.txt --out {out_file}',
                             f'snpHeritability_{trait}', print_call = print_call) 
             else:
-                self.bashLog(f'{self.gcta} --reml {self.thrflag}  --autosome-num {nchr}\
+                self.bashLog(f'{self.gcta} --reml {self.thrflag}  --autosome-num {self.n_autosome}\
                                            --pheno {trait_file} --grm {self.autoGRM} --out {out_file}',
                             f'snpHeritability_{trait}', print_call = print_call) #--autosome
             
@@ -963,7 +970,7 @@ class gwas_pipe:
         plt.savefig(f'{self.path}images/genetic_correlation_matrix.png', dpi = 400)
         return outmixed
         
-    def BLUP(self, nchr = 20, print_call: bool = False, save: bool = True, frac: float = 1.,**kwards):
+    def BLUP(self,  print_call: bool = False, save: bool = True, frac: float = 1.,**kwards):
         '''
         Create a blup model to get SNP effects and breeding values.
         
@@ -986,14 +993,14 @@ class gwas_pipe:
             tempdf = self.df.sample(frac = frac) if frac < .999 else self.df.copy()
             tempdf[['rfid', 'rfid', trait]].fillna('NA').astype(str).to_csv(trait_file,  index = False, sep = ' ', header = None)
             tempdf[['rfid', 'rfid']].to_csv(trait_rfids, header = None, index = False, sep = ' ')
-            self.bashLog(f'{self.gcta} --grm {self.autoGRM} --autosome-num {nchr}  --keep {trait_rfids} \
+            self.bashLog(f'{self.gcta} --grm {self.autoGRM} --autosome-num {self.n_autosome}  --keep {trait_rfids} \
                                         --make-grm  --out {out_file}_GRMsubset',
                         f'BLUP_{trait}_GRM', print_call = print_call)
             self.bashLog(f'{self.gcta} --reml {self.thrflag} \
                                        --pheno {trait_file} --grm {out_file}_GRMsubset --reml-pred-rand --out {out_file}_BV',
                         f'BLUP_{trait}_BV', print_call = print_call) #--autosome
             self.bashLog(f'{self.gcta} --bfile {self.genotypes_subset} {self.thrflag} --blup-snp {out_file}_BV.indi.blp \
-                           --autosome --autosome-num {nchr} --out {out_file}_snpscores',
+                           --autosome --autosome-num {self.n_autosome} --out {out_file}_snpscores',
                         f'BLUP_{trait}_snpscores', print_call = print_call) #--autosome
 
         BVtable = pd.concat([pd.read_csv(f'{self.path}results/BLUP/{trait}_BV.indi.blp',sep = '\t',  header = None)\
@@ -1043,7 +1050,7 @@ class gwas_pipe:
         
     
     def GWAS(self, traitlist: list = [] ,subtract_grm: bool = True, loco: bool = True , run_per_chr: bool = False,
-             print_call: bool = False, nchr:int = 21, **kwards):
+             print_call: bool = False, **kwards):
         """
         This function performs a genome-wide association study (GWAS) on the provided genotype data using the GCTA software.
         
@@ -1083,7 +1090,7 @@ class gwas_pipe:
                 grm_flag = f'--grm {self.path}grm/AllchrGRM ' if subtract_grm else ''
                 loco_flag = '-loco' if loco else ''
                 self.bashLog(f"{self.gcta} {self.thrflag} {grm_flag} \
-                --autosome-num {nchr}\
+                --autosome-num {self.n_autosome}\
                 --pheno {self.path}data/pheno/{trait}.txt \
                 --bfile {self.genotypes_subset} \
                 --mlma{loco_flag} \
@@ -1093,17 +1100,17 @@ class gwas_pipe:
                     print(f"couldn't run trait: {trait}")
                     self.GWAS(traitlist = traitlist, run_per_chr = True, print_call= print_call)
                     return 2
-            ranges = [{nchr}]
+            ranges = [self.n_autosome+1]
         else:
             print('running gwas per chr per trait...')
-            ranges =  range(1,nchr+1)
+            ranges =  range(1,self.n_autosome+2)
         
         for trait, chrom in tqdm(list(itertools.product(traitlist,ranges))):
-            if chrom == 21: chromp2 = 'x'
+            if chrom == self.n_autosome+1: chromp2 = 'x'
             else: chromp2 = chrom
             self.bashLog(f'{self.gcta} {self.thrflag} --pheno {self.path}data/pheno/{trait}.txt --bfile {self.genotypes_subset} \
                                        --grm {self.path}grm/AllchrGRM \
-                                       --autosome-num {nchr}\
+                                       --autosome-num {self.n_autosome}\
                                        --chr {chrom} \
                                        --mlma-subtract-grm {self.path}grm/{chromp2}chrGRM \
                                        --mlma \
@@ -1190,7 +1197,7 @@ class gwas_pipe:
         
         
     def callQTLs(self, threshold: float = 5.3591, suggestive_threshold: float = 5.58, window: int = 2e6, subterm: int = 2,  add_founder_genotypes: bool = True,
-                 ldwin = 7e6, ldkb = 7000, ldr2 = .4, qtl_dist = 7*1e6, nchr: int = 21, NonStrictSearchDir = True, **kwards): # annotate_genome: str = 'rn7',
+                 ldwin = 7e6, ldkb = 7000, ldr2 = .4, qtl_dist = 7*1e6, NonStrictSearchDir = True, **kwards): # annotate_genome: str = 'rn7',
         
         '''
         The function callQTLs() is used to call quantitative trait loci (QTLs) from GWAS results. 
@@ -1205,7 +1212,6 @@ class gwas_pipe:
          ldkb: int = 11000 
          ldr2: float = .4
          qtl_dist: int = 2*1e6
-         nchr: int = 21
          NonStrictSearchDir = ''
          
         Design
@@ -1224,12 +1230,11 @@ class gwas_pipe:
         '''
         print(f'starting call qtl ... {self.project_name}') 
         thresh = 10**(-threshold)
-        # chr_list = ['x' if x == 21 else x for x in range(1,nchr+1)]
         
         if not NonStrictSearchDir:
             topSNPs = pd.DataFrame()
-            for t, chrom in tqdm(list(itertools.product(self.traits, range(1,nchr+1)))):
-                    if chrom == 21 : chrom = 'x'
+            for t, chrom in tqdm(list(itertools.product(self.traits, range(1,self.n_autosome+2)))):
+                    if chrom == self.n_autosome+1 : chrom = 'x'
                     filename = f'{self.path}results/gwas/{t}_chrgwas{chrom}.mlma'
                     if os.path.exists(filename):
                         topSNPs = pd.concat([topSNPs, pd.read_csv(filename, sep = '\t').query(f'p < {thresh}').assign(trait=t)])
@@ -1259,11 +1264,6 @@ class gwas_pipe:
                 qtl = True if correlated_snps.shape[0] > 2 else False
 
                 ldfilename = f'{self.path}temp/r2/temp_qtl_n_{t}'
-                print(f'plink --bfile {self.genotypes_subset} --chr {c} --ld-snp {maxp.SNP} \
-                                     --ld-window {ldwin} {self.thrflag} \
-                                     --nonfounders --r2 \
-                                     --ld-window-r2 {ldr2} --out {ldfilename}',\
-                             f'qlt_{t}')
                 self.bashLog(f'plink --bfile {self.genotypes_subset} --chr {c} --ld-snp {maxp.SNP} \
                                      --ld-window {ldwin} {self.thrflag} \
                                      --nonfounders --r2 \
@@ -1322,7 +1322,7 @@ class gwas_pipe:
             print(f'running conditional analysis for trait {trait} and all snps below threshold {snpstring}')
 
         pbimtemp = self.pbim.assign(n = self.df.count()[trait] ).rename({'snp': 'SNP', 'n':'N'}, axis = 1)[['SNP', 'N']] #- da.isnan(pgen).sum(axis = 1)
-        tempdf = pd.concat([pd.read_csv(f'{self.path}_report_/{trait}.loco.mlma', sep = '\t'),
+        tempdf = pd.concat([pd.read_csv(f'{self.path}results/gwas/{trait}.loco.mlma', sep = '\t'),
                            pd.read_csv(f'{self.path}results/gwas/{trait}_chrgwasx.mlma', sep = '\t')]).rename({'Freq': 'freq'}, axis =1 )
         tempdf = tempdf.merge(pbimtemp, on = 'SNP')[['SNP','A1','A2','freq','b','se','p','N' ]]
         mafile, snpl = f'{self.path}temp/cojo/tempmlma.ma', f'{self.path}temp/cojo/temp.snplist'
@@ -1406,7 +1406,7 @@ class gwas_pipe:
 
         for num, (_, qtl_row) in tqdm(list(enumerate(qtltable.reset_index().iterrows()))):
             topsnpchr, topsnpbp = qtl_row.SNP.split(':')
-            topsnpchr = topsnpchr.replace('X','21')
+            topsnpchr = topsnpchr.replace('X',str(self.n_autosome+1))
             test = pd.read_csv(f'{self.path}results/lz/lzplottable@{qtl_row.trait}@{qtl_row.SNP}.tsv', sep = '\t')
             test['-log10(P)'] = -np.log10(test.p)
             range_interest = test.query('R2> .6')['bp'].agg(['min', 'max'])
@@ -1746,8 +1746,8 @@ class gwas_pipe:
         if len(traitlist) == 0: traitlist = self.traits
         for num, t in tqdm(list(enumerate(traitlist))):
             df_gwas,df_date = [], []
-            chrlist = [str(i) if i!=21 else 'x' for i in range(1,22)]
-            for opt in [f'{t}.loco.mlma'] + [f'{t}.mlma'] + [f'{t}_chrgwas{chromp2}.mlma' for chromp2 in chrlist]:
+            #chrlist = [str(i) if i!=(self.n_autosome+1) else 'x' for i in range(1,self.n_autosome+2)]
+            for opt in [f'{t}.loco.mlma'] + [f'{t}.mlma'] + [f'{t}_chrgwas{chromp2}.mlma' for chromp2 in self.chrList]:
                 try: 
                     df_gwas += [pd.read_csv(f'{self.path}results/gwas/{opt}', sep = '\t')]
                     logopt = opt.replace('.loco.mlma', '.log').replace('.mlma', '.log')
@@ -1763,7 +1763,7 @@ class gwas_pipe:
             df_gwas['Chromosome'] = df_gwas.apply(lambda row: row.bp + append_position[row.Chr], axis = 1)
             def mapcolor(c, thresh , p):
                 if -np.log10(p)> thresh : return 'black' 
-                elif int(str(c).replace('X','21').replace('Y', '22').replace('MT', '22'))%2 == 0: return 'steelblue'
+                elif int(str(c).replace('X',str(self.n_autosome+1)).replace('Y', str(self.n_autosome+2)).replace('MT', str(self.n_autosome+4)))%2 == 0: return 'steelblue'
                 return 'firebrick'
             df_gwas['color']= df_gwas.apply(lambda row: mapcolor(row.Chr, threshold, row.p) ,axis =1)
             fig2 =  go.Figure(data=go.Scattergl(
@@ -1777,7 +1777,7 @@ class gwas_pipe:
             fig2.update_layout(yaxis_range=[0,max(6, -np.log10(df_gwas.p.min())+.5)], xaxis_range = df_gwas.Chromosome.agg(['min', 'max']),
                                template='simple_white',width = 1920, height = 800, showlegend=False, xaxis_title="Chromosome", yaxis_title="-log10(p)")
             #fig2.layout['title'] = 'Manhattan Plot'
-            fig2.update_xaxes(ticktext = [str(i) if i!=21 else 'X' for i in range(1,22)],
+            fig2.update_xaxes(ticktext = [str(i) if i!=self.n_autosome+1 else 'X' for i in range(1,self.n_autosome+2)],
                       tickvals =(append_position + df_gwas.groupby('Chr').bp.agg('max').sort_index().cumsum())//2 )
             if 'png' in save_fmt: fig2.write_image(f"{self.path}images/manhattan/{t}.png",width = 1920, height = 800)
             if display: fig2.show(renderer = 'png',width = 1920, height = 800)
@@ -1794,10 +1794,10 @@ class gwas_pipe:
             else: traitlist = self.traits
         qtl = qtltable.query('QTL==True')
         df_gwas,df_date = [], []
-        chrlist = [str(i) if i!=21 else 'x' for i in range(1,22)]
+        #chrlist = [str(i) if i!=self.n_autosome+1 else 'x' for i in range(1,self.n_autosome+2)]
         for t in tqdm(traitlist):
             for opt in [f'regressedlr_{t.replace("regressedlr_", "")}.loco.mlma',  f'regressedlr_{t.replace("regressedlr_", "")}.mlma']+ \
-            [f'regressedlr_{t.replace("regressedlr_", "")}_chrgwas{chromp2}.mlma' for chromp2 in chrlist]:
+            [f'regressedlr_{t.replace("regressedlr_", "")}_chrgwas{chromp2}.mlma' for chromp2 in self.chrList]:
                 try: 
                     g = pd.read_csv(f'{self.path}results/gwas/{opt}', sep = '\t', dtype = {'Chr': int, 'bp': int}).assign(trait = t)
                     g['inv_prob'] = 1/np.clip(g.p, 1e-6, 1)
@@ -1813,7 +1813,7 @@ class gwas_pipe:
         d = {t: cmap[v] for v,t in enumerate(traitlist)}
         def mapcolor(c, thresh , p, trait):
             if -np.log10(p)> thresh : return d[trait] 
-            elif int(str(c).replace('X','21').replace('Y', '22').replace('MT', '22'))%2 == 0: return 'black'
+            elif int(str(c).replace('X',str(self.n_autosome+1)).replace('Y', str(self.n_autosome+2)).replace('MT', str(self.n_autosome+4)))%2 == 0: return 'black'
             return 'gray'
         print(f'starting porcupineplot ... {self.project_name} colorcoding')
         df_gwas['color']= df_gwas.progress_apply(lambda row: mapcolor(row.Chr, threshold, row.p, row.trait) ,axis =1)
@@ -1831,7 +1831,7 @@ class gwas_pipe:
         df_gwas.trait = df_gwas.trait.str.replace('regressedlr_', '')
         df_gwas.query('annotate == True').apply(lambda x: fig2.add_annotation(x=x.Chromosome, y=-np.log10(x.p),text=f"{x.trait}",showarrow=True,arrowhead=2), axis = 1)
         #fig2.layout['title'] = 'Porcupine Plot'
-        fig2.update_xaxes(ticktext = [str(i) if i!=21 else 'X' for i in range(1,22)],
+        fig2.update_xaxes(ticktext = [str(i) if i!=self.n_autosome+1 else 'X' for i in range(1,self.n_autosome+2)],
                   tickvals =(append_position + df_gwas.groupby('Chr').bp.agg('max').sort_index().cumsum())//2 )
         if 'png' in save_fmt: fig2.write_image(f"{self.path}images/porcupineplot.png",width = 1920, height = 800)
         if display: fig2.show(renderer = 'png',width = 1920, height = 800)
