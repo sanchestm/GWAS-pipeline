@@ -10,7 +10,7 @@ print(path)
 pj = dictionary['project'].rstrip('/')  if (dictionary['project'] ) else 'test'
 print(pj)
 if not dictionary['genotypes']:
-    dictionary['genotypes'] = '/projects/ps-palmer/tsanches/gwaspipeline/gwas/zzplink_genotypes/round10'
+    dictionary['genotypes'] = '/projects/ps-palmer/gwas/databases/rounds/round10_1'
 
 if not dictionary['genome']: dictionary['genome'] = 'rn7'
     
@@ -53,7 +53,7 @@ gwas = gwas_pipe(path = f'{path}{pj}/',
 if dictionary['regressout']: 
     if not dictionary['timeseries']:  gwas.regressout(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'))
     else:  gwas.regressout_timeseries(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'))
-if dictionary['subset']: gwas.subsetSamplesFromAllGenotypes(sourceFormat = 'plink')
+if dictionary['subset']: gwas.SubsetAndFilter()
 if dictionary['grm']:gwas.generateGRM()
 if dictionary['h2']: gwas.snpHeritability()
 if dictionary['BLUP']: gwas.BLUP()
@@ -61,12 +61,10 @@ if dictionary['BLUP_predict']: gwas.BLUP_predict(dictionary['BLUP_predict']);
 if dictionary['gwas']: gwas.GWAS()
 if dictionary['db']: gwas.addGWASresultsToDb(researcher=dictionary['researcher'], round_version=dictionary['round'], gwas_version=dictionary['gwas_version'])
 if dictionary['qtl']: 
-    qtl_add_founder = True if ((dictionary['genome'] in ['rn7', 'rn6']) 
-                               and (dictionary['founder_genotypes'] not in [ 'none', 'None', 0])) else False
+    qtl_add_founder = True if (dictionary['founder_genotypes'] not in [ 'none', 'None', 0]) else False
     try: qtls = gwas.callQTLs( NonStrictSearchDir=False, add_founder_genotypes = qtl_add_founder)
     except: qtls = gwas.callQTLs( NonStrictSearchDir=True)
     gwas.annotate(qtls, genome = dictionary['genome'] )
-if dictionary['locuszoom']: gwas.locuszoom(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv'), annotate_genome = dictionary['genome']) 
 if dictionary['effect']: gwas.effectsize(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv')) 
 if dictionary['gcorr']: gwas.genetic_correlation_matrix()
 if dictionary['manhattanplot']: gwas.manhattanplot(display = False)
@@ -74,6 +72,7 @@ if dictionary['porcupineplot']: gwas.porcupineplot(pd.read_csv(f'{gwas.path}/res
 if dictionary['phewas']:gwas.phewas(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), annotate=True, pval_threshold = 1e-4, nreturn = 1, r2_threshold = .4, annotate_genome = dictionary['genome']) 
 if dictionary['eqtl']:gwas.eQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), annotate= True, genome = dictionary['genome'])
 if dictionary['sqtl']:gwas.sQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), genome = dictionary['genome'])
+if dictionary['locuszoom']: gwas.locuszoom(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv'), annotate_genome = dictionary['genome']) 
 if dictionary['report']:gwas.report(round_version=dictionary['round'], gwas_version=dictionary['gwas_version'])
 if dictionary['store']:gwas.store(researcher=dictionary['researcher'],round_version=dictionary['round'], gwas_version=dictionary['gwas_version'],  remove_folders=False)
 try: 

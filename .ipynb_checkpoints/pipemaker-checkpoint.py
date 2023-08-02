@@ -163,6 +163,9 @@ class pipemaker2:
         if just_classifier == True: name = param.split('__')[1]
         else: name = param
         
+        
+        if name == 'alpha': return Real(1e-8, 1, 'log-uniform',name = name)
+        
         if value == 0 or value ==1: return
         
         if type(value) == int: 
@@ -187,6 +190,8 @@ class pipemaker2:
                              if x.find('classifier__') != -1 
                              and  x.find('silent') == -1 
                              and  x.find('n_jobs') == -1
+                             and x != 'classifier__tol'
+                             and x != 'classifier__max_iter'
                              and x.find('bagging_fraction') == -1 
                              and x != 'classifier__subsample'
                              and x != 'classifier__validation_fraction'] # and
@@ -254,7 +259,7 @@ class pipemaker2:
             raise
              
     def Vis_Cluster(self, method):
-        transformed = self.Pipe()['preprocessing'].fit_transform(self.df)
+        transformed = UMAP().fit_transform(self.Pipe()['preprocessing'].fit_transform(self.df))
         classsification = method.fit_predict(transformed)  #(*args, **kwds)
         end_time = time.time()
         palette = sns.color_palette('deep', np.unique(classsification).max() + 1)
@@ -317,7 +322,7 @@ class pipemaker2:
                                          display_labels=['negative detection', 'positive detection'],
                                          cmap=plt.cm.Blues, ax = ax[1])
             ax[1].grid(False)
-            fig.tight_layout()
+            #fig.tight_layout()
         except: 
             print('is it a regressor?')
             plt.close()
@@ -326,9 +331,9 @@ class pipemaker2:
         except: #### report for regression
             if self.optimized_pipe[1] == 0: clf = self.Pipe()
             else: clf = self.optimized_pipe[0]
-            report = cross_validate(clf, X, y, cv=5,  scoring=('neg_mean_absolute_percentage_error','r2','explained_variance', 'max_error', 'neg_mean_absolute_error', 'neg_mean_squared_error'))
+            report = cross_validate(clf, X, y, cv=5,  scoring=('neg_mean_absolute_percentage_error','r2','explained_variance', 'max_error', 'neg_mean_absolute_error', 'neg_mean_squared_error'), return_train_score = True)
             fig, ax = plt.subplots(1, 1, figsize = (10,10))
-            fig.tight_layout()
+            #fig.tight_layout()
         return pd.DataFrame(report), fig
         
     def named_preprocessor(self):  
@@ -343,7 +348,7 @@ class pipemaker2:
         else: clf = self.optimized_pipe[0]
         return pd.DataFrame(clf['preprocessing'].fit_transform(self.df), columns = naming_features)
 
-    def Shapley_feature_importance(self, clustering_cutoff = -1, forceplot = 'matplotlib'):
+    def Shapley_feature_importance(self, clustering_cutoff = -1, forceplot = 'matplotlib', do_force_plot=False):
         if self.optimized_pipe[1] == 0: clf = self.Pipe()
         else: clf = self.optimized_pipe[0]
         shap.initjs()
@@ -375,19 +380,21 @@ class pipemaker2:
         
         #### force-plot
         print('doing forceplot')
-        try: a = [shap.force_plot(explainer.expected_value[i], shap_values[i], dat_trans, matplotlib=False, figsize=(18, 18)) \
-                  for i in range(len(shap_values))]
-        except: a = [shap.force_plot(explainer.expected_value, shap_values, dat_trans, matplotlib=False, figsize=(18, 18)) ]
+        if do_force_plot:
+            try: a = [shap.force_plot(explainer.expected_value[i], shap_values[i], dat_trans, matplotlib=False, figsize=(18, 18)) \
+                      for i in range(len(shap_values))]
+            except: a = [shap.force_plot(explainer.expected_value, shap_values, dat_trans, matplotlib=False, figsize=(18, 18)) ]
+        else: a = []
         
         ### dependence matrix
-        figdm, axdm = plt.subplots(len( dat_trans.columns),  len(dat_trans.columns), figsize=(15, 15))
-        try:
-            ivalues = explainer.shap_interaction_values(dat_trans)
-            d = {i: name for i,name in enumerate(dat_trans.columns)}
-            for i in d.keys():
-                for j in d.keys():
-                    shap.dependence_plot((d[i], d[j]), ivalues[1], dat_trans, ax = axdm[i,j], show = False)
-        except: print('failed at dependence matrix')
+        #figdm, axdm = plt.subplots(len( dat_trans.columns),  len(dat_trans.columns), figsize=(15, 15))
+        #try:
+        #    ivalues = explainer.shap_interaction_values(dat_trans)
+        #    d = {i: name for i,name in enumerate(dat_trans.columns)}
+        #    for i in d.keys():
+        #        for j in d.keys():
+        #            shap.dependence_plot((d[i], d[j]), ivalues[1], dat_trans, ax = axdm[i,j], show = False)
+        #except: print('failed at dependence matrix')
                 
         if clustering_cutoff < 0:
             fig_summary, ax = plt.subplots(figsize=(15, 15))
@@ -405,4 +412,4 @@ class pipemaker2:
             print('didnt make shap scatterplot')
              
                 
-        return (a,  figdm) #fig,
+        return a #fig,

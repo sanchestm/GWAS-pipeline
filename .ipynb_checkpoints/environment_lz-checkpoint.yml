@@ -16,4 +16,8 @@ dependencies:
   - r-rmarkdown
   - r-plyr
   - r-readxl
+  - pandoc
+  - r-purrr
+  - r-dplyr
+  - r-data.table
 

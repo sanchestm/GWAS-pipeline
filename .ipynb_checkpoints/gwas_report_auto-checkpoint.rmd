@@ -64,11 +64,11 @@ Phenotype Info
 
 * n = NSAMPLES
 
-* phenotype data: [here](https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/PATHNAMEprocessed_data_ready.csv)
+* phenotype data: [here](https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/PROJECTNAME/processed_data_ready.csv)
 
-* covariate dropboxes: [here](https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/PATHNAMEdata_dict_PROJECTNAME.csv) 
+* covariate dropboxes: [here](https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/PROJECTNAME/data_dict_PROJECTNAME.csv) 
 
-* phenotype statistical descriptions file: [here](https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/PATHNAMEdata_distributions.html) 
+* phenotype statistical descriptions file: [here](https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/PROJECTNAME/data_distributions.html) 
 
 Genotype Info
 
@@ -117,8 +117,6 @@ tryCatch(
 ******
 # **Phenotype processing details **  
 
-
-Quantile normalized separately for males and females then regress out the effect of other covariates (simulataneously) if they are significant and explain more than REGRESSTHRS of variance. 
 
 Here are the covariates looked at: 
 
@@ -200,9 +198,11 @@ Column definitions:
 
 df = read.csv("heritability/heritability.tsv",header=T,stringsAsFactors = F, sep= '\t')
 names(df) = c('trait', 'gen_var', 'env_var', 'phe_var', 'heritability', 'likelihood', 'lrt', 'df', 'pval', 'n', 'heritability_se')
+df$pval = -log10(df$pval)
+df = df %>% rename( '-Log10(p)' = 'pval')
 df =df %>% mutate_if(is.numeric, ~round(., 3))
 df$trait = str_remove_all(df$trait, 'regressedlr_')
-df= df[c('trait', 'n','heritability',   'heritability_se', 'pval')]
+df= df[c('trait', 'n','heritability',   'heritability_se', '-Log10(p)')]
 pretify(df)
 
 ```
@@ -224,9 +224,10 @@ if ("ACI" %in% colnames(qtls)) {
 ```{r variant annotation table, message=F,warning=F,eval=T,include=T,echo=F}
 ###### load snp annotations
 ann<-read.csv( "qtls/possible_causal_snps.tsv",header=T,stringsAsFactors=F, sep = '\t')
-ann = filter(ann, putative_impact %in% c('HIGH', 'MODERATE'))  %>% select(-c('A1','A2', 'featureid', 'rank', 
+ann = ann   %>% select(-c('A1','A2', 'featureid', 'rank', 
                                                                        'cDNA_position.cDNA_len','CDS_position.CDS_len',
                                                                        'Protein_position.Protein_len','distancetofeature')) #'HGVS.c','HGVS.p',
+# %>% filter(putative_impact %in% c('HIGH', 'MODERATE'))
 ```
 
 ```{r read in eQTL table,message=F,warning=F,eval=T,include=T,echo=F,cache=F}
@@ -241,12 +242,12 @@ phewas<-read.csv( 'phewas/pretty_table_window_match.tsv',header=T,stringsAsFacto
         select(-c('round_version', 'uploadeddate')) %>% rename( '-Log10(p)PheDb' = 'p_PheDb')
 }
 eqtl = ""
-if (file.exists("phewas/pretty_eqtl_table.tsv")) {
+if (file.exists("eqtl/pretty_eqtl_table.csv")) {
 eqtl<-read.csv( 'eqtl/pretty_eqtl_table.csv',header=T,stringsAsFactors=F, sep = ',') %>%
       rename( '-Log10(p)' = 'X.log10.P.value.','-Log10(p)_eqtldb'= 'X.log10.pval_nominal.') %>% select(-c('gene_id')) 
 }
 sqtl = ""
-if (file.exists("phewas/pretty_sqtl_table.tsv")) {
+if (file.exists("sqtl/pretty_sqtl_table.csv")) {
 sqtl<-read.csv( 'sqtl/pretty_sqtl_table.csv',header=T,stringsAsFactors=F, sep = ',') %>%
       rename( '-Log10(p)' = 'X.log10.P.value.','-Log10(p)_sqtldb'= 'X.log10.pval_nominal.') %>% select(-c('gene_id')) 
 }
@@ -365,6 +366,10 @@ Defining columns:
 
 The second PheWAS table examines the association between the topSNP for this phenotype and all other topSNPs that were mapped within a 3 Mb window of the topSNP from the current study and a correlation above 0.6. Instead of showing association of the topSNP with other traits like in the first table, the second table shows significant association identified for other traits within the nearby chromosomal interval.
 
+Projects included in the PheWAS analysis (see project_name column in PheWAS tables). 
+
+PROJECTLIST
+
 
 Defining columns: 
 
@@ -408,9 +413,7 @@ Defining columns:
 * slope: Effect size of the SNP_sqtldb onto the Ensembl_gene
 * af: allele frequency of the SNP_sqtldb
 
-Projects included in the PheWAS analysis (see project_name column in PheWAS tables). 
 
-PROJECTLIST
 
 ```{r dynamic chunks,message=F,warning=F,eval=T,include=T,results = 'asis',echo=F,cache=F}
 for( i in rownames(qtls) ){
@@ -435,28 +438,28 @@ for( i in rownames(qtls) ){
     })
    
    cat(str_interp("  \n### PheWAS: P-values for other phenotypes at trait topSNP ${qtls[i, 'trait']} ${qtls[i, 'SNP']}   \n"))
-   if (tolower(phewas_exact) != "") {
+   if (class(phewas_exact) == 'data.frame') {
        phetemp = phewas_exact %>% filter(SNP == qtls[i, 'SNP']) %>% filter(trait_QTL == qtls[i, 'trait']) %>% select(c('-Log10(p)PheDb' ,'trait_PheDb', 'project', 'trait_description_PheDb')) %>% distinct()
        if (nrow(phetemp)){pretify2(phetemp) }
        else{cat("  \n SNPS were not detected for other phenotypes at this SNP \n   \n")}
     }
     
    cat(str_interp("  \n### PheWAS: Lowest P-values for other phenotypes in a 3Mb window ${qtls[i, 'trait']} ${qtls[i, 'SNP']}   \n"))
-   if (tolower(phewas) != "") {
+   if (class(phewas) == 'data.frame') {
        phetemp = phewas %>% filter(SNP_QTL == qtls[i, 'SNP']) %>% filter(trait_QTL == qtls[i, 'trait'])  %>% select(c('SNP_PheDb','-Log10(p)PheDb','R2', 'DP' ,'trait_PheDb', 'project', 'trait_description_PheDb')) %>% distinct() 
        if (nrow(phetemp)){pretify2(phetemp) }
        else{cat("  \n SNPS were not detected for other phenotypes in 3Mb window of trait topSNP \n   \n")}
    }
    
    cat(str_interp("  \n### eQTL: Lowest P-values for eqtls in a 3Mb window of ${qtls[i, 'trait']} ${qtls[i, 'SNP']}   \n"))
-   if (tolower(eqtl) != "") {
+   if (class(eqtl) == 'data.frame') {
        eqtltemp = eqtl %>% filter(SNP == paste0('chr',qtls[i, 'SNP'])) %>% filter(trait == qtls[i, 'trait'])  %>% select(c('SNP_eqtldb', '-Log10(p)_eqtldb', 'tissue', 'R2', 'DP', 'Ensembl_gene', 'slope', 'af', 'slope'))%>% rename( 'gene' = 'Ensembl_gene') %>% distinct()  # 'presence_samples'
        if (nrow(eqtltemp)){pretify2(eqtltemp) }
        else{cat("  \n SNPS were not detected for eQTLs in 3Mb window of trait topSNP \n   \n")}
    }
    
    cat(str_interp("  \n### sQTL: Lowest P-values for splice qtls in a 3Mb window of ${qtls[i, 'trait']} ${qtls[i, 'SNP']}   \n"))
-   if (tolower(sqtl) != "") {
+   if (class(sqtl) == 'data.frame') {
        sqtltemp = sqtl %>% filter(SNP == paste0('chr',qtls[i, 'SNP'])) %>% filter(trait == qtls[i, 'trait'])  %>% select(c('SNP_sqtldb', '-Log10(p)_sqtldb', 'tissue','R2', 'DP', 'Ensembl_gene',  'slope', 'af', 'slope')) %>% rename( 'gene' = 'Ensembl_gene') %>% distinct()   #'presence_samples',
        if (nrow(sqtltemp)){pretify2(sqtltemp)}
        else{cat("  \n SNPS were not detected for sQTLs in 3Mb window of trait topSNP \n   \n")}

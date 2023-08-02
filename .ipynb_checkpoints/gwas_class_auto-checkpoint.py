@@ -1,77 +1,113 @@
-import pandas as pd
-import subprocess
-from glob import glob
-from datetime import datetime
-import numpy as np
-import re
-from glob import glob
-import matplotlib.pyplot as plt
-import seaborn as sns
-from scipy.stats import pearsonr
-import matplotlib.pyplot as plt 
-import gzip
-import dask.dataframe as dd
-from tqdm import tqdm
-import gc
-from collections import Counter, defaultdict
-from sklearn.decomposition import PCA
-from umap import UMAP
-from pathlib import Path
-import os
-import inspect
-from time import sleep
-import sys
-import itertools
-from IPython.utils import io
-import psycopg2
-import warnings
-import requests
-from io import StringIO
-import requests
-import goatools
-from pdf2image import convert_from_path
-from goatools.base import download_ncbi_associations
-from collections import defaultdict, namedtuple
-from goatools.anno.genetogo_reader import Gene2GoReader
 #gene2go = download_ncbi_associations()
 #geneid2gos_rat= Gene2GoReader(gene2go, taxids=[10116])
-import mygene
-import seaborn as sns
-import dash_bio as dashbio
-import matplotlib.pyplot as plt
-tqdm.pandas()
-import plotly.graph_objects as go
-from  os.path import dirname, basename
-from itertools import product
-from scipy.spatial import distance
-from scipy.cluster.hierarchy import ward, dendrogram, leaves_list, linkage
-from sklearn.preprocessing import QuantileTransformer, MinMaxScaler
-import numpy as np
-from sklearn.impute import KNNImputer
-from sklearn.pipeline import make_pipeline
-from sklearn.linear_model import LinearRegression#, RobustRegression
-from sklearn.multioutput import MultiOutputRegressor
-from sklearn.preprocessing import OneHotEncoder
-import warnings
-from IPython.display import display
-mg = mygene.MyGeneInfo()
 #import sleep
-warnings.filterwarnings('ignore')
-import prophet
+from  os.path import dirname, basename
+from IPython.display import display
+from IPython.utils import io
+from collections import Counter, defaultdict
+from collections import defaultdict, namedtuple
+from datetime import datetime
+from glob import glob
+from goatools.anno.genetogo_reader import Gene2GoReader
+from goatools.base import download_ncbi_associations
+from io import StringIO
+from pathlib import Path
+from pdf2image import convert_from_path
 from prophet.plot import plot_plotly, plot_components_plotly
 from prophet.utilities import regressor_coefficients 
-import plotly.express as px
+from scipy.cluster.hierarchy import ward, dendrogram, leaves_list, linkage
+from scipy.spatial import distance
+from scipy.stats import pearsonr
+from sklearn.decomposition import PCA
+from sklearn.impute import KNNImputer
+from sklearn.linear_model import LinearRegression#, RobustRegression
+from sklearn.multioutput import MultiOutputRegressor
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import QuantileTransformer, MinMaxScaler
 from statsReport import quantileTrasformEdited as quantiletrasform
-import statsReport
-import pandas_plink
+from time import sleep
+from tqdm import tqdm
+from umap import UMAP
+import dash_bio as dashbio
 import dask.array as da
+import dask.dataframe as dd
+import gc
+import goatools
+import gzip
+import inspect
+import itertools
+import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt 
+import mygene
+import numpy as np
+import os
+import pandas as pd
+import pandas_plink
+import plotly.express as px
+import plotly.graph_objects as go
+import prophet
+import psycopg2
+import re
+import requests
+import seaborn as sns
+import statsReport
+import subprocess
+import sys
+import warnings
+mg = mygene.MyGeneInfo()
+tqdm.pandas()
+warnings.filterwarnings('ignore')
 #conda create --name gpipe -c conda-forge openjdk=17 ipykernel pandas seaborn scikit-learn umap-learn psycopg2 dask
 #conda activate gpipe
 #conda install -c bioconda gcta plink snpeff mygene
 #pip install goatools
 #wget https://snpeff.blob.core.windows.net/versions/snpEff_latest_core.zip
 
+def decompose_grm(grm_path, n_comp = 50, verbose = True):
+    (grmxr, ar) =  pandas_plink.read_grm(grm_path)
+    eigval, eigvec = np.linalg.eig(grmxr)
+    eig_pairs = [(np.abs(eigval[i]), eigvec[:,i]) for i in range(len(eigval))]
+    eig_pairs.sort(key=lambda x: x[0], reverse=True)
+    explained_var = np.array([eig_pairs[i][0] for i in range(n_comp)])/sum(list(zip(*eig_pairs))[0])
+    if verbose: print(f'explained_variances:{explained_var}\
+          \n total explained var:{sum(explained_var)}' )
+    return pd.DataFrame(np.vstack((eig_pairs[i][1] for i in range(n_comp))).T,
+             columns = [f'GRM_PC{x}' for x in range(1, n_comp+1)],
+             index= grmxr.sample_0.astype(str))
 
+def decompose_grm_pca(grm_path, n_comp = 5, verbose = True):
+    (grmxr, ar) =  pandas_plink.read_grm(grm_path)
+    from sklearn.decomposition import PCA
+    pca = PCA(n_components=n_comp)
+    decomp = pca.fit_transform(grmxr)
+    if verbose: print(f'explained_variances:{pca.explained_variance_ratio_}\
+          \ntotal explained var:{sum(pca.explained_variance_ratio_)}' )
+    return pd.DataFrame(decomp, columns = [f'GRM_PC{x}' for x in range(1, decomp.shape[1]+1)],
+             index= grmxr.sample_0.astype(str))
+
+def plink2pddf(plinkpath,rfids = 0, c = 0, pos_start = 0, pos_end = 0, snplist = 0):
+    snps, iid, gen = pandas_plink.read_plink(plinkpath)
+    snps.chrom = snps.chrom.astype(int)
+    snps.pos = snps.pos.astype(int)
+    isnps = snps.set_index(['chrom', 'pos'])
+    iiid = iid.set_index('iid')
+    if not snplist:
+        if (pos_start == pos_start == 0 ):
+            if not c: index = isnps
+            else: index = isnps.loc[(slice(c, c)), :]
+        index = isnps.loc[(slice(c, c),slice(pos_start, pos_end) ), :]
+    else:
+        index = isnps.set_index('snp').loc[snplist].reset_index()
+    col = iiid  if not rfids else iiid.loc[rfids]
+    return pd.DataFrame(gen.astype(np.float16)[index.i.values ][:, col.i].T, index = col.index.values.astype(str), columns = index.snp.values )
+
+def plink(print_call = False, **kwargs):
+    call = 'plink ' + ' '.join([f'--{k.replace("_", "-")} {v}'
+                                for k,v in kwargs.items() if k not in ['print_call'] ])
+    call = re.sub(r' +', ' ', call).strip(' ')
+    bash(call, print_call=print_call)
+    return
 
 class vcf_manipulation:
     def corrfunc(x, y, ax=None, **kws):
@@ -123,10 +159,9 @@ class vcf_manipulation:
         df.to_csv(filename, sep="\t", mode='a', index=False)
 
 def bash(call, verbose = 0, return_stdout = True, print_call = True):
-    if print_call: print(call+'\n')
-    out = subprocess.run(call.split(' '), capture_output = True) 
+    if print_call: print(call)
+    out = subprocess.run(call.strip(' ').split(' '), capture_output = True) 
     if verbose and not return_stdout: print(out.stdout)
-    
     if out.stderr: 
         try:print(out.stderr.decode('ascii'))
         except: print(out.stderr.decode('utf-8'))
@@ -391,8 +426,8 @@ class gwas_pipe:
                  trait_descriptions: list = [],
                  chrList: list = [], 
                  n_autosome: int = 20,
-                 all_genotypes: str = 'round10.vcf.gz',
-                 founder_genotypes: str = 'founder_genotypes/Ref_panel_mRatBN7_2_chr_GT', 
+                 all_genotypes: str = '/projects/ps-palmer/gwas/databases/rounds/round10_1',
+                 founder_genotypes: str = '/projects/ps-palfounder_genotypes/Ref_panel_mRatBN7_2_chr_GT', 
                  gtca_path: str = '',
                  snpeff_path: str =  'snpEff/',
                  phewas_db: str = 'phewasdb.parquet.gz',
@@ -409,8 +444,9 @@ class gwas_pipe:
         
         if os.path.exists(f'{self.path}temp'): bash(f'rm -r {self.path}temp')
         
-        if type(data) == str: df = pd.read_csv(data, dtype={'rfid': str})
-        else: df = data
+        if type(data) == str: 
+            df = pd.read_csv(data, dtype={'rfid': str}).replace([np.inf, -np.inf], np.nan)
+        else: df = data.replace([np.inf, -np.inf], np.nan)
         df.columns = df.columns.str.lower()
         if 'vcf' in self.all_genotypes:
             sample_list_inside_genotypes = vcf_manipulation.get_vcf_header(self.all_genotypes)
@@ -442,12 +478,19 @@ class gwas_pipe:
         
         self.autoGRM = f'{self.path}grm/AllchrGRM'
         self.xGRM = f'{path}grm/xchrGRM'
+        self.yGRM = f'{path}grm/ychrGRM'
+        self.mtGRM = f'{path}grm/mtchrGRM'
         self.log = pd.DataFrame( columns = ['function', 'call', 'out'])
         self.thrflag = f'--thread-num {threads}'
         self.threadnum = threads
         self.print_call = True
+        
+        self.replacenumstoXYMT = lambda x: str(x).replace(str(self.n_autosome+1), 'x')\
+                                                 .replace(str(self.n_autosome+2), 'y')\
+                                                 .replace(str(self.n_autosome+4), 'mt')\
+        
         if not chrList:
-            self.chrList = [str(i) if i!=(self.n_autosome+1) else 'x' for i in range(1,self.n_autosome+2)]
+            self.chrList = [self.replacenumstoXYMT(i) for i in range(1,self.n_autosome+4) if i != self.n_autosome+3]
         self.failed_full_grm = False
         
         self.sample_path = f'{self.path}genotypes/sample_rfids.txt'
@@ -468,9 +511,11 @@ class gwas_pipe:
         oheencoded = ohe.fit_transform(dfohe[categorical_all].astype(str)).todense()
         dfohe[[f'OHE_{x}'for x in ohe.get_feature_names_out(categorical_all)]] = oheencoded
         alltraits = list(datadic.query('trait_covariate == "trait"').measure.unique())
-        dfohe.loc[:, alltraits] = QuantileTransformer( n_quantiles = 100).fit_transform(dfohe.loc[:, alltraits])
+        dfohe.loc[:, alltraits] = QuantileTransformer(n_quantiles = 100).fit_transform(dfohe.loc[:, alltraits])
         continuousall = list(datadic.query('trait_covariate == "covariate_continuous"').measure)
-        dfohe.loc[:, continuousall] = QuantileTransformer( n_quantiles = 100).fit_transform(dfohe.loc[:, continuousall])
+        #print(f'all continuous variables {continuousall}')
+        if continuousall:
+            dfohe.loc[:, continuousall] = QuantileTransformer(n_quantiles = 100).fit_transform(dfohe.loc[:, continuousall])
         variablesall = []
         all_explained_vars = []
         stR = statsReport.stat_check(df)
@@ -633,166 +678,97 @@ class gwas_pipe:
         '''
         for folder in folders:
             os.makedirs(f'{self.path}{folder}', exist_ok = True)
-            
-            
-    def subsetSamplesFromAllGenotypes(self,samplelist: list = [], sexfmt: str = 'F|M',  sexColumn: str = 'sex',
-                                      use_rfid_from_df = True, sourceFormat = 'plink',  
-                                      geno: float = .1, maf: float = .005, hwe: float = 1e-10,hwex: float = 1e-20, **kwards ):
-        
-        '''
-        this function will get the large round vcf (or plink) file, subset it based of the rfid from the dataframe
-        (or a sample list if wanted), and filter based on missingness, minor allele frequency and hwe equilibrium
-        '''
-        
-        
-        funcName = inspect.getframeinfo(inspect.currentframe()).function
-        
+
+    def SubsetAndFilter(self, rfids=[] ,thresh_m: float = 0.1, thresh_hwe: float = 1e-10, thresh_maf: float = 0.005, verbose: bool = True,
+                       filter_based_on_subset: bool = True):
+
+        sex_encoding = defaultdict(lambda : 0, {'M': '1', 'F':'2'})
+        sex_encoder = lambda x: sex_encoding[x]    
+        self.sample_path = f'{self.path}genotypes/keep_rfids.txt'
+        self.sample_path_males = f'{self.path}genotypes/keep_rfids_males.txt'
+        self.sample_path_females = f'{self.path}genotypes/keep_rfids_females.txt'
+        accepted_snps_path = f'{self.path}genotypes/accepted_snps.txt'
         os.makedirs(f'{self.path}genotypes', exist_ok = True)
-        
-        mfList = sorted(sexfmt.split('|'))
-        if sourceFormat == 'vcf':
-            sample_list_inside_genotypes = vcf_manipulation.get_vcf_header(self.all_genotypes)
-        elif sourceFormat in ['bfile', 'plink']:
-            sample_list_inside_genotypes = pd.read_csv(self.all_genotypes+'.fam', header = None, sep='\s+', dtype = str)[1].to_list()
-        
-        dff = self.df[self.df.astype(str).rfid.isin(sample_list_inside_genotypes)].copy()
-        dff.rfid = dff.rfid.astype(str)
-        dff['plink_sex'] = dff[sexColumn].apply(lambda x: self.plink_sex_encoding(x, female_code=mfList[0] ,male_code=mfList[1]))
-        
-        if len(samplelist) > 0:
-            dff = dff.loc[dff.rfid.isin(samplelist)]
+        self.genotypes_subset = f'{self.path}genotypes/genotypes'
+
+        if not rfids:
+            famf = pd.read_csv(self.all_genotypes+'.fam', header = None, sep = '\t', dtype = str)[[1, 4]].set_axis(['iid', 'gender'], axis = 1)
+            gen_iids = famf['iid'].to_list()
+            if not filter_based_on_subset: 
+                famf[['iid', 'iid']].to_csv(self.sample_path, index = False, header = None, sep = ' ')
+                famf.query('gender in [1, "1"]')[['iid', 'iid']].to_csv(self.sample_path_males, index = False, header = None, sep = ' ')
+                famf.query('gender in [2, "2"]')[['iid', 'iid']].to_csv(self.sample_path_females, index = False, header = None, sep = ' ')
+            else:
+                tempdf = self.df.query('rfid in @gen_iids')
+                tempdf[['rfid', 'rfid']].to_csv(self.sample_path, index = False, header = None, sep = ' ')
+                tempdf.query('sex in ["M", "m", "male", "1", 1]')[['rfid', 'rfid']].to_csv(self.sample_path_males, index = False, header = None, sep = ' ')
+                tempdf.query('sex in ["F", "f", "female", "2", 2]')[['rfid', 'rfid']].to_csv(self.sample_path_females, index = False, header = None, sep = ' ')
+
+        os.makedirs(f'{self.path}genotypes', exist_ok = True)
+
+        print('calculating missing hwe maf for autossomes and MT')
+        plink(bfile = self.all_genotypes, chr = f'1-{self.n_autosome} MT', hardy = '', keep = self.sample_path, thread_num =  self.threadnum, 
+              freq = '', missing = '', nonfounders = '', out = f'{self.path}genotypes/autosomes', 
+              chr_set = f'{self.n_autosome} no-xy') #autosome_num = 20
+        print('calculating missing hwe maf for X')
+        plink(bfile = self.all_genotypes, chr = 'X', hardy = '', keep = self.sample_path, thread_num =  self.threadnum,
+              freq = '' , missing = '', nonfounders = '', out = f'{self.path}genotypes/xfilter',
+              filter_males = '', chr_set = f'{self.n_autosome} no-xy')
+        print('calculating missing hwe maf for Y')
+        plink(bfile = self.all_genotypes, chr = 'Y', hardy = '', keep = self.sample_path, thread_num =  self.threadnum,
+              freq = '' , missing = '', nonfounders = '', out = f'{self.path}genotypes/yfilter', 
+              filter_females = '', chr_set = f'{self.n_autosome} no-xy')
+
+        full = pd.concat([pd.concat(
+             [pd.read_csv(f'{self.path}genotypes/{x}.lmiss', sep = '\s+')[['CHR','SNP', 'F_MISS']].set_index('SNP'),
+              pd.read_csv(f'{self.path}genotypes/{x}.hwe', sep = '\s+')[['SNP', 'GENO' ,'P']].set_index('SNP')\
+                                                                                .set_axis(['GENOTYPES','HWE'], axis = 1),
+              pd.read_csv(f'{self.path}genotypes/{x}.frq', sep = '\s+')[['SNP', 'MAF', 'A1', 'A2']].set_index('SNP')], axis = 1) 
+                for x in tqdm(['autosomes', 'xfilter', 'yfilter'])])
+
+        full['PASS_MISS'] = ((full.F_MISS < thresh_m) + \
+                             (full.CHR == self.n_autosome + 2 )) > 0 
+        full['PASS_MAF'] = (full.MAF - .5).abs() <= .5 - thresh_maf
+        full['PASS_HWE']= ((full.HWE > thresh_hwe) + \
+                          (full.CHR == self.n_autosome + 4) + \
+                          (full.CHR == self.n_autosome + 2 )) > 0 
+        full['PASS'] = full['PASS_MISS'] * full['PASS_MAF'] * full['PASS_HWE']
+
+        full[full.PASS].reset_index()[['SNP']].to_csv(accepted_snps_path,index = False, header = None)
+        full.to_parquet(f'{self.path}genotypes/snpquality.parquet.gz', compression='gzip')
+
+        if verbose:
+            display(full.value_counts(subset=  full.columns[full.columns.str.contains('PASS')].to_list())\
+                                                   .to_frame().set_axis(['count for all chrs'], axis = 1))
+            for i in sorted(full.CHR.unique())[-4:]:
+                display(full[full.CHR == i].value_counts(subset=  full.columns[full.columns.str.contains('PASS')].to_list())\
+                                                   .to_frame().set_axis([f'count for chr {i}'], axis = 1))
+
+        plink(bfile = self.all_genotypes, extract = accepted_snps_path, keep = self.sample_path, make_bed = '', thread_num =  self.threadnum,
+              set_missing_var_ids = '@:#', keep_allele_order = '',
+              out = self.genotypes_subset, chr_set = f'{self.n_autosome} no-xy')
+
+        bim, fam, gen = pandas_plink.read_plink(self.genotypes_subset)
+        print('making plots for heterozygosity per CHR')
+        os.makedirs(f'{self.path}genotypes/images/', exist_ok = True)
+        for numc, c in tqdm(list(enumerate(bim.chrom.unique().astype(str)))):
+            snps = bim[bim['chrom'] == c]
+            snps = snps[::snps.shape[0]//2000+1]
             
-        self.sample_path = f'{self.path}genotypes/sample_rfids.txt'
-        self.sample_sex_path = f'{self.path}genotypes/sample_rfids_sex_info.txt'
-        self.sample_just_males_path = f'{self.path}genotypes/sample_rfids_just_males.txt'
-        
-        dff[['rfid', 'rfid']].to_csv(self.sample_path, index = False, header = None, sep = ' ')
-        dff[['rfid', 'plink_sex']].to_csv(self.sample_sex_path, index = False, header = None, sep = ' ')
-        dff[dff[sexColumn] == mfList[0]][['rfid', 'rfid']].to_csv(self.sample_just_males_path, index = False, header = None, sep = ' ')
-        self.sample_names = dff.rfid.to_list()
-        
-        fmt_call = {'vcf': 'vcf', 'plink': 'bfile'}[sourceFormat]        
-        
-        extra_params = f'--geno {geno} --maf {maf} --hwe {hwe} --set-missing-var-ids @:# --chr-set {self.n_autosome} no-xy --keep-allele-order' #--double-id 
-        
-        sex_flags = f'--update-sex {self.sample_sex_path}'
-        
-        self.bashLog(f'plink --{fmt_call} {self.all_genotypes} --keep {self.sample_path} {extra_params} {sex_flags} {self.thrflag} --make-bed --out {self.genotypes_subset}',
-                    funcName)
-        
-        tempfam = pd.read_csv(self.genotypes_subset+ '.fam', header = None, sep = '\s+', dtype = str)
-        tempfam = tempfam.merge(dff[['rfid','plink_sex']], left_on = 0, right_on='rfid', how = 'left').fillna(0)
-        tempfam.iloc[:, 4] = tempfam['plink_sex']
-        tempfam.drop(['rfid', 'plink_sex'], axis = 1).to_csv(self.genotypes_subset+ '.fam', header = None, sep = '\t', index = False)
-        
-        
-    def SubsampleMissMafHweFilter(self, sexfmt: str = 'M|F',  sexColumn: str = 'sex',
-                                  geno: float = .1, maf: float = .005, hwe: float = 1e-10,
-                                  sourceFormat = 'vcf', remove_dup: bool = True, print_call: bool = False, **kwards):
-        
-        '''
-        Function to subset and refilter the genotypes given a set of geno, maf and hwe.
-        
-        Parameters
-        ----------
-        sexfmt: str = 'M|F'
-            format of the sex column it should be written as the options for describing sex in the self.df
-            M -> male, F -> female becomes "M|F"
-            0 -> male, 1 -> female becomes "0|1"
-            male -> male, fem -> female becomes "male|fem"
-        sexColumn: str = 'sex'
-            which column of self.df contains the sex information
-        geno: float = .1
-            missingness threshold
-        maf: float = .005
-        hwe: float = 1e-10
-        sourceFormat = 'vcf'
-        remove_dup: bool = True
-        print_call: bool = False
-        
-        Design
-        ------
-        1.It cross validates the rfids from self.df and the genotypes file
-        2.Then it generates 4 files based on self.df 
-            for female samples  one containing the rfids and another containing the rfids 
-            and the other sex information encoded' on the plink format (0 is missing, 
-            1 is male 2 is female)
-            for male samples  one containing the rfids and another containing the rfids 
-            and the other sex information encoded' on the plink format (0 is missing, 
-            1 is male 2 is female)
-        
-        3.For female samples we apply all the filters
-        4.For males we apply the all the filters on the autossomes but for the X we do not apply the HWE
-        5.then the resulting plink files are merged and the path is assigned to self.genotypes_subset
-        '''
-        print(f'starting subsample plink ... {self.project_name}') 
-        funcName = inspect.getframeinfo(inspect.currentframe()).function
-        
-               
-        fmt_call = {'vcf': 'vcf', 'plink': 'bfile'}[sourceFormat]  
-        rmv = f' --set-missing-var-ids @:# ' if remove_dup else ' '#--double-id 
-        sub = self.genotypes_subset
-        
-        mfList = sorted(sexfmt.split('|'))
-        
-        dff = self.df.copy()
-        dff.rfid = dff.rfid.astype(str)
-        dff['plink_sex'] = dff[sexColumn].apply(lambda x: self.plink_sex_encoding(x, female_code=mfList[0] ,male_code=mfList[1]))
-        
-        dff[['rfid', 'rfid']].to_csv(self.sample_path, index = False, header = None, sep = ' ')
-        dff[['rfid', 'plink_sex']].to_csv(self.sample_sex_path, index = False, header = None, sep = ' ')
-        dff[['rfid', 'rfid', 'plink_sex']].to_csv(self.sample_sex_path_gcta, index = False, header = None, sep = ' ')
-        self.sample_names = dff.rfid.to_list()
-        
-        self.sample_just_males_path = f'{self.path}genotypes/sample_rfids_just_males.txt'
-        dff[dff[sexColumn] == mfList[0]][['rfid', 'rfid']].to_csv(self.sample_just_males_path, index = False, header = None, sep = ' ')
-        
-        self.samples = {}
-        self.samples_sex = {}
-        for num, sx in enumerate(tqdm(mfList)): 
-            
-            dff_sm = dff[dff[sexColumn] == sx]
-            dff_sm['plink_sex'] = dff_sm[sexColumn].apply(lambda x: self.plink_sex_encoding(x, female_code=mfList[0] ,male_code=mfList[1]))
-            
-            self.samples[sx] = f'{self.path}genotypes/sample_rfids_{sx}.txt'
-            dff_sm[['rfid', 'rfid']].to_csv(self.samples[sx], index = False, header = None, sep = ' ')
-            
-            self.samples_sex[sx] = f'{self.path}genotypes/sample_rfids_sex_info_{sx}.txt'
-            dff_sm[['rfid', 'plink_sex']].to_csv(self.samples_sex[sx], index = False, header = None, sep = ' ')
-            
-            filtering_flags = f' --geno {geno} --maf {maf} --hwe {hwe}'
-            filtering_flags_justx = f''
-            extra_flags = f'--not-chr X'  if num == 1 else ''
-            sex_flags = f'--update-sex {self.samples_sex[sx]}'
-            
-            self.bashLog(f'plink --{fmt_call} {self.all_genotypes} --keep {self.samples[sx]}  --chr-set {self.n_autosome} no-xy \
-                          {sex_flags} {filtering_flags} {rmv} {extra_flags} {self.thrflag} --make-bed --out {sub}_{sx}',
-                        f'{funcName}_subseting_{sx}', print_call=print_call)#--autosome-num {self.n_autosome}
-            
-            if num == 1:
-                self.bashLog(f'plink --bfile {self.all_genotypes} --keep {self.samples[sx]}  --chr-set {self.n_autosome} no-xy\
-                                --chr x {self.thrflag} --geno {geno} --maf {maf} --make-bed --out {sub}_{sx}_xchr',
-                        f'{funcName}_maleXsubset{sx}',  print_call=print_call) #--out {sub}_{sx}_xchr {sub}_{sx} 
-                male_1_x_filenames = [aa for aa in [f'{sub}_{sx}', f'{sub}_{sx}_xchr'] if len(glob(aa+'.*')) >= 5]
-                male_gen_filenames = f'{self.path}genotypes/temp_male_filenames'
-                pd.DataFrame(male_1_x_filenames).to_csv(male_gen_filenames, index = False, header = None)
-            else: female_hwe = f'{sub}_{sx}'
-                
-        print('merging sexes')        
-        self.bashLog(f'plink --bfile {female_hwe} --merge-list {male_gen_filenames} {self.thrflag} \
-                       --geno {geno} --maf {maf} --chr-set {self.n_autosome} no-xy --make-bed --out {sub}',
-                        f'{funcName}_mergeSexes', print_call=print_call) # {filtering_flags}
-        
-        self.genotypes_subset = f'{sub}'
-        
-        tempfam = pd.read_csv(self.genotypes_subset+ '.fam', header = None, sep = '\s+', dtype = str)
-        tempfam = tempfam.merge(dff[['rfid','plink_sex']], left_on = 0, right_on='rfid', how = 'left').fillna(0)
-        tempfam.iloc[:, 4] = tempfam['plink_sex']
-        tempfam.drop(['rfid', 'plink_sex'], axis = 1).to_csv(self.genotypes_subset+ '.fam', header = None, sep = '\t', index = False)
-        
+            f, ax = plt.subplots(2, 2, sharex = True, sharey = True, figsize=(20,20))
+            for num, g in enumerate(['M', 'F']):
+                ys = gen[snps.i].compute().T
+                fams= fam[fam.gender == sex_encoder(g)]#[::snps.shape[0]//300]
+                sns.heatmap(pd.DataFrame(abs(ys[fams.i] - 1),columns = snps.snp, index = fams.iid ), 
+                            cbar=False, cmap = 'coolwarm', ax = ax[num, 0])
+                sns.heatmap(pd.DataFrame(ys[fams.i] ,columns = snps.snp, index = fams.iid ), cmap = 'BrBG', ax = ax[num, 1],
+                           cbar=False)
+            plt.tight_layout()
+            plt.savefig(f'{self.path}genotypes/images/genotypes_chr{c}')
+            plt.close()
         
     def generateGRM(self, autosome_list: list = [], print_call: bool = True, allatonce: bool = False,
-                    extra_chrs: list = ['xchr'], just_autosomes: bool = True, just_full_grm: bool = True,
+                    extra_chrs: list = ['X', 'Y', 'MT'], just_autosomes: bool = True, just_full_grm: bool = True,
                    full_grm: bool = True, **kwards):
         
         '''
@@ -828,13 +804,28 @@ class gwas_pipe:
             
         all_filenames_partial_grms = pd.DataFrame(columns = ['filename'])
 
-        if 'xchr' in extra_chrs:
+        if 'X' in extra_chrs:
             self.bashLog(f'{self.gcta} {self.thrflag} --bfile {self.genotypes_subset} --autosome-num {self.n_autosome} \
                            --make-grm-xchr --out {self.xGRM}',
                         f'{funcName}_chrX', print_call = False)
-
             all_filenames_partial_grms.loc[len(all_filenames_partial_grms), 'filename'] = self.xGRM
-
+            
+        if 'Y' in extra_chrs:
+            try:
+                self.bashLog(f'{self.gcta} {self.thrflag} --bfile {self.genotypes_subset} --keep {self.sample_path_males} --autosome-num {self.n_autosome+4} \
+                               --make-grm-bin --chr {self.n_autosome+2} --out {self.yGRM}',
+                            f'{funcName}_chrY', print_call = False)
+                all_filenames_partial_grms.loc[len(all_filenames_partial_grms), 'filename'] = self.yGRM
+            except: print('could not make grm for chr Y')
+            
+        if 'MT' in extra_chrs:
+            try:
+                self.bashLog(f'{self.gcta} {self.thrflag} --bfile {self.genotypes_subset} --autosome-num {self.n_autosome+6} --chr {self.n_autosome+4}\
+                               --make-grm-bin --out {self.mtGRM}',
+                            f'{funcName}_chrMT', print_call = False)
+                all_filenames_partial_grms.loc[len(all_filenames_partial_grms), 'filename'] = self.mtGRM
+            except:print('could not make grm for chr MT')
+            
         for c in tqdm(autosome_list):
             self.bashLog(f'{self.gcta} {self.thrflag} --bfile {self.genotypes_subset} --chr {c} --autosome-num {self.n_autosome}\
                          --make-grm-bin --out {self.path}grm/{c}chrGRM',
@@ -900,15 +891,18 @@ class gwas_pipe:
                 self.bashLog(f'{self.gcta} --reml {self.thrflag}  --autosome-num {self.n_autosome}\
                                            --pheno {trait_file} --grm {self.autoGRM} --out {out_file}',
                             f'snpHeritability_{trait}', print_call = print_call) #--autosome
+            try:
+                a = pd.read_csv(f'{out_file}.hsq', skipfooter=6, sep = '\t',engine='python')
+                b = pd.read_csv(f'{out_file}.hsq', skiprows=6, sep = '\t', header = None, index_col = 0).T.rename({1: trait})
+                newrow = pd.concat(
+                    [a[['Source','Variance']].T[1:].rename({i:j for i,j in enumerate(a.Source)}, axis = 1).rename({'Variance': trait}),
+                    b],axis =1 )
+                newrow.loc[trait, 'heritability_SE'] = a.set_index('Source').loc['V(G)/Vp', 'SE']
+            except: 
+                newrow = pd.DataFrame(np.array(['Fail']*10)[:, None].T, columns =['V(G)','V(e)','Vp','V(G)/Vp','logL0','LRT','df','Pval','n','heritability_SE'], index = [trait])
             
-            a = pd.read_csv(f'{out_file}.hsq', skipfooter=6, sep = '\t',engine='python')
-            b = pd.read_csv(f'{out_file}.hsq', skiprows=6, sep = '\t', header = None, index_col = 0).T.rename({1: trait})
-            newrow = pd.concat(
-                [a[['Source','Variance']].T[1:].rename({i:j for i,j in enumerate(a.Source)}, axis = 1).rename({'Variance': trait}),
-                b],axis =1 )
-            newrow.loc[trait, 'heritability_SE'] = a.set_index('Source').loc['V(G)/Vp', 'SE']
             h2table= pd.concat([h2table,newrow])
-            
+
         if save: h2table.to_csv(f'{self.path}results/heritability/heritability.tsv', sep = '\t')
         return h2table
     
@@ -965,7 +959,7 @@ class gwas_pipe:
         for i in outmixed.columns: outmixed.loc[i,i] =  H2.loc['regressedlr_'+i, 'her_str']
         outmixed.to_csv(f'{self.path}results/heritability/genetic_correlation_matrix.csv')
         a = sns.clustermap(outmixed.applymap(lambda x: float(x.split('+-')[0])).copy().T,  cmap="RdBu_r", col_cluster= False, row_cluster=False,
-                annot=outmixed.applymap(lambda x: '' if '*' not in x else '*').copy().T, vmin =-1, vmax =1, center = 0 , fmt = '', square = True, linewidth = .3 )
+                annot=outmixed.applymap(lambda x: '' if '*' not in x else '*').copy().T, vmin =-1, vmax =1, center = 0 , fmt = '', square = True, linewidth = .3, figsize=(25, 25) )
         dendrogram(hie, ax = a.ax_col_dendrogram)
         plt.savefig(f'{self.path}images/genetic_correlation_matrix.png', dpi = 400)
         return outmixed
@@ -1100,14 +1094,13 @@ class gwas_pipe:
                     print(f"couldn't run trait: {trait}")
                     self.GWAS(traitlist = traitlist, run_per_chr = True, print_call= print_call)
                     return 2
-            ranges = [self.n_autosome+1]
+            ranges = [self.n_autosome+1, self.n_autosome+2, self.n_autosome+4]
         else:
             print('running gwas per chr per trait...')
-            ranges =  range(1,self.n_autosome+2)
+            ranges = [i for i in range(1,self.n_autosome+2) if i != self.n_autosome+3]
         
         for trait, chrom in tqdm(list(itertools.product(traitlist,ranges))):
-            if chrom == self.n_autosome+1: chromp2 = 'x'
-            else: chromp2 = chrom
+            chromp2 = self.replacenumstoXYMT(chrom)
             self.bashLog(f'{self.gcta} {self.thrflag} --pheno {self.path}data/pheno/{trait}.txt --bfile {self.genotypes_subset} \
                                        --grm {self.path}grm/AllchrGRM \
                                        --autosome-num {self.n_autosome}\
@@ -1233,8 +1226,8 @@ class gwas_pipe:
         
         if not NonStrictSearchDir:
             topSNPs = pd.DataFrame()
-            for t, chrom in tqdm(list(itertools.product(self.traits, range(1,self.n_autosome+2)))):
-                    if chrom == self.n_autosome+1 : chrom = 'x'
+            for t, chrom in tqdm(list(itertools.product(self.traits, range(1,self.n_autosome+4)))):
+                    chrom = self.replacenumstoXYMT(chrom)
                     filename = f'{self.path}results/gwas/{t}_chrgwas{chrom}.mlma'
                     if os.path.exists(filename):
                         topSNPs = pd.concat([topSNPs, pd.read_csv(filename, sep = '\t').query(f'p < {thresh}').assign(trait=t)])
@@ -1422,13 +1415,22 @@ class gwas_pipe:
             os.system(f'chmod +x {lzpvalname}')
             os.system(f'chmod +x {lzr2name}')
             for filest in glob(f'{self.path}temp/{qtl_row.trait}*{qtl_row.SNP}'): os.system(f'rm -r {filest}')
-            os.system(f'''conda run -n lzenv && \
-                locuszoomfiles/bin/locuszoom \ 
+            
+            os.system(f'''module load R && module load python && \
+                /projects/ps-palmer/software/local/src/locuszoom/bin/locuszoom \
                 --metal {lzpvalname} --ld {lzr2name} \
                 --refsnp {qtl_row.SNP} --chr {int(topsnpchr)} --start {int(range_interest["min"] - padding)} --end {int(range_interest["max"] + padding)} --build manual \
                 --db /projects/ps-palmer/gwas/databases/databases_lz/{genome_lz_path}.db \
                 --plotonly showRecomb=FALSE showAnnot=FALSE --prefix {self.path}temp/{qtl_row.trait} signifLine="{threshold},{suggestive_threshold}" signifLineColor="red,blue" \
-                title = "{qtl_row.trait} SNP {qtl_row.SNP}" > /dev/null 2>&1 ''') #--build u01_peter_kalivas_v7 module load R && module load python
+                title = "{qtl_row.trait} SNP {qtl_row.SNP}" > /dev/null 2>&1 ''')
+            
+            #os.system(f'''conda run -n lzenv && \
+            #    locuszoomfiles/bin/locuszoom \ 
+            #    --metal {lzpvalname} --ld {lzr2name} \
+            #    --refsnp {qtl_row.SNP} --chr {int(topsnpchr)} --start {int(range_interest["min"] - padding)} --end {int(range_interest["max"] + padding)} --build manual \
+            #    --db /projects/ps-palmer/gwas/databases/databases_lz/{genome_lz_path}.db \
+            #    --plotonly showRecomb=FALSE showAnnot=FALSE --prefix {self.path}temp/{qtl_row.trait} signifLine="{threshold},{suggestive_threshold}" signifLineColor="red,blue" \
+            #    title = "{qtl_row.trait} SNP {qtl_row.SNP}" > /dev/null 2>&1 ''') #--build u01_peter_kalivas_v7 module load R && module load python
             path = glob(f'{self.path}temp/{qtl_row.trait}*{qtl_row.SNP}/*.pdf'.replace(':', '_'))[0]
             for num,image in enumerate(convert_from_path(path)):
                 bn = basename(path).replace('.pdf', '.png')
@@ -1475,7 +1477,6 @@ class gwas_pipe:
         10.return the final PheWAS table.
         '''
         print(f'starting phewas ... {self.project_name}')  
-        import re
         if qtltable.shape == (0,0): qtltable = pd.read_csv(self.annotatedtablepath).set_index('SNP')
         db_vals = pd.read_parquet(self.phewas_db).query(f'p < {pval_threshold}')  #, compression='gzip'   and project != "{self.project_name}   
         db_vals.SNP = db_vals.SNP.str.replace('chr', '')
@@ -1508,7 +1509,6 @@ class gwas_pipe:
             pd.DataFrame().to_csv(self.phewas_window_r2, index = False)
             return -1
             
-        
         out = table_window_match.groupby([ 'SNP_QTL','project', 'trait_phewasdb'])\
                                 .apply(lambda df : df[df.uploadeddate == df.uploadeddate.max()]\
                                                    .nsmallest(n = nreturn, columns = 'p_phewasdb'))\
@@ -1547,9 +1547,6 @@ class gwas_pipe:
         oo = pd.concat([aa, bb]).fillna('Exact match SNP').to_csv(f'{self.path}results/phewas/pretty_table_both_match.tsv', index = False, sep = '\t')
         
         return phewas_info
-        
-
-        
         
     def eQTL(self, qtltable: pd.DataFrame(), pval_thresh: float = 1e-4, r2_thresh: float = .6, nreturn: int =1, ld_window: int = 3e6,\
             tissue_list: list = ['BLA','Brain','Eye','IL','LHb','NAcc','NAcc2','OFC','PL','PL2'],\
@@ -1682,12 +1679,13 @@ class gwas_pipe:
             8.save the final eQTL table to a file and return the final eQTL table.
         '''
         print(f'starting spliceqtl ... {self.project_name}') 
+        mygene_species = {'rn6': 'rat', 'rn7': 'rat', 'm38': 'mouse', 'cfw': 'mouse'}[genome]
         #d =  {'rn6': '', 'rn7': '.rn7.2'}[genome]
         if qtltable.shape == (0,0): qtltable = pd.read_csv(self.annotatedtablepath).set_index('SNP')
         out = []
         loop_str = [('cis','cis_qtl_signif')] if just_cis else [('cis','cis_qtl_signif'), ('trans','trans_qtl_pairs')]
         
-        for tissue, (typ, prefix) in tqdm(list(product(tissue_list, loop_str)),  position=0, desc="tissue+CisTrans", leave=True):
+        for tissue, (typ, prefix) in tqdm(list(itertools.product(tissue_list, loop_str)),  position=0, desc="tissue+CisTrans", leave=True):
 
             tempdf = pd.read_csv(f'https://ratgtex.org/data/splice/{tissue}.{genome}.splice.{prefix}.txt.gz', sep = '\t').assign(tissue = tissue)\
                                                                                                              .rename({'variant_id': 'SNP', 'pval': 'pval_nominal'}, axis = 1)  
@@ -1777,8 +1775,9 @@ class gwas_pipe:
             fig2.update_layout(yaxis_range=[0,max(6, -np.log10(df_gwas.p.min())+.5)], xaxis_range = df_gwas.Chromosome.agg(['min', 'max']),
                                template='simple_white',width = 1920, height = 800, showlegend=False, xaxis_title="Chromosome", yaxis_title="-log10(p)")
             #fig2.layout['title'] = 'Manhattan Plot'
-            fig2.update_xaxes(ticktext = [str(i) if i!=self.n_autosome+1 else 'X' for i in range(1,self.n_autosome+2)],
-                      tickvals =(append_position + df_gwas.groupby('Chr').bp.agg('max').sort_index().cumsum())//2 )
+            dfgwasgrouped = df_gwas.groupby('Chr')
+            fig2.update_xaxes(ticktext = [self.replacenumstoXYMT(names) for names,dfs in dfgwasgrouped],
+                  tickvals =(append_position + dfgwasgrouped.bp.agg('max').sort_index().cumsum())//2 )
             if 'png' in save_fmt: fig2.write_image(f"{self.path}images/manhattan/{t}.png",width = 1920, height = 800)
             if display: fig2.show(renderer = 'png',width = 1920, height = 800)
             
@@ -1831,8 +1830,10 @@ class gwas_pipe:
         df_gwas.trait = df_gwas.trait.str.replace('regressedlr_', '')
         df_gwas.query('annotate == True').apply(lambda x: fig2.add_annotation(x=x.Chromosome, y=-np.log10(x.p),text=f"{x.trait}",showarrow=True,arrowhead=2), axis = 1)
         #fig2.layout['title'] = 'Porcupine Plot'
-        fig2.update_xaxes(ticktext = [str(i) if i!=self.n_autosome+1 else 'X' for i in range(1,self.n_autosome+2)],
-                  tickvals =(append_position + df_gwas.groupby('Chr').bp.agg('max').sort_index().cumsum())//2 )
+        
+        dfgwasgrouped = df_gwas.groupby('Chr')
+        fig2.update_xaxes(ticktext = [self.replacenumstoXYMT(names) for names,dfs in dfgwasgrouped],
+                  tickvals =(append_position + dfgwasgrouped.bp.agg('max').sort_index().cumsum())//2 )
         if 'png' in save_fmt: fig2.write_image(f"{self.path}images/porcupineplot.png",width = 1920, height = 800)
         if display: fig2.show(renderer = 'png',width = 1920, height = 800)
         #return fig2, df_gwas
@@ -1917,7 +1918,7 @@ class gwas_pipe:
         with open(f'{self.path}results/gwas_report.rmd', 'w') as f: f.write(report_txt)
         try:bash(f'rm -r {self.path}results/gwas_report_cache')
         except:pass
-        os.system(f'''conda run -n lzenv Rscript -e "rmarkdown::render('{self.path}results/gwas_report.rmd')" | grep -oP 'Output created: gwas_report.html' '''); #> /dev/null 2>&1 r-environment
+        os.system(f'''conda run -n r-environment Rscript -e "rmarkdown::render('{self.path}results/gwas_report.rmd')" | grep -oP 'Output created: gwas_report.html' '''); #> /dev/null 2>&1 r-environment
         bash(f'''cp {self.path}results/gwas_report.html {self.path}results/gwas_report_{self.project_name}_round{round_version}_threshold{threshold}_n{self.df.shape[0]}_date{datetime.today().strftime('%Y-%m-%d')}_gwasversion_{gwas_version}.html''')
         #print('Output created: gwas_report.html') if 'Output created: gwas_report.html' in ''.join(repout) else print(''.join(repout))
         try:bash(f'rm -r {self.path}results/gwas_report_cache')
