@@ -692,7 +692,7 @@ class gwas_pipe:
         self.genotypes_subset = f'{self.path}genotypes/genotypes'
 
         if not rfids:
-            famf = pd.read_csv(self.all_genotypes+'.fam', header = None, sep = '\t', dtype = str)[[1, 4]].set_axis(['iid', 'gender'], axis = 1)
+            famf = pd.read_csv(self.all_genotypes+'.fam', header = None, sep = '\s+', dtype = str)[[1, 4]].set_axis(['iid', 'gender'], axis = 1)
             gen_iids = famf['iid'].to_list()
             if not filter_based_on_subset: 
                 famf[['iid', 'iid']].to_csv(self.sample_path, index = False, header = None, sep = ' ')
