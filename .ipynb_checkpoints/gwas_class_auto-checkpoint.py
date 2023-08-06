@@ -19,12 +19,13 @@ from scipy.cluster.hierarchy import ward, dendrogram, leaves_list, linkage
 from scipy.spatial import distance
 from scipy.stats import pearsonr
 from sklearn.decomposition import PCA
+from sklearn.feature_extraction.text import TfidfTransformer
 from sklearn.impute import KNNImputer
 from sklearn.linear_model import LinearRegression#, RobustRegression
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.preprocessing import QuantileTransformer, MinMaxScaler
+from sklearn.preprocessing import QuantileTransformer, MinMaxScaler, OneHotEncoder, LabelEncoder, StandardScaler
+from sklearn.semi_supervised import LabelSpreading
 from statsReport import quantileTrasformEdited as quantiletrasform
 from time import sleep
 from tqdm import tqdm
@@ -38,7 +39,7 @@ import gzip
 import inspect
 import itertools
 import matplotlib.pyplot as plt
-import matplotlib.pyplot as plt 
+from matplotlib.colors import  PowerNorm
 import mygene
 import numpy as np
 import os
@@ -50,10 +51,12 @@ import prophet
 import psycopg2
 import re
 import requests
+from scipy.spatial.distance import cdist
 import seaborn as sns
 import statsReport
 import subprocess
 import sys
+from umap import UMAP
 import warnings
 mg = mygene.MyGeneInfo()
 tqdm.pandas()
@@ -87,7 +90,9 @@ def decompose_grm_pca(grm_path, n_comp = 5, verbose = True):
              index= grmxr.sample_0.astype(str))
 
 def plink2pddf(plinkpath,rfids = 0, c = 0, pos_start = 0, pos_end = 0, snplist = 0):
-    snps, iid, gen = pandas_plink.read_plink(plinkpath)
+    if type(plinkpath) == str: 
+        snps, iid, gen = pandas_plink.read_plink(plinkpath)
+    else: snps, iid, gen = plinkpath
     snps.chrom = snps.chrom.astype(int)
     snps.pos = snps.pos.astype(int)
     isnps = snps.set_index(['chrom', 'pos'])
@@ -98,6 +103,7 @@ def plink2pddf(plinkpath,rfids = 0, c = 0, pos_start = 0, pos_end = 0, snplist =
             else: index = isnps.loc[(slice(c, c)), :]
         index = isnps.loc[(slice(c, c),slice(pos_start, pos_end) ), :]
     else:
+        snplist = list(set(snplist) & set(isnps.snp))
         index = isnps.set_index('snp').loc[snplist].reset_index()
     col = iiid  if not rfids else iiid.loc[rfids]
     return pd.DataFrame(gen.astype(np.float16)[index.i.values ][:, col.i].T, index = col.index.values.astype(str), columns = index.snp.values )
@@ -108,6 +114,113 @@ def plink(print_call = False, **kwargs):
     call = re.sub(r' +', ' ', call).strip(' ')
     bash(call, print_call=print_call)
     return
+
+def make_LD_plot(ys: pd.DataFrame, fname: str):
+    r2mat = ys.corr()**2 
+    dist_r2 = r2mat.reset_index(names = ['snp1']).melt(id_vars = 'snp1', value_name='r2')
+    dist_r2['distance'] = (dist_r2.snp1.str.extract(':(\d+)').astype(int) - dist_r2.snp.str.extract(':(\d+)').astype(int)).abs()
+    fr2, axr2 = plt.subplots(1, 2,  figsize=(20,10))
+    sns.regplot(dist_r2.assign(logdils = 1/np.log10(dist_r2.distance+100)).sample(2000, weights='logdils'), 
+                x='distance', y = 'r2' ,logistic = True, line_kws= {'color': 'red'},
+               scatter_kws={'linewidths':1,'edgecolor':'black', 'alpha': .2},  ax = axr2[0])
+    sns.heatmap(r2mat, ax = axr2[1], cmap = 'Greys' , cbar = False, vmin = 0, vmax = 1 )
+    sns.despine()
+    plt.savefig(fname)
+    plt.close()
+    
+def nan_sim(x, y):
+    if ~np.isnan(o := np.nanmean(np.abs(x-y))): return 1/(o+1)**2
+    return 0
+
+def nan_dist(x, y):
+    if ~np.isnan(o := np.nanmean(np.abs(x-y))): return o/2
+    return 1
+
+def combine_hex_values(d):
+    d_items = sorted(d.items())
+    tot_weight = sum(d.values())
+    red = int(sum([int(k[:2], 16)*v for k, v in d_items])/tot_weight)
+    green = int(sum([int(k[2:4], 16)*v for k, v in d_items])/tot_weight)
+    blue = int(sum([int(k[4:6], 16)*v for k, v in d_items])/tot_weight)
+    zpad = lambda x: x if len(x)==2 else '0' + x
+    return zpad(hex(red)[2:]) + zpad(hex(green)[2:]) + zpad(hex(blue)[2:])
+
+def get_topk_values(s, k): 
+    return s.groupby(s.values).agg(lambda x: '|'.join(x.index) ).sort_index()[::-1].values[:k]
+
+def _distance_to_founders(subset_geno,founderfile,fname,c, scaler: str = 'ss', verbose = False):
+    if type(founderfile) == str: bimf, famf, genf = pandas_plink.read_plink(founderfile)
+    else: bimf, famf, genf = founderfile
+    if type(subset_geno) == str: bim, fam, gen = pandas_plink.read_plink(founderfile)
+    else: bim, fam, gen = subset_geno
+    
+    snps = bim[bim['chrom'] == c]
+    snps = snps[::snps.shape[0]//2000+1]
+    ys = pd.DataFrame(gen[snps.i][:, fam.i].compute().T,columns = snps.snp, index = fam.iid )
+    
+    founder_gens = plink2pddf( (bimf, famf, genf),snplist= list(snps.snp))
+    if (aa := bimf.merge(snps, on = 'snp', how = "inner").query('a0_x != a0_y')).shape[0]:
+        print('allele order mixed between founders and samples')
+        display(aa)
+    Scaler = {'tfidf': make_pipeline(KNNImputer(), TfidfTransformer()), 
+              'ss': StandardScaler(), 'passthrough': make_pipeline('passthrough')}
+    founder_colors = defaultdict(lambda: 'white', {'BN': '#1f77b4', 'ACI':'#ff7f0e', 'MR': '#2ca02c', 'M520':'#d62728',
+                      'F344': '#9467bd', 'BUF': '#8c564b', 'WKY': '#e377c2', 'WN': '#17becf'})
+    shared_snps = list(set(ys.columns) & set(founder_gens.columns))
+    merged1 = pd.concat([ys[shared_snps], founder_gens[shared_snps]])
+    merged1.loc[:, :] = Scaler[scaler].fit_transform(merged1) if scaler != 'tfidf' \
+                        else Scaler[scaler].fit_transform(merged1).toarray()
+    dist2f = pd.DataFrame( cdist(merged1.loc[ys.index], merged1.loc[founder_gens.index] , metric = nan_sim),
+                          index = ys.index, columns=founder_gens.index)
+    matchdf = dist2f.apply(lambda x: pd.Series(get_topk_values(x,2)), axis = 1)\
+                    .set_axis(['TopMatch', "2ndMatch"], axis = 1)\
+                    .fillna(method='ffill', axis = 1)
+    matchdfcolors = matchdf.applymap(lambda x: '#'+combine_hex_values({founder_colors[k][1:]: 1 for k in x.split('|')}))
+    genders = fam.set_index('iid').loc[dist2f.index.to_list(), :].gender.map(lambda x: ['white','steelblue', 'pink'][int(x)]).to_frame()
+    rowcols = pd.concat([genders,matchdfcolors], axis = 1)
+    #sns.clustermap(dist2f , cmap = 'turbo',  figsize= (8, 8), 
+    #               square = True, norm=PowerNorm(4, vmax = 1, vmin = 0), 
+    #                row_colors=rowcols) #vmin = dist2f.melt().quantile(.099).value,norm=LogNorm(),
+    sns.clustermap(dist2f.div(dist2f.sum(axis = 1), axis = 0).fillna(0) , cmap = 'turbo',  figsize= (15, 15), 
+               square = True, norm=PowerNorm(.5, vmax = 1, vmin = 0), 
+                row_colors=rowcols)
+    print(f'the following founders are present in the chr {c}:\n')
+    display(matchdf.TopMatch.value_counts().to_frame())
+    plt.savefig(fname)
+    if verbose: plt.show()
+    plt.close()
+    return
+
+def _make_umap_plot(subset_geno, founderfile, fname, c, verbose = False):
+    if type(founderfile) == str: bimf, famf, genf = pandas_plink.read_plink(founderfile)
+    else: bimf, famf, genf = founderfile
+    if type(subset_geno) == str: bim, fam, gen = pandas_plink.read_plink(founderfile)
+    else: bim, fam, gen = subset_geno
+    
+    snps = bim[bim['chrom'] == c]
+    snps = snps[::snps.shape[0]//2000+1]
+    ys = pd.DataFrame(gen[snps.i][:, fam.i].compute().T,columns = snps.snp, index = fam.iid )
+    
+    founder_gens = plink2pddf( (bimf, famf, genf),snplist= list(snps.snp))
+    shared_snps = list(set(ys.columns) & set(founder_gens.columns))
+    merged = pd.concat([ys[shared_snps], founder_gens[shared_snps]])
+    merged.iloc[:, :] = make_pipeline(KNNImputer(), StandardScaler()).fit_transform(merged)
+    merged['label'] = merged.index.to_series().apply(lambda x: x if x in founder_gens.index else 'AAunk')
+    le = LabelEncoder().fit(merged.label)
+    merged['labele'] = le.transform(merged.label) -1
+    o = UMAP(metric ='manhattan').fit_transform((merged.loc[:, merged.columns.str.contains(':')]), y=merged.labele)
+    o = pd.DataFrame(o, index = merged.index, columns=['UMAP1', 'UMAP2'])
+    o['label'] = merged['label']
+    o['size'] = o.label.apply(lambda x: 200 if x!= 'AAunk' else 20)
+    o['alpha'] = o.label.apply(lambda x: .95 if x!= 'AAunk' else .3)
+    labeler =  LabelSpreading().fit(o[['UMAP1', 'UMAP2']], merged.labele)
+    o['predictedLabel'] = le.inverse_transform(labeler.predict(o[['UMAP1', 'UMAP2']])+1)
+    f, ax = plt.subplots(1, 1, sharex = True, sharey = True, figsize=(10,10))
+    sns.scatterplot(o, x = 'UMAP1', y = 'UMAP2', alpha = o.alpha,s = o['size'] ,hue= 'predictedLabel', edgecolor = 'Black', ax = ax)
+    sns.despine()
+    plt.savefig(fname)
+    if verbose: plt.show()
+    plt.close()
 
 class vcf_manipulation:
     def corrfunc(x, y, ax=None, **kws):
@@ -428,6 +541,7 @@ class gwas_pipe:
                  n_autosome: int = 20,
                  all_genotypes: str = '/projects/ps-palmer/gwas/databases/rounds/round10_1',
                  founder_genotypes: str = '/projects/ps-palfounder_genotypes/Ref_panel_mRatBN7_2_chr_GT', 
+                 founderfile: str = '/projects/ps-palmer/gwas/databases/founder_genotypes/founders7.2',
                  gtca_path: str = '',
                  snpeff_path: str =  'snpEff/',
                  phewas_db: str = 'phewasdb.parquet.gz',
@@ -475,6 +589,7 @@ class gwas_pipe:
         self.sample_path = f'{self.path}genotypes/sample_rfids.txt'
         self.genotypes_subset = f'{self.path}genotypes/genotypes'
         self.genotypes_subset_vcf = f'{self.path}genotypes/genotypes_subset_vcf.vcf.gz'
+        if len(founderfile): self.foundersbimfambed = pandas_plink.read_plink(founderfile)
         
         self.autoGRM = f'{self.path}grm/AllchrGRM'
         self.xGRM = f'{path}grm/xchrGRM'
@@ -490,7 +605,7 @@ class gwas_pipe:
                                                  .replace(str(self.n_autosome+4), 'mt')\
         
         if not chrList:
-            self.chrList = [self.replacenumstoXYMT(i) for i in range(1,self.n_autosome+4) if i != self.n_autosome+3]
+            self.chrList = [self.replacenumstoXYMT(i) for i in range(1,self.n_autosome+5) if i != self.n_autosome+3]
         self.failed_full_grm = False
         
         self.sample_path = f'{self.path}genotypes/sample_rfids.txt'
@@ -668,10 +783,12 @@ class gwas_pipe:
             print(f'found possible error in log, check the file {self.path}log{loc}/{func}.log')
             #raise ValueError(f'found possible error in log, check the file {self.path}/log{loc}/{func}.log')
             
-    def make_dir_structure(self, folders: list = ['data', 'genotypes', 'grm', 'log', 'logerr', 
+    def make_dir_structure(self, folders: list = ['data', 'genotypes', 'grm', 'log', 'logerr', 'images/genotypes',
                                             'results', 'temp', 'data/pheno', 'results/heritability', 'results/preprocessing',
                                              'results/gwas',  'results/loco', 'results/qtls','results/eqtl','results/sqtl',
-                                                  'results/phewas', 'temp/r2', 'results/lz/', 'images/', 'images/scattermatrix/', 'images/manhattan/']):
+                                                  'results/phewas', 'temp/r2', 'results/lz/', 'images/', 'images/scattermatrix/', 
+                                                  'images/manhattan/', 'images/genotypes/heatmaps', 'images/genotypes/lds',
+                                                 'images/genotypes/dist2founders', 'images/genotypes/umap']):
         
         '''
         creates the directory structure for the project
@@ -680,7 +797,7 @@ class gwas_pipe:
             os.makedirs(f'{self.path}{folder}', exist_ok = True)
 
     def SubsetAndFilter(self, rfids=[] ,thresh_m: float = 0.1, thresh_hwe: float = 1e-10, thresh_maf: float = 0.005, verbose: bool = True,
-                       filter_based_on_subset: bool = True):
+                       filter_based_on_subset: bool = True, makefigures = True):
 
         sex_encoding = defaultdict(lambda : 0, {'M': '1', 'F':'2'})
         sex_encoder = lambda x: sex_encoding[x]    
@@ -704,8 +821,6 @@ class gwas_pipe:
                 tempdf.query('sex in ["M", "m", "male", "1", 1]')[['rfid', 'rfid']].to_csv(self.sample_path_males, index = False, header = None, sep = ' ')
                 tempdf.query('sex in ["F", "f", "female", "2", 2]')[['rfid', 'rfid']].to_csv(self.sample_path_females, index = False, header = None, sep = ' ')
 
-        os.makedirs(f'{self.path}genotypes', exist_ok = True)
-
         print('calculating missing hwe maf for autossomes and MT')
         plink(bfile = self.all_genotypes, chr = f'1-{self.n_autosome} MT', hardy = '', keep = self.sample_path, thread_num =  self.threadnum, 
               freq = '', missing = '', nonfounders = '', out = f'{self.path}genotypes/autosomes', 
@@ -713,11 +828,11 @@ class gwas_pipe:
         print('calculating missing hwe maf for X')
         plink(bfile = self.all_genotypes, chr = 'X', hardy = '', keep = self.sample_path, thread_num =  self.threadnum,
               freq = '' , missing = '', nonfounders = '', out = f'{self.path}genotypes/xfilter',
-              filter_males = '', chr_set = f'{self.n_autosome} no-xy')
+              filter_females = '', chr_set = f'{self.n_autosome} no-xy')
         print('calculating missing hwe maf for Y')
         plink(bfile = self.all_genotypes, chr = 'Y', hardy = '', keep = self.sample_path, thread_num =  self.threadnum,
               freq = '' , missing = '', nonfounders = '', out = f'{self.path}genotypes/yfilter', 
-              filter_females = '', chr_set = f'{self.n_autosome} no-xy')
+              filter_males = '', chr_set = f'{self.n_autosome} no-xy')
 
         full = pd.concat([pd.concat(
              [pd.read_csv(f'{self.path}genotypes/{x}.lmiss', sep = '\s+')[['CHR','SNP', 'F_MISS']].set_index('SNP'),
@@ -728,7 +843,8 @@ class gwas_pipe:
 
         full['PASS_MISS'] = ((full.F_MISS < thresh_m) + \
                              (full.CHR == self.n_autosome + 2 )) > 0 
-        full['PASS_MAF'] = (full.MAF - .5).abs() <= .5 - thresh_maf
+        full['PASS_MAF'] = ((full.MAF - .5).abs() <= .5 - thresh_maf)# +
+                            #(full.CHR == self.n_autosome + 2)) > 0 
         full['PASS_HWE']= ((full.HWE > thresh_hwe) + \
                           (full.CHR == self.n_autosome + 4) + \
                           (full.CHR == self.n_autosome + 2 )) > 0 
@@ -736,6 +852,9 @@ class gwas_pipe:
 
         full[full.PASS].reset_index()[['SNP']].to_csv(accepted_snps_path,index = False, header = None)
         full.to_parquet(f'{self.path}genotypes/snpquality.parquet.gz', compression='gzip')
+        
+        with open(f'{self.path}genotypes/parameter_thresholds.txt', 'w') as f: 
+            f.write(f'--geno {thresh_m}\n--maf {thresh_maf}\n--hwe {thresh_hwe}')
 
         if verbose:
             display(full.value_counts(subset=  full.columns[full.columns.str.contains('PASS')].to_list())\
@@ -745,28 +864,36 @@ class gwas_pipe:
                                                    .to_frame().set_axis([f'count for chr {i}'], axis = 1))
 
         plink(bfile = self.all_genotypes, extract = accepted_snps_path, keep = self.sample_path, make_bed = '', thread_num =  self.threadnum,
-              set_missing_var_ids = '@:#', keep_allele_order = '',
-              out = self.genotypes_subset, chr_set = f'{self.n_autosome} no-xy')
+              set_missing_var_ids = '@:#', keep_allele_order = '',  set_hh_missing = '' , make_founders = '', 
+              out = self.genotypes_subset, chr_set = f'{self.n_autosome} no-xy') #
 
-        bim, fam, gen = pandas_plink.read_plink(self.genotypes_subset)
-        print('making plots for heterozygosity per CHR')
-        os.makedirs(f'{self.path}genotypes/images/', exist_ok = True)
-        for numc, c in tqdm(list(enumerate(bim.chrom.unique().astype(str)))):
-            snps = bim[bim['chrom'] == c]
-            snps = snps[::snps.shape[0]//2000+1]
+        if makefigures:
+            bim, fam, gen = pandas_plink.read_plink(self.genotypes_subset)
+            print('making plots for heterozygosity per CHR')
+            for numc, c in tqdm(list(enumerate(bim.chrom.unique().astype(str)))):
+                snps = bim[bim['chrom'] == c]
+                snps = snps[::snps.shape[0]//2000+1]
+                f, ax = plt.subplots(2, 2, sharex = True, sharey = True, figsize=(20,20))
+                for num, g in enumerate(['M', 'F']):
+                    fams= fam[fam.gender == sex_encoder(g)]#[::snps.shape[0]//300]
+                    ys = pd.DataFrame(gen[snps.i][:, fams.i].compute().T,columns = snps.snp, index = fams.iid )
+                    f2, ax2 = plt.subplots(1, 1)
+                    order  = dendrogram(linkage(ys, metric = nan_dist), ax = ax2 )['ivl']
+                    plt.close(f2)
+                    ys = ys.iloc[[int(i) for i in order], :]
+                    sns.heatmap((ys - 1).abs(),  cbar=False, cmap = 'RdBu', ax = ax[num, 0])
+                    ax[num, 0].title.set_text(f'G for {g} samples - Red:Het Blue:Hom ')
+                    sns.heatmap(ys, cmap = 'Spectral', ax = ax[num, 1], cbar=False)
+                    ax[num, 1].title.set_text(f'genotypes for {g} samples Blue:REF Red:ALT')
+                plt.tight_layout()
+                plt.savefig(f'{self.path}images/genotypes/heatmaps/chr{c}_genotypes_heatmap.png')
+                plt.close()
+                ys = pd.DataFrame(gen[snps.i][:, fam.i].compute().T,columns = snps.snp, index = fam.iid )
+                make_LD_plot(ys, f'{self.path}images/genotypes/lds/ld_clumps_chr{c}')
+                _distance_to_founders((bim, fam, gen), self.foundersbimfambed,
+                                      f'{self.path}images/genotypes/dist2founders/dist2founder_chr{c}',c )
+                _make_umap_plot((bim, fam, gen), self.foundersbimfambed, f'{self.path}images/genotypes/umap/umap_chr{c}',c )
             
-            f, ax = plt.subplots(2, 2, sharex = True, sharey = True, figsize=(20,20))
-            for num, g in enumerate(['M', 'F']):
-                ys = gen[snps.i].compute().T
-                fams= fam[fam.gender == sex_encoder(g)]#[::snps.shape[0]//300]
-                sns.heatmap(pd.DataFrame(abs(ys[fams.i] - 1),columns = snps.snp, index = fams.iid ), 
-                            cbar=False, cmap = 'coolwarm', ax = ax[num, 0])
-                sns.heatmap(pd.DataFrame(ys[fams.i] ,columns = snps.snp, index = fams.iid ), cmap = 'BrBG', ax = ax[num, 1],
-                           cbar=False)
-            plt.tight_layout()
-            plt.savefig(f'{self.path}genotypes/images/genotypes_chr{c}')
-            plt.close()
-        
     def generateGRM(self, autosome_list: list = [], print_call: bool = True, allatonce: bool = False,
                     extra_chrs: list = ['X', 'Y', 'MT'], just_autosomes: bool = True, just_full_grm: bool = True,
                    full_grm: bool = True, **kwards):
@@ -1903,12 +2030,17 @@ class gwas_pipe:
         REGRESSTHRS = str(round(covariate_explained_var_threshold*100, 2)) + '%'
         with open(reportpath, 'r') as f: 
             report_txt = f.read()
-        with open(f'{self.path}genotypes/genotypes.log') as f:
+        with open(f'{self.path}genotypes/parameter_thresholds.txt', 'r') as f: 
             out = f.read()
             params = {x:re.findall(f"--{x} ([^\n]+)", out)[0] for x in ['geno', 'maf', 'hwe']}
+        with open(f'{self.path}genotypes/genotypes.log') as f:
+            out = f.read()
             params['snpsb4'] = re.findall(f"(\d+) variants loaded from .bim file.", out)[0]
             params['snpsafter'], params['nrats'] = re.findall("(\d+) variants and (\d+) samples pass filters and QC.", out)[0]
-            params['removed_geno'], params['removedhwe'], params['removedmaf'] = re.findall("(\d+) variants removed due", out)
+            params['removed_geno'], params['removedhwe'], params['removedmaf'] = \
+                   (~pd.read_parquet(f'{self.path}genotypes/snpquality.parquet.gz')[['PASS_MISS','PASS_MAF','PASS_HWE']])\
+                   .sum().astype(str)
+
 
         for i,j in [('PROJECTNAME', self.project_name),('PATHNAME', self.path),('ROUND', round_version), ('NSNPSB4', params['snpsb4'] ), ('NSNPS', params['snpsafter'])
                     , ('GENODROP', params['removed_geno']), ('MAFDROP', params['removedmaf']), ('HWEDROP', params['removedhwe']),
