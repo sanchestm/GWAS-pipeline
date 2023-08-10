@@ -42,6 +42,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import  PowerNorm
 import mygene
 import numpy as np
+import numba
 import os
 import pandas as pd
 import pandas_plink
@@ -60,12 +61,15 @@ from umap import UMAP
 import warnings
 mg = mygene.MyGeneInfo()
 tqdm.pandas()
+sys.setrecursionlimit(10000)
 warnings.filterwarnings('ignore')
 #conda create --name gpipe -c conda-forge openjdk=17 ipykernel pandas seaborn scikit-learn umap-learn psycopg2 dask
 #conda activate gpipe
 #conda install -c bioconda gcta plink snpeff mygene
 #pip install goatools
 #wget https://snpeff.blob.core.windows.net/versions/snpEff_latest_core.zip
+
+na_values_4_pandas = ['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NA', 'NULL', 'NaN', 'None', 'n/a', 'nan', 'null', 'UNK']
 
 def decompose_grm(grm_path, n_comp = 50, verbose = True):
     (grmxr, ar) =  pandas_plink.read_grm(grm_path)
@@ -127,14 +131,18 @@ def make_LD_plot(ys: pd.DataFrame, fname: str):
     sns.despine()
     plt.savefig(fname)
     plt.close()
-    
+
+@numba.njit()
 def nan_sim(x, y):
-    if ~np.isnan(o := np.nanmean(np.abs(x-y))): return 1/(o+1)**2
+    o = np.nansum(np.abs(x-y))
+    if ~np.isnan(o): return 1/(o+1)
     return 0
 
+@numba.njit()
 def nan_dist(x, y):
-    if ~np.isnan(o := np.nanmean(np.abs(x-y))): return o/2
-    return 1
+    o = np.nansum(np.abs(x-y))
+    if ~np.isnan(o): return o
+    return 1e10
 
 def combine_hex_values(d):
     d_items = sorted(d.items())
@@ -148,16 +156,19 @@ def combine_hex_values(d):
 def get_topk_values(s, k): 
     return s.groupby(s.values).agg(lambda x: '|'.join(x.index) ).sort_index()[::-1].values[:k]
 
-def _distance_to_founders(subset_geno,founderfile,fname,c, scaler: str = 'ss', verbose = False):
+def _distance_to_founders(subset_geno,founderfile,fname,c, scaler: str = 'ss', verbose = False, nautosomes = 20):
     if type(founderfile) == str: bimf, famf, genf = pandas_plink.read_plink(founderfile)
     else: bimf, famf, genf = founderfile
-    if type(subset_geno) == str: bim, fam, gen = pandas_plink.read_plink(founderfile)
+    if type(subset_geno) == str: bim, fam, gen = pandas_plink.read_plink(subset_geno)
     else: bim, fam, gen = subset_geno
+    if str(c).lower() in [str(nautosomes+2), 'y']: fam = fam[fam.gender == '1']
     
     snps = bim[bim['chrom'] == c]
     snps = snps[::snps.shape[0]//2000+1]
     ys = pd.DataFrame(gen[snps.i][:, fam.i].compute().T,columns = snps.snp, index = fam.iid )
     
+    if str(c).lower() in [str(nautosomes+2), 'x']:
+        ys.loc[fam.query('gender == "2"').iid, :] *= 2
     founder_gens = plink2pddf( (bimf, famf, genf),snplist= list(snps.snp))
     if (aa := bimf.merge(snps, on = 'snp', how = "inner").query('a0_x != a0_y')).shape[0]:
         print('allele order mixed between founders and samples')
@@ -191,15 +202,17 @@ def _distance_to_founders(subset_geno,founderfile,fname,c, scaler: str = 'ss', v
     plt.close()
     return
 
-def _make_umap_plot(subset_geno, founderfile, fname, c, verbose = False):
+def _make_umap_plot(subset_geno, founderfile, fname, c, verbose = False, nautosomes = 20):
     if type(founderfile) == str: bimf, famf, genf = pandas_plink.read_plink(founderfile)
     else: bimf, famf, genf = founderfile
     if type(subset_geno) == str: bim, fam, gen = pandas_plink.read_plink(founderfile)
     else: bim, fam, gen = subset_geno
     
+    if str(c).lower() in [str(nautosomes+2), 'y']: fam = fam[fam.gender == '1']
     snps = bim[bim['chrom'] == c]
     snps = snps[::snps.shape[0]//2000+1]
     ys = pd.DataFrame(gen[snps.i][:, fam.i].compute().T,columns = snps.snp, index = fam.iid )
+    if str(c).lower() in [str(nautosomes+2), 'x']:  ys.loc[fam.query('gender == "2"').iid, :] *= 2
     
     founder_gens = plink2pddf( (bimf, famf, genf),snplist= list(snps.snp))
     shared_snps = list(set(ys.columns) & set(founder_gens.columns))
@@ -208,7 +221,7 @@ def _make_umap_plot(subset_geno, founderfile, fname, c, verbose = False):
     merged['label'] = merged.index.to_series().apply(lambda x: x if x in founder_gens.index else 'AAunk')
     le = LabelEncoder().fit(merged.label)
     merged['labele'] = le.transform(merged.label) -1
-    o = UMAP(metric ='manhattan').fit_transform((merged.loc[:, merged.columns.str.contains(':')]), y=merged.labele)
+    o = UMAP(metric =nan_dist).fit_transform((merged.loc[:, merged.columns.str.contains(':')]), y=merged.labele)#'manhattan'
     o = pd.DataFrame(o, index = merged.index, columns=['UMAP1', 'UMAP2'])
     o['label'] = merged['label']
     o['size'] = o.label.apply(lambda x: 200 if x!= 'AAunk' else 20)
@@ -872,7 +885,8 @@ class gwas_pipe:
             print('making plots for heterozygosity per CHR')
             for numc, c in tqdm(list(enumerate(bim.chrom.unique().astype(str)))):
                 snps = bim[bim['chrom'] == c]
-                snps = snps[::snps.shape[0]//2000+1]
+                if int(c)<= self.n_autosome: snps = snps[::snps.shape[0]//2000+1]
+                else: snps = snps[::snps.shape[0]//6000+1]
                 f, ax = plt.subplots(2, 2, sharex = True, sharey = True, figsize=(20,20))
                 for num, g in enumerate(['M', 'F']):
                     fams= fam[fam.gender == sex_encoder(g)]#[::snps.shape[0]//300]
@@ -891,8 +905,9 @@ class gwas_pipe:
                 ys = pd.DataFrame(gen[snps.i][:, fam.i].compute().T,columns = snps.snp, index = fam.iid )
                 make_LD_plot(ys, f'{self.path}images/genotypes/lds/ld_clumps_chr{c}')
                 _distance_to_founders((bim, fam, gen), self.foundersbimfambed,
-                                      f'{self.path}images/genotypes/dist2founders/dist2founder_chr{c}',c )
-                _make_umap_plot((bim, fam, gen), self.foundersbimfambed, f'{self.path}images/genotypes/umap/umap_chr{c}',c )
+                                      f'{self.path}images/genotypes/dist2founders/dist2founder_chr{c}',c , nautosomes = self.n_autosome)
+                _make_umap_plot((bim, fam, gen), self.foundersbimfambed, f'{self.path}images/genotypes/umap/umap_chr{c}',c,
+                                nautosomes = self.n_autosome)
             
     def generateGRM(self, autosome_list: list = [], print_call: bool = True, allatonce: bool = False,
                     extra_chrs: list = ['X', 'Y', 'MT'], just_autosomes: bool = True, just_full_grm: bool = True,
@@ -942,7 +957,7 @@ class gwas_pipe:
                 self.bashLog(f'{self.gcta} {self.thrflag} --bfile {self.genotypes_subset} --keep {self.sample_path_males} --autosome-num {self.n_autosome+4} \
                                --make-grm-bin --chr {self.n_autosome+2} --out {self.yGRM}',
                             f'{funcName}_chrY', print_call = False)
-                all_filenames_partial_grms.loc[len(all_filenames_partial_grms), 'filename'] = self.yGRM
+                #all_filenames_partial_grms.loc[len(all_filenames_partial_grms), 'filename'] = self.yGRM
             except: print('could not make grm for chr Y')
             
         if 'MT' in extra_chrs:
@@ -1228,15 +1243,12 @@ class gwas_pipe:
         
         for trait, chrom in tqdm(list(itertools.product(traitlist,ranges))):
             chromp2 = self.replacenumstoXYMT(chrom)
+            subgrmflag = f'--mlma-subtract-grm {self.path}grm/{chromp2}chrGRM' if chromp2 != 'y' else ''
             self.bashLog(f'{self.gcta} {self.thrflag} --pheno {self.path}data/pheno/{trait}.txt --bfile {self.genotypes_subset} \
-                                       --grm {self.path}grm/AllchrGRM \
-                                       --autosome-num {self.n_autosome}\
-                                       --chr {chrom} \
-                                       --mlma-subtract-grm {self.path}grm/{chromp2}chrGRM \
-                                       --mlma \
+                                       --grm {self.path}grm/AllchrGRM --autosome-num {self.n_autosome} \
+                                       --chr {chrom} {subgrmflag} --mlma \
                                        --out {self.path}results/gwas/{trait}_chrgwas{chromp2}', 
                         f'GWAS_{chrom}_{trait}', print_call = print_call)
-                
                 
         return 1
     
@@ -1443,7 +1455,9 @@ class gwas_pipe:
 
         pbimtemp = self.pbim.assign(n = self.df.count()[trait] ).rename({'snp': 'SNP', 'n':'N'}, axis = 1)[['SNP', 'N']] #- da.isnan(pgen).sum(axis = 1)
         tempdf = pd.concat([pd.read_csv(f'{self.path}results/gwas/{trait}.loco.mlma', sep = '\t'),
-                           pd.read_csv(f'{self.path}results/gwas/{trait}_chrgwasx.mlma', sep = '\t')]).rename({'Freq': 'freq'}, axis =1 )
+                           pd.read_csv(f'{self.path}results/gwas/{trait}_chrgwasx.mlma', sep = '\t'),
+                           pd.read_csv(f'{self.path}results/gwas/{trait}_chrgwasy.mlma', sep = '\t'),
+                           pd.read_csv(f'{self.path}results/gwas/{trait}_chrgwasmt.mlma', sep = '\t')]).rename({'Freq': 'freq'}, axis =1 )
         tempdf = tempdf.merge(pbimtemp, on = 'SNP')[['SNP','A1','A2','freq','b','se','p','N' ]]
         mafile, snpl = f'{self.path}temp/cojo/tempmlma.ma', f'{self.path}temp/cojo/temp.snplist'
         tempdf.to_csv(mafile, index = False, sep = '\t')
@@ -1454,9 +1468,11 @@ class gwas_pipe:
             tempdf[-np.log10(tempdf.p) > threshold][['SNP']].to_csv(snpl, index = False, header = None,sep = '\t')
         else: snpdf[['SNP']].to_csv(snpl, index = False, header = None,sep = '\t')
         cojofile = f'{self.path}temp/cojo/tempcojo'
-        self.bashLog(f'{self.gcta} {self.thrflag} --bfile {self.genotypes_subset} --cojo-slct --cojo-collinear 0.99 --cojo-p {10**-threshold} \
-                    --cojo-file {mafile} --cojo-cond {snpl} --out {cojofile}', f'cojo_test', print_call=False)
-        return pd.read_csv(f'{cojofile}.jma.cojo', sep = '\t')
+        self.bashLog(f'{self.gcta} {self.thrflag} --bfile {self.genotypes_subset} --cojo-slct --cojo-collinear 0.99 --cojo-p {10**-(threshold-2)} --cojo-file {mafile} --cojo-cond {snpl} --out {cojofile}', f'cojo_test', print_call=False)
+        if os.path.isfile(f'{cojofile}.jma.cojo'):
+            return pd.read_csv(f'{cojofile}.jma.cojo', sep = '\t')
+        print(f'Conditional Analysis Failed for  trait {trait} and all snps below threshold {snpstring}, returning the top snp only')
+        return pd.DataFrame(snpdf.SNP.values, columns = ['SNP'])
 
     def conditional_analysis_filter(self, qtltable, threshold: float = 5.3591):
         return qtltable.groupby(['Chr', 'trait']).progress_apply(lambda df: df.loc[df.SNP.isin(self.conditional_analysis('regressedlr_' +df.name[1].replace('regressedlr_', ''), df, threshold).SNP.to_list())]
@@ -1527,7 +1543,12 @@ class gwas_pipe:
         for num, (_, qtl_row) in tqdm(list(enumerate(qtltable.reset_index().iterrows()))):
             topsnpchr, topsnpbp = qtl_row.SNP.split(':')
             topsnpchr = topsnpchr.replace('X',str(self.n_autosome+1))
-            test = pd.read_csv(f'{self.path}results/lz/lzplottable@{qtl_row.trait}@{qtl_row.SNP}.tsv', sep = '\t')
+            try:test = pd.read_csv(f'{self.path}results/lz/lzplottable@{qtl_row.trait}@{qtl_row.SNP}.tsv', 
+                               dtype = {'p':float, 'bp': int, 'R2': float, 'DP': float}, sep = '\t',
+                                   na_values =  na_values_4_pandas)\
+                         .replace([np.inf, -np.inf], np.nan)\
+                         .dropna(how = 'any', subset = ['Freq','b','se','p','R2','DP'])
+            except: raise Exception(f"couldn't open this file {self.path}results/lz/lzplottable@{qtl_row.trait}@{qtl_row.SNP}.tsv") 
             test['-log10(P)'] = -np.log10(test.p)
             range_interest = test.query('R2> .6')['bp'].agg(['min', 'max'])
             test = test.query(f'{range_interest["min"] - padding}<bp<{range_interest["max"] + padding}')

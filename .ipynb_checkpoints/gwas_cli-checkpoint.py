@@ -32,7 +32,8 @@ if not dictionary['regressout']:
         pref = dictionary['traits'].replace('prefix_', '')
         traits_ = df.columns[df.columns.str.startswith(f'regressedlr_{pref}')]
     else: traits_ = dictionary['traits'].split(',')
-    traits_d = get_trait_descriptions_f(pd.read_csv(f'{path}{pj}/data_dict_{pj}.csv'), traits_)
+    try: traits_d = get_trait_descriptions_f(pd.read_csv(f'{path}{pj}/data_dict_{pj}.csv'), traits_)
+    except: traits_d = ['UNK' for x in range(len(traits_))]
 else:
     rawdata = dictionary['regressout'] if (len(dictionary['regressout']) > 1) else f'{path}{pj}/raw_data.csv'
     df = pd.read_csv(rawdata, dtype = {'rfid': str}).drop_duplicates(subset = 'rfid') 
