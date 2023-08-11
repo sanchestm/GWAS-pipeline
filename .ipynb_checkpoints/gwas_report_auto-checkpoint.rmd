@@ -17,9 +17,9 @@ title: 'PROJECTNAME'
 ---
 
 ```{r setup, include=FALSE}
-library("stringi")
-library("stringr")
-library("knitr")
+suppressPackageStartupMessages(library("stringi"))
+suppressPackageStartupMessages(library("stringr"))
+suppressPackageStartupMessages(library("knitr"))
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
@@ -28,16 +28,16 @@ specify_decimal <- function(x, k) trimws(format(round(x, k), nsmall=k))
 ```
 
 ```{r cool functions ive used v2, echo=FALSE,eval=TRUE,message=FALSE,include=F}
-library(DT)
-library(htmltools)
-library(readxl)
-library(httr)
-library(RJSONIO)
-library(openxlsx)
-library(purrr)
-library(dplyr)
-library(kableExtra)
-library(data.table)
+suppressPackageStartupMessages(library(DT))
+suppressPackageStartupMessages(library(htmltools))
+suppressPackageStartupMessages(library(readxl))
+suppressPackageStartupMessages(library(httr))
+suppressPackageStartupMessages(library(RJSONIO))
+suppressPackageStartupMessages(library(openxlsx))
+suppressPackageStartupMessages(library(purrr))
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(kableExtra))
+suppressPackageStartupMessages(library(data.table))
 
 pretify <- function(data){
     data %>% mutate_if(is.numeric, ~round(., 3)) %>% datatable(
@@ -106,9 +106,6 @@ tryCatch(
 # ******
 #**Raw trait distribution**  
 
-
-#See the phenotype qc report for covariate distributions and trait distributions separated by covariates:  [here](https://www.dropbox.com/s/yezhrba9qdlijw3/kalivas_final_phenotype_qc_report_kalivas_calculated_v3.html?dl=0)
-
 #For many statistical analyses, it’s often assumed that the trait of interest (the dependent variable) is normally distributed. This assumption is often broken due to multiple factors. In cases where this assumption is violated, extreme values can be overrepresented, and in some cases the conclusions of the model might be misleading [Simpson Paradox](https://en.wikipedia.org/wiki/Simpson%27s_paradox). To address these issues our pipeline performs a [quantile normalization](https://scikit-learn.org/stable/modules/generated/sklearn.preprocessing.QuantileTransformer.html), which is a transformation that preserves the rank of each subject but reassigns values such that the final distribution is perfectly normally distributed. This means that our GWAS identifies biallelic snps that contribute to a change in the rank of the phenotype (e.g. having a mutation on snp 1:3029384 contributes to a rat to go from the top 70% percentile of the trait to the top 75%). 
 
 #This is an example of a normally distributed trait: 
@@ -121,7 +118,6 @@ tryCatch(
 Here are the covariates looked at: 
 
 ```{r covariate, echo=FALSE,eval=TRUE,message=FALSE,include=T,comment=NA}
-
 
 tryCatch(
     expr = {
@@ -162,7 +158,9 @@ tryCatch(
 ******
 # **Genetic Correlation Matrix**
 
-Genetic correlation is a statistical concept that quantifies the extent to which two traits share a common genetic basis. The estimation of genetic correlation can be accomplished using Genome-wide Complex Trait Analysis (GCTA), a software tool that utilizes summary statistics from genome-wide association studies (GWAS) to estimate the genetic covariance between pairs of traits. GCTA implements a method that decomposes the total phenotypic covariance between two traits into genetic and environmental components, providing an estimate of the genetic correlation between them. This approach allows researchers to examine the degree of shared genetic architecture between traits of interest and gain insights into the biological mechanisms underlying complex traits and diseases. For the figure, the upper triangle represents the genetic correlation, while the lower triangle represents the phenotypic correlation. Hierarchical clustering is performed using [scipy's linkage function](https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.linkage.html) with the genetic correlation. Dendrogram is drawn using [scipy dendrogram](https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.dendrogram.html) where color coding for clusters depends on a distance threshold set to 70% of the maximum linkage distance. Asterisks means that test failed, for genetic relationship the main failure point is if the 2 traits being tested are colinear, while for the phenotypic correlation it's due to no overlapping rats between the 2 traits.
+Genetic correlation is a statistical concept that quantifies the extent to which two traits share a common genetic basis. The estimation of genetic correlation can be accomplished using Genome-wide Complex Trait Analysis (GCTA), a software tool that utilizes summary statistics from genome-wide association studies (GWAS) to estimate the genetic covariance between pairs of traits. GCTA implements a method that decomposes the total phenotypic covariance between two traits into genetic and environmental components, providing an estimate of the genetic correlation between them. This approach allows researchers to examine the degree of shared genetic architecture between traits of interest and gain insights into the biological mechanisms underlying complex traits and diseases. 
+
+For the figure, the upper triangle represents the genetic correlation (ranges from [-1:1]), while the lower triangle represents the phenotypic correlation. Meanwhile the diagonal displays the heritability (ranges from [0:1]) of the traits. Hierarchical clustering is performed using [scipy's linkage function](https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.linkage.html) with the genetic correlation. Dendrogram is drawn using [scipy dendrogram](https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.dendrogram.html) where color coding for clusters depends on a distance threshold set to 70% of the maximum linkage distance. Asterisks means that test failed, for genetic relationship the main failure point is if the 2 traits being tested are colinear, while for the phenotypic correlation it's due to no overlapping rats between the 2 traits.
 
 ```{r geneticcorrelationblock,message=F,warning=F,eval=T,include=T,results = 'asis',echo=F}
 
@@ -198,7 +196,7 @@ Column definitions:
 
 df = read.csv("heritability/heritability.tsv",header=T,stringsAsFactors = F, sep= '\t')
 names(df) = c('trait', 'gen_var', 'env_var', 'phe_var', 'heritability', 'likelihood', 'lrt', 'df', 'pval', 'n', 'heritability_se')
-df$pval = -log10(df$pval)
+df$pval = -log10(df$pval + 1e-20)
 df = df %>% rename( '-Log10(p)' = 'pval')
 df =df %>% mutate_if(is.numeric, ~round(., 3))
 df$trait = str_remove_all(df$trait, 'regressedlr_')
@@ -224,6 +222,7 @@ if ("ACI" %in% colnames(qtls)) {
 ```{r variant annotation table, message=F,warning=F,eval=T,include=T,echo=F}
 ###### load snp annotations
 ann<-read.csv( "qtls/possible_causal_snps.tsv",header=T,stringsAsFactors=F, sep = '\t')
+ann$'-Log10(p)' <- -log10(ann$p)
 ann = ann   %>% select(-c('A1','A2', 'featureid', 'rank', 
                                                                        'cDNA_position.cDNA_len','CDS_position.CDS_len',
                                                                        'Protein_position.Protein_len','distancetofeature')) #'HGVS.c','HGVS.p',
@@ -244,12 +243,12 @@ phewas<-read.csv( 'phewas/pretty_table_window_match.tsv',header=T,stringsAsFacto
 eqtl = ""
 if (file.exists("eqtl/pretty_eqtl_table.csv")) {
 eqtl<-read.csv( 'eqtl/pretty_eqtl_table.csv',header=T,stringsAsFactors=F, sep = ',') %>%
-      rename( '-Log10(p)' = 'X.log10.P.value.','-Log10(p)_eqtldb'= 'X.log10.pval_nominal.') %>% select(-c('gene_id')) 
+      rename( '-Log10(p)' = 'X.log10.P.value.','-Log10(p)_eqtldb'= 'X.log10.pval_nominal.') #%>% select(-c('gene_id')) 
 }
 sqtl = ""
 if (file.exists("sqtl/pretty_sqtl_table.csv")) {
 sqtl<-read.csv( 'sqtl/pretty_sqtl_table.csv',header=T,stringsAsFactors=F, sep = ',') %>%
-      rename( '-Log10(p)' = 'X.log10.P.value.','-Log10(p)_sqtldb'= 'X.log10.pval_nominal.') %>% select(-c('gene_id')) 
+      rename( '-Log10(p)' = 'X.log10.P.value.','-Log10(p)_sqtldb'= 'X.log10.pval_nominal.') #%>% select(-c('gene_id')) 
 }
 
 ```
@@ -426,7 +425,7 @@ for( i in rownames(qtls) ){
    tryCatch(
     expr = {
        cat(str_interp("  \n### Putatively causal coding variants: ${qtls[i, 'trait']} ${qtls[i, 'SNP']}   \n"))
-       tempcausal = ann %>% filter(SNP_qtl == qtls[i, 'SNP']) %>% filter(trait == qtls[i, 'trait'])  %>% select(c('SNP','Freq','b','p','R2','DP','annotation','putative_impact','gene','HGVS.c','HGVS.p')) %>% distinct()
+       tempcausal = ann %>% filter(SNP_qtl == qtls[i, 'SNP']) %>% filter(trait == qtls[i, 'trait'])  %>% select(c('SNP','Freq','b','-Log10(p)','R2','DP','annotation','putative_impact','gene','HGVS.c','HGVS.p')) %>% distinct()
        if (nrow(tempcausal)){pretify2(tempcausal) }
        else{cat("  \n HIGH or MODERATE impact variants absent \n   \n")}
     },
@@ -453,14 +452,14 @@ for( i in rownames(qtls) ){
    
    cat(str_interp("  \n### eQTL: Lowest P-values for eqtls in a 3Mb window of ${qtls[i, 'trait']} ${qtls[i, 'SNP']}   \n"))
    if (class(eqtl) == 'data.frame') {
-       eqtltemp = eqtl %>% filter(SNP == paste0('chr',qtls[i, 'SNP'])) %>% filter(trait == qtls[i, 'trait'])  %>% select(c('SNP_eqtldb', '-Log10(p)_eqtldb', 'tissue', 'R2', 'DP', 'Ensembl_gene', 'slope', 'af', 'slope'))%>% rename( 'gene' = 'Ensembl_gene') %>% distinct()  # 'presence_samples'
+       eqtltemp = eqtl %>% filter(SNP == paste0('chr',qtls[i, 'SNP'])) %>% filter(trait == qtls[i, 'trait'])  %>% select(c('SNP_eqtldb', '-Log10(p)_eqtldb', 'tissue', 'R2', 'DP', 'Ensembl_gene', 'gene_id', 'slope', 'af', 'slope'))%>% rename( 'gene' = 'Ensembl_gene') %>% distinct()  # 'presence_samples'
        if (nrow(eqtltemp)){pretify2(eqtltemp) }
        else{cat("  \n SNPS were not detected for eQTLs in 3Mb window of trait topSNP \n   \n")}
    }
    
    cat(str_interp("  \n### sQTL: Lowest P-values for splice qtls in a 3Mb window of ${qtls[i, 'trait']} ${qtls[i, 'SNP']}   \n"))
    if (class(sqtl) == 'data.frame') {
-       sqtltemp = sqtl %>% filter(SNP == paste0('chr',qtls[i, 'SNP'])) %>% filter(trait == qtls[i, 'trait'])  %>% select(c('SNP_sqtldb', '-Log10(p)_sqtldb', 'tissue','R2', 'DP', 'Ensembl_gene',  'slope', 'af', 'slope')) %>% rename( 'gene' = 'Ensembl_gene') %>% distinct()   #'presence_samples',
+       sqtltemp = sqtl %>% filter(SNP == paste0('chr',qtls[i, 'SNP'])) %>% filter(trait == qtls[i, 'trait'])  %>% select(c('SNP_sqtldb', '-Log10(p)_sqtldb', 'tissue','R2', 'DP', 'Ensembl_gene','gene_id' , 'slope', 'af', 'slope')) %>% rename( 'gene' = 'Ensembl_gene') %>% distinct()   #'presence_samples',
        if (nrow(sqtltemp)){pretify2(sqtltemp)}
        else{cat("  \n SNPS were not detected for sQTLs in 3Mb window of trait topSNP \n   \n")}
    }

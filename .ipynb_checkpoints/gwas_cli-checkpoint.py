@@ -38,7 +38,8 @@ else:
     rawdata = dictionary['regressout'] if (len(dictionary['regressout']) > 1) else f'{path}{pj}/raw_data.csv'
     df = pd.read_csv(rawdata, dtype = {'rfid': str}).drop_duplicates(subset = 'rfid') 
     traits_, traits_d = [], []
-
+#sys.stdout = open(f'{path}{pj}/GWASpipelineCLIout.txt', 'w')
+for k,v in dictionary.items(): print(f'--{k} : {v}')
 gwas = gwas_pipe(path = f'{path}{pj}/',
              all_genotypes = dictionary['genotypes'], #'round9_1.vcf.gz',
              data = df,

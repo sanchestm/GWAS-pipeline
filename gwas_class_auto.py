@@ -364,7 +364,12 @@ def _prophet_reg(dforiginal = "",y_column = 'y',
               n_changepoints= 25, changepoint_prior_scale=10 , changepoint_range = .8,
               **season_true_kwards, **season_false_kwards) #mcmc_samples=100
     for i in approved_cols: fbmodel.add_regressor(i)
-    fbmodel.fit(df)
+    try: fbmodel.fit(df)
+    except: 
+        print(f' could not run the trait {y_column}, take a look at the input data')
+        display(dforiginal[[y_column]])
+        print('we will set this values to NAN')
+        return dforiginal.copy().set_index('rfid').assign(**{f'regressedlr_{y_column}': np.nan})[[f'regressedlr_{y_column}']]
     future = pd.DataFrame()
     forecast = fbmodel.predict(pd.concat([df, future], axis = 0).reset_index()).set_index(df.index)
     
@@ -1943,7 +1948,8 @@ class gwas_pipe:
         df_gwas,df_date = [], []
         #chrlist = [str(i) if i!=self.n_autosome+1 else 'x' for i in range(1,self.n_autosome+2)]
         for t in tqdm(traitlist):
-            for opt in [f'regressedlr_{t.replace("regressedlr_", "")}.loco.mlma',  f'regressedlr_{t.replace("regressedlr_", "")}.mlma']+ \
+            for opt in [f'regressedlr_{t.replace("regressedlr_", "")}.loco.mlma', 
+                        f'regressedlr_{t.replace("regressedlr_", "")}.mlma']+ \
             [f'regressedlr_{t.replace("regressedlr_", "")}_chrgwas{chromp2}.mlma' for chromp2 in self.chrList]:
                 try: 
                     g = pd.read_csv(f'{self.path}results/gwas/{opt}', sep = '\t', dtype = {'Chr': int, 'bp': int}).assign(trait = t)
@@ -2058,7 +2064,7 @@ class gwas_pipe:
             out = f.read()
             params['snpsb4'] = re.findall(f"(\d+) variants loaded from .bim file.", out)[0]
             params['snpsafter'], params['nrats'] = re.findall("(\d+) variants and (\d+) samples pass filters and QC.", out)[0]
-            params['removed_geno'], params['removedhwe'], params['removedmaf'] = \
+            params['removed_geno'], params['removedmaf'], params['removedhwe'] = \
                    (~pd.read_parquet(f'{self.path}genotypes/snpquality.parquet.gz')[['PASS_MISS','PASS_MAF','PASS_HWE']])\
                    .sum().astype(str)
 
@@ -2097,9 +2103,11 @@ class gwas_pipe:
         #destination += '/'+ self.project_name
         #print(f'copying {self.project_name} to {destination}')
         os.makedirs(f'{destination}', exist_ok = True)
-        bash(f'cp -r {self.path} {destination}')
+        out_path, pjname = (self.path, '') if self.path else ('.', f'/{self.project_name}')
+        bash(f'cp -r {out_path} {destination}{pjname}')
         if make_public:
             bash('/projects/ps-palmer/tsanches/mc anonymous set public myminio/tsanches_dash_genotypes --recursive')
+            print(f'{destination.replace("/projects/ps-palmer/s3/data", "https://palmerlab.s3.sdsc.edu")}/p50_david_dietz/results/gwas_report.html')
 
 
     def print_watermark(self):
