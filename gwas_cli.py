@@ -6,9 +6,9 @@ import pandas as pd
 dictionary = defaultdict(lambda: 0, {k.replace('-', ''):v for k,v in [(x + '=1' if '=' not in x else x).split('=') for x in sys.argv[1:]] })
 
 path = dictionary['path'].rstrip('/') + '/' if (dictionary['path'] ) else ''
-print(path)
+
 pj = dictionary['project'].rstrip('/')  if (dictionary['project'] ) else 'test'
-print(pj)
+
 if not dictionary['genotypes']:
     dictionary['genotypes'] = '/projects/ps-palmer/gwas/databases/rounds/round10_1'
 
@@ -39,7 +39,6 @@ else:
     df = pd.read_csv(rawdata, dtype = {'rfid': str}).drop_duplicates(subset = 'rfid') 
     traits_, traits_d = [], []
 #sys.stdout = open(f'{path}{pj}/GWASpipelineCLIout.txt', 'w')
-for k,v in dictionary.items(): print(f'--{k} : {v}')
 gwas = gwas_pipe(path = f'{path}{pj}/',
              all_genotypes = dictionary['genotypes'], #'round9_1.vcf.gz',
              data = df,
@@ -51,7 +50,9 @@ gwas = gwas_pipe(path = f'{path}{pj}/',
              phewas_db = dictionary['phewas_path'],
              trait_descriptions= traits_d,
              threads = dictionary['threads'])
-
+printwithlog(path)
+printwithlog(pj)
+for k,v in dictionary.items(): printwithlog(f'--{k} : {v}')
 if dictionary['regressout']: 
     if not dictionary['timeseries']:  gwas.regressout(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'))
     else:  gwas.regressout_timeseries(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'))
@@ -60,8 +61,10 @@ if dictionary['grm']:gwas.generateGRM()
 if dictionary['h2']: gwas.snpHeritability()
 if dictionary['BLUP']: gwas.BLUP()
 if dictionary['BLUP_predict']: gwas.BLUP_predict(dictionary['BLUP_predict']);
-if dictionary['gwas']: gwas.GWAS()
-if dictionary['db']: gwas.addGWASresultsToDb(researcher=dictionary['researcher'], round_version=dictionary['round'], gwas_version=dictionary['gwas_version'])
+if dictionary['gwas']: gwas.GWAS(skip_already_present = dictionary['skip_already_present_gwas'])
+if dictionary['db']: gwas.addGWASresultsToDb(researcher=dictionary['researcher'],
+                                             round_version=dictionary['round'], 
+                                             gwas_version=dictionary['gwas_version'])
 if dictionary['qtl']: 
     qtl_add_founder = True if (dictionary['founder_genotypes'] not in [ 'none', 'None', 0]) else False
     try: qtls = gwas.callQTLs( NonStrictSearchDir=False, add_founder_genotypes = qtl_add_founder)
@@ -74,7 +77,9 @@ if dictionary['porcupineplot']: gwas.porcupineplot(pd.read_csv(f'{gwas.path}/res
 if dictionary['phewas']:gwas.phewas(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), annotate=True, pval_threshold = 1e-4, nreturn = 1, r2_threshold = .4, annotate_genome = dictionary['genome']) 
 if dictionary['eqtl']:gwas.eQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), annotate= True, genome = dictionary['genome'])
 if dictionary['sqtl']:gwas.sQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), genome = dictionary['genome'])
-if dictionary['locuszoom']: gwas.locuszoom(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv'), annotate_genome = dictionary['genome']) 
+if dictionary['locuszoom']: gwas.locuszoom(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv'), 
+                                           annotate_genome = dictionary['genome'],
+                                           skip_ld_calculation = dictionary['skip_ld_calculation_locuszoom']) 
 if dictionary['report']:gwas.report(round_version=dictionary['round'], gwas_version=dictionary['gwas_version'])
 if dictionary['store']:gwas.store(researcher=dictionary['researcher'],round_version=dictionary['round'], gwas_version=dictionary['gwas_version'],  remove_folders=False)
 try: 

@@ -38,6 +38,8 @@ import goatools
 import gzip
 import inspect
 import itertools
+import logging
+#logging.basicConfig(filename=f'gwasRun.log', filemode='w', level=logging.DEBUG)
 import matplotlib.pyplot as plt
 from matplotlib.colors import  PowerNorm
 import mygene
@@ -70,6 +72,10 @@ warnings.filterwarnings('ignore')
 #wget https://snpeff.blob.core.windows.net/versions/snpEff_latest_core.zip
 
 na_values_4_pandas = ['', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN', '-NaN', '-nan', '1.#IND', '1.#QNAN', '<NA>', 'N/A', 'NA', 'NULL', 'NaN', 'None', 'n/a', 'nan', 'null', 'UNK']
+
+def printwithlog(string):
+    print(string)
+    logging.info(string)
 
 def decompose_grm(grm_path, n_comp = 50, verbose = True):
     (grmxr, ar) =  pandas_plink.read_grm(grm_path)
@@ -171,7 +177,7 @@ def _distance_to_founders(subset_geno,founderfile,fname,c, scaler: str = 'ss', v
         ys.loc[fam.query('gender == "2"').iid, :] *= 2
     founder_gens = plink2pddf( (bimf, famf, genf),snplist= list(snps.snp))
     if (aa := bimf.merge(snps, on = 'snp', how = "inner").query('a0_x != a0_y')).shape[0]:
-        print('allele order mixed between founders and samples')
+        printwithlog('allele order mixed between founders and samples')
         display(aa)
     Scaler = {'tfidf': make_pipeline(KNNImputer(), TfidfTransformer()), 
               'ss': StandardScaler(), 'passthrough': make_pipeline('passthrough')}
@@ -195,7 +201,7 @@ def _distance_to_founders(subset_geno,founderfile,fname,c, scaler: str = 'ss', v
     sns.clustermap(dist2f.div(dist2f.sum(axis = 1), axis = 0).fillna(0) , cmap = 'turbo',  figsize= (15, 15), 
                square = True, norm=PowerNorm(.5, vmax = 1, vmin = 0), 
                 row_colors=rowcols)
-    print(f'the following founders are present in the chr {c}:\n')
+    printwithlog(f'the following founders are present in the chr {c}:\n')
     display(matchdf.TopMatch.value_counts().to_frame())
     plt.savefig(fname)
     if verbose: plt.show()
@@ -278,19 +284,19 @@ class vcf_manipulation:
             '##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype Quality">',
             '##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Read Depth">',
             '##FORMAT=<ID=HQ,Number=2,Type=Integer,Description="Haplotype Quality">']) + '\n'
-        elif metadata[-4:] == '.vcf': header = get_vcf_metadata(metadata)
+        elif metadata[-4:] == '.vcf': header = self.get_vcf_metadata(metadata)
 
         with open(filename, 'w') as vcf: 
             vcf.write(header)
         df.to_csv(filename, sep="\t", mode='a', index=False)
 
 def bash(call, verbose = 0, return_stdout = True, print_call = True):
-    if print_call: print(call)
+    if print_call: printwithlog(call)
     out = subprocess.run(call.strip(' ').split(' '), capture_output = True) 
-    if verbose and not return_stdout: print(out.stdout)
+    if verbose and not return_stdout: printwithlog(out.stdout)
     if out.stderr: 
-        try:print(out.stderr.decode('ascii'))
-        except: print(out.stderr.decode('utf-8'))
+        try:printwithlog(out.stderr.decode('ascii'))
+        except: printwithlog(out.stderr.decode('utf-8'))
     if return_stdout: 
         try: oo =  out.stdout.decode('ascii').strip().split('\n')
         except: oo =  out.stdout.decode('utf-8').strip().split('\n')
@@ -366,9 +372,9 @@ def _prophet_reg(dforiginal = "",y_column = 'y',
     for i in approved_cols: fbmodel.add_regressor(i)
     try: fbmodel.fit(df)
     except: 
-        print(f' could not run the trait {y_column}, take a look at the input data')
+        printwithlog(f' could not run the trait {y_column}, take a look at the input data')
         display(dforiginal[[y_column]])
-        print('we will set this values to NAN')
+        printwithlog('we will set this values to NAN')
         return dforiginal.copy().set_index('rfid').assign(**{f'regressedlr_{y_column}': np.nan})[[f'regressedlr_{y_column}']]
     future = pd.DataFrame()
     forecast = fbmodel.predict(pd.concat([df, future], axis = 0).reset_index()).set_index(df.index)
@@ -574,6 +580,7 @@ class gwas_pipe:
         self.snpeff_path = snpeff_path
         self.n_autosome = n_autosome
         
+        logging.basicConfig(filename=f'{self.path}gwasRun.log', filemode='w', level=logging.INFO, format='%(asctime)s %(message)s')
         if os.path.exists(f'{self.path}temp'): bash(f'rm -r {self.path}temp')
         
         if type(data) == str: 
@@ -585,15 +592,15 @@ class gwas_pipe:
         else:
             sample_list_inside_genotypes = pd.read_csv(self.all_genotypes+'.fam', header = None, sep='\s+', dtype = str)[1].to_list()
         df = df.sort_values('rfid').reset_index(drop = True).dropna(subset = 'rfid').drop_duplicates(subset = ['rfid'])
-        self.df = df[df.astype(str).rfid.isin(sample_list_inside_genotypes)].copy()
+        self.df = df[df.rfid.astype(str).isin(sample_list_inside_genotypes)].copy()
         
         if self.df.shape[0] != df.shape[0]:
             missing = set(df.rfid.astype(str).unique()) - set(self.df.rfid.astype(str).unique())
-            print(f"missing {len(missing)} rfids for project {project_name}")
+            printwithlog(f"missing {len(missing)} rfids for project {project_name}")
             
         
         self.traits = [x.lower() for x in traits]
-        print(self.df[self.traits].count())
+        printwithlog(self.df[self.traits].count())
         self.make_dir_structure()
         for trait in self.traits:
             trait_file = f'{self.path}data/pheno/{trait}.txt'            
@@ -660,7 +667,7 @@ class gwas_pipe:
             continuous = set(name.split(',')) & set(datadic.query('trait_covariate == "covariate_continuous"').measure)
             all_covariates = list(set(itertools.chain.from_iterable([ getcols(dfohe, F'OHE_{x}') for x in categorical]))) + list(continuous)
             if verbose:
-                print(f'variables:{variables}-categorical:{categorical}-continuous:{continuous}')
+                printwithlog(f'variables:{variables}-categorical:{categorical}-continuous:{continuous}')
                 display(stR.plot_var_distribution(targets=variables, covariates = list(categorical)))
             partial_explained_vars = statsReport.stat_check(dfohe).explained_variance(variables,all_covariates)
             melted_variances = partial_explained_vars.reset_index().melt(id_vars = ['index'], 
@@ -742,7 +749,7 @@ class gwas_pipe:
 
         try: out = pd.read_csv(f'{self.path}{temp_out_filename}.{dtype}', sep = '\s+')
         except:
-            print(f"file not found")
+            printwithlog(f"file not found")
             out = pd.DataFrame()
         return out 
     
@@ -798,7 +805,7 @@ class gwas_pipe:
         with open(f'{self.path}log{loc}/{func}.log', 'w') as f:
                 f.write('\n'.join(out))
         if loc == 'err':
-            print(f'found possible error in log, check the file {self.path}log{loc}/{func}.log')
+            printwithlog(f'found possible error in log, check the file {self.path}log{loc}/{func}.log')
             #raise ValueError(f'found possible error in log, check the file {self.path}/log{loc}/{func}.log')
             
     def make_dir_structure(self, folders: list = ['data', 'genotypes', 'grm', 'log', 'logerr', 'images/genotypes',
@@ -839,15 +846,15 @@ class gwas_pipe:
                 tempdf.query('sex in ["M", "m", "male", "1", 1]')[['rfid', 'rfid']].to_csv(self.sample_path_males, index = False, header = None, sep = ' ')
                 tempdf.query('sex in ["F", "f", "female", "2", 2]')[['rfid', 'rfid']].to_csv(self.sample_path_females, index = False, header = None, sep = ' ')
 
-        print('calculating missing hwe maf for autossomes and MT')
+        printwithlog('calculating missing hwe maf for autossomes and MT')
         plink(bfile = self.all_genotypes, chr = f'1-{self.n_autosome} MT', hardy = '', keep = self.sample_path, thread_num =  self.threadnum, 
               freq = '', missing = '', nonfounders = '', out = f'{self.path}genotypes/autosomes', 
               chr_set = f'{self.n_autosome} no-xy') #autosome_num = 20
-        print('calculating missing hwe maf for X')
+        printwithlog('calculating missing hwe maf for X')
         plink(bfile = self.all_genotypes, chr = 'X', hardy = '', keep = self.sample_path, thread_num =  self.threadnum,
               freq = '' , missing = '', nonfounders = '', out = f'{self.path}genotypes/xfilter',
               filter_females = '', chr_set = f'{self.n_autosome} no-xy')
-        print('calculating missing hwe maf for Y')
+        printwithlog('calculating missing hwe maf for Y')
         plink(bfile = self.all_genotypes, chr = 'Y', hardy = '', keep = self.sample_path, thread_num =  self.threadnum,
               freq = '' , missing = '', nonfounders = '', out = f'{self.path}genotypes/yfilter', 
               filter_males = '', chr_set = f'{self.n_autosome} no-xy')
@@ -887,7 +894,7 @@ class gwas_pipe:
 
         if makefigures:
             bim, fam, gen = pandas_plink.read_plink(self.genotypes_subset)
-            print('making plots for heterozygosity per CHR')
+            printwithlog('making plots for heterozygosity per CHR')
             for numc, c in tqdm(list(enumerate(bim.chrom.unique().astype(str)))):
                 snps = bim[bim['chrom'] == c]
                 if int(c)<= self.n_autosome: snps = snps[::snps.shape[0]//2000+1]
@@ -934,7 +941,7 @@ class gwas_pipe:
         just_full_grm: bool = True
             Runs only the full GRM
         '''
-        print('generating GRM...')
+        printwithlog('generating GRM...')
         funcName = inspect.getframeinfo(inspect.currentframe()).function
         
         if not autosome_list:
@@ -963,7 +970,7 @@ class gwas_pipe:
                                --make-grm-bin --chr {self.n_autosome+2} --out {self.yGRM}',
                             f'{funcName}_chrY', print_call = False)
                 #all_filenames_partial_grms.loc[len(all_filenames_partial_grms), 'filename'] = self.yGRM
-            except: print('could not make grm for chr Y')
+            except: printwithlog('could not make grm for chr Y')
             
         if 'MT' in extra_chrs:
             try:
@@ -971,7 +978,7 @@ class gwas_pipe:
                                --make-grm-bin --out {self.mtGRM}',
                             f'{funcName}_chrMT', print_call = False)
                 all_filenames_partial_grms.loc[len(all_filenames_partial_grms), 'filename'] = self.mtGRM
-            except:print('could not make grm for chr MT')
+            except:printwithlog('could not make grm for chr MT')
             
         for c in tqdm(autosome_list):
             self.bashLog(f'{self.gcta} {self.thrflag} --bfile {self.genotypes_subset} --chr {c} --autosome-num {self.n_autosome}\
@@ -1021,7 +1028,7 @@ class gwas_pipe:
         6.It reads in the results file, parses it and concatenates it to the h2table DataFrame.
         7.At the end of the loop, it writes the resulting h2table DataFrame to a file and returns it.
         '''
-        print(f'starting snp heritability {self.project_name}')       
+        printwithlog(f'starting snp heritability {self.project_name}')       
         
         h2table = pd.DataFrame()
         for trait in tqdm(self.traits):
@@ -1066,7 +1073,7 @@ class gwas_pipe:
         ------
 
         '''
-        print(f'starting genetic correlation matrix {self.project_name}...')
+        printwithlog(f'starting genetic correlation matrix {self.project_name}...')
         if not traitlist: traitlist = self.traits
         d_ = {t: str(num) for num, t in enumerate(['rfid']+ traitlist)} 
         self.df[['rfid', 'rfid']+ traitlist].fillna('NA').to_csv(f'{self.path}data/allpheno.txt', sep = '\t', header = None, index = False)
@@ -1124,7 +1131,7 @@ class gwas_pipe:
         ------
 
         '''
-        print(f'starting BLUP model {self.project_name}...')      
+        printwithlog(f'starting BLUP model {self.project_name}...')      
 
         for trait in tqdm(self.traits):
             os.makedirs( f'{self.path}data/BLUP', exist_ok = True)
@@ -1166,7 +1173,7 @@ class gwas_pipe:
         ------
 
         '''
-        print(f'starting blup prediction for {self.project_name} -> {genotypes2predict}')
+        printwithlog(f'starting blup prediction for {self.project_name} -> {genotypes2predict}')
         if type(traits) == str: traits = [traits]
         pred_path = f'{self.path}results/BLUP/predictions'
         os.makedirs( pred_path, exist_ok = True) 
@@ -1190,7 +1197,7 @@ class gwas_pipe:
         return outdf
         
     
-    def GWAS(self, traitlist: list = [] ,subtract_grm: bool = True, loco: bool = True , run_per_chr: bool = False,
+    def GWAS(self, traitlist: list = [] ,subtract_grm: bool = True, loco: bool = True , run_per_chr: bool = False, skip_already_present = False,
              print_call: bool = False, **kwards):
         """
         This function performs a genome-wide association study (GWAS) on the provided genotype data using the GCTA software.
@@ -1199,7 +1206,7 @@ class gwas_pipe:
         ----------
     
         subtract_grm: 
-            a boolean indicating whether to subtract the genomic relatedness matrix (GRM) from the GWAS results (default is False)
+            a boolean indicating whether to subtract the genomic relatedness matrix (GRM) from the GWAS results (default is True)
         loco: 
             a boolean indicating whether to perform leave-one-chromosome-out (LOCO) analysis (default is True)
         print_call: 
@@ -1218,42 +1225,53 @@ class gwas_pipe:
         with the filename indicating the trait, GRM subtraction status, and LOCO status.
         """
 
-        print(f'starting GWAS {self.project_name}')
+        printwithlog(f'starting GWAS {self.project_name}')
         from joblib import Parallel, delayed
         
         if len(traitlist) == 0:
             traitlist = self.traits
         #results = Parallel(n_jobs=2)(delayed(countdown)(10**7) for _ in range(20))
+        check_present = lambda trait: os.path.exists(f'{self.path}results/gwas/{trait}.loco.mlma')\
+                                      +os.path.exists(f'{self.path}results/gwas/{trait}.mlma')
+        check_present_extra = lambda trait, chromp2: os.path.exists(f'{self.path}results/gwas/{trait}_chrgwas{chromp2}.mlma')
         
         if not run_per_chr:
-            print('running gwas per trait...')
+            printwithlog('running gwas per trait...')
             for trait in tqdm(traitlist):
-                grm_flag = f'--grm {self.path}grm/AllchrGRM ' if subtract_grm else ''
-                loco_flag = '-loco' if loco else ''
-                self.bashLog(f"{self.gcta} {self.thrflag} {grm_flag} \
-                --autosome-num {self.n_autosome}\
-                --pheno {self.path}data/pheno/{trait}.txt \
-                --bfile {self.genotypes_subset} \
-                --mlma{loco_flag} \
-                --out {self.path}results/gwas/{trait}",\
-                            f'GWAS_{loco_flag[1:]}_{trait}',  print_call = print_call)
-                if not os.path.exists(f'{self.path}results/gwas/{trait}.loco.mlma')+os.path.exists(f'{self.path}results/gwas/{trait}.mlma'):
-                    print(f"couldn't run trait: {trait}")
-                    self.GWAS(traitlist = traitlist, run_per_chr = True, print_call= print_call)
-                    return 2
+                if check_present(trait) and skip_already_present:
+                    printwithlog(f'''skipping gwas autosomes for trait: {trait}, 
+                          output files already present, to change this behavior use skip_already_present = False''')
+                else:
+                    grm_flag = f'--grm {self.path}grm/AllchrGRM ' if subtract_grm else ''
+                    loco_flag = '-loco' if loco else ''
+                    self.bashLog(f"{self.gcta} {self.thrflag} {grm_flag} \
+                    --autosome-num {self.n_autosome}\
+                    --pheno {self.path}data/pheno/{trait}.txt \
+                    --bfile {self.genotypes_subset} \
+                    --mlma{loco_flag} \
+                    --out {self.path}results/gwas/{trait}",\
+                                f'GWAS_{loco_flag[1:]}_{trait}',  print_call = print_call)
+                    if not check_present(trait):
+                        printwithlog(f"couldn't run trait: {trait}")
+                        self.GWAS(traitlist = [trait], run_per_chr = True, print_call= print_call)
+                        return 2
             ranges = [self.n_autosome+1, self.n_autosome+2, self.n_autosome+4]
         else:
-            print('running gwas per chr per trait...')
-            ranges = [i for i in range(1,self.n_autosome+2) if i != self.n_autosome+3]
+            printwithlog('running gwas per chr per trait...')
+            ranges = [i for i in range(1,self.n_autosome+5) if i != self.n_autosome+3]
         
         for trait, chrom in tqdm(list(itertools.product(traitlist,ranges))):
             chromp2 = self.replacenumstoXYMT(chrom)
-            subgrmflag = f'--mlma-subtract-grm {self.path}grm/{chromp2}chrGRM' if chromp2 != 'y' else ''
-            self.bashLog(f'{self.gcta} {self.thrflag} --pheno {self.path}data/pheno/{trait}.txt --bfile {self.genotypes_subset} \
-                                       --grm {self.path}grm/AllchrGRM --autosome-num {self.n_autosome} \
-                                       --chr {chrom} {subgrmflag} --mlma \
-                                       --out {self.path}results/gwas/{trait}_chrgwas{chromp2}', 
-                        f'GWAS_{chrom}_{trait}', print_call = print_call)
+            if check_present_extra(trait, chromp2) and  skip_already_present:
+                    printwithlog(f'''skipping gwas for trait: {trait} and chr {chromp2}, 
+                          output files already present, to change this behavior use skip_already_present = False''')
+            else:
+                subgrmflag = f'--mlma-subtract-grm {self.path}grm/{chromp2}chrGRM' if chromp2 != 'y' else ''
+                self.bashLog(f'{self.gcta} {self.thrflag} --pheno {self.path}data/pheno/{trait}.txt --bfile {self.genotypes_subset} \
+                                           --grm {self.path}grm/AllchrGRM --autosome-num {self.n_autosome} \
+                                           --chr {chrom} {subgrmflag} --mlma \
+                                           --out {self.path}results/gwas/{trait}_chrgwas{chromp2}', 
+                            f'GWAS_{chrom}_{trait}', print_call = print_call)
                 
         return 1
     
@@ -1284,7 +1302,7 @@ class gwas_pipe:
         Finally, it saves the updated PheWAS database to a file.
         
         '''
-        print(f'starting adding gwas to database ... {self.project_name}') 
+        printwithlog(f'starting adding gwas to database ... {self.project_name}') 
         if type(filenames) == str:
             filenames = [filenames]
             
@@ -1316,7 +1334,7 @@ class gwas_pipe:
             try:
                 alldata = pd.concat([all_new, pd.read_parquet(self.phewas_db)])
             except:
-                print(f"Could not open phewas database in file: {self.phewas_db}, rebuilding db with only this project")
+                printwithlog(f"Could not open phewas database in file: {self.phewas_db}, rebuilding db with only this project")
                 if safe_rebuild: 
                     raise ValueError('not doing anything further until data is manually verified')
                     return
@@ -1365,7 +1383,7 @@ class gwas_pipe:
         If there are more than 2 correlated SNPs, the SNP is considered a QTL. The QTL is then added to the output DataFrame out,
         and linkage disequilibrium is calculated for the SNP using the plink command-line tool.
         '''
-        print(f'starting call qtl ... {self.project_name}') 
+        printwithlog(f'starting call qtl ... {self.project_name}') 
         thresh = 10**(-threshold)
         
         if not NonStrictSearchDir:
@@ -1380,7 +1398,7 @@ class gwas_pipe:
                     filename = f'{self.path}results/gwas/{t}.loco.mlma'
                     if os.path.exists(filename):
                         topSNPs = pd.concat([topSNPs, pd.read_csv(filename, sep = '\t').query(f'p < {thresh}').assign(trait=t)])
-                    else: print(f'could not locate {filename}')
+                    else: printwithlog(f'could not locate {filename}')
                     
 
         else:
@@ -1423,7 +1441,7 @@ class gwas_pipe:
                                  axis = 0)
                 
         if not len(out):
-            print('no SNPS were found, returning an empty dataframe')
+            printwithlog('no SNPS were found, returning an empty dataframe')
             out.to_csv(f'{self.path}results/qtls/allQTLS.csv', index = False)
             return out
             
@@ -1441,7 +1459,7 @@ class gwas_pipe:
         self.allqtlspath = f'{self.path}results/qtls/allQTLS.csv'
         
         out.to_csv(self.allqtlspath.replace('allQTLS', 'QTLSb4CondAnalysis'), index = False)
-        print('running conditional analysis...')
+        printwithlog('running conditional analysis...')
         self.pbim, self.pfam, self.pgen = pandas_plink.read_plink(self.genotypes_subset)
         out = self.conditional_analysis_filter(out, threshold)
         out.to_csv(self.allqtlspath, index = False)
@@ -1452,11 +1470,11 @@ class gwas_pipe:
         os.makedirs(f'{self.path}results/cojo', exist_ok=True)
         os.makedirs(f'{self.path}temp/cojo',exist_ok=True)
         
-        if not snpdf.shape[0]: print(f'running conditional analysis for trait {trait} and all snps above threshold {threshold}')
+        if not snpdf.shape[0]: printwithlog(f'running conditional analysis for trait {trait} and all snps above threshold {threshold}')
         else: 
-            #print(snpdf.shape)
+            #printwithlog(snpdf.shape)
             snpstring = ' '.join(snpdf.SNP)
-            print(f'running conditional analysis for trait {trait} and all snps below threshold {snpstring}')
+            printwithlog(f'running conditional analysis for trait {trait} and all snps below threshold {snpstring}')
 
         pbimtemp = self.pbim.assign(n = self.df.count()[trait] ).rename({'snp': 'SNP', 'n':'N'}, axis = 1)[['SNP', 'N']] #- da.isnan(pgen).sum(axis = 1)
         tempdf = pd.concat([pd.read_csv(f'{self.path}results/gwas/{trait}.loco.mlma', sep = '\t'),
@@ -1476,7 +1494,7 @@ class gwas_pipe:
         self.bashLog(f'{self.gcta} {self.thrflag} --bfile {self.genotypes_subset} --cojo-slct --cojo-collinear 0.99 --cojo-p {10**-(threshold-2)} --cojo-file {mafile} --cojo-cond {snpl} --out {cojofile}', f'cojo_test', print_call=False)
         if os.path.isfile(f'{cojofile}.jma.cojo'):
             return pd.read_csv(f'{cojofile}.jma.cojo', sep = '\t')
-        print(f'Conditional Analysis Failed for  trait {trait} and all snps below threshold {snpstring}, returning the top snp only')
+        printwithlog(f'Conditional Analysis Failed for  trait {trait} and all snps below threshold {snpstring}, returning the top snp only')
         return pd.DataFrame(snpdf.SNP.values, columns = ['SNP'])
 
     def conditional_analysis_filter(self, qtltable, threshold: float = 5.3591):
@@ -1484,7 +1502,7 @@ class gwas_pipe:
                                                             if df.shape[0] > 1 else df).reset_index(drop= True)
         
     def effectsize(self, qtltable: pd.DataFrame(), display_plots: bool = True):
-        print(f'starting effect size plot... {self.project_name}') 
+        printwithlog(f'starting effect size plot... {self.project_name}') 
         out = qtltable.reset_index()
         usnps = out.SNP.unique()
         aa = ','.join(usnps)
@@ -1506,40 +1524,41 @@ class gwas_pipe:
                 ax[num].hlines(y = 0 if num==0 else temp[temp[row.SNP]!= '00'][ex+ row.trait].mean() , xmin =-.5, xmax=2.5, color = 'black', linewidth = 2, linestyle = '--')
                 sns.despine()
             os.makedirs(f'{self.path}images/boxplot/', exist_ok=True)
-            plt.savefig(f'{self.path}images/boxplot/boxplot{row.SNP}__{row.trait}.png'.replace(':', '_'))
             plt.tight_layout()
+            plt.savefig(f'{self.path}images/boxplot/boxplot{row.SNP}__{row.trait}.png'.replace(':', '_'))
             plt.show()
             plt.close()   
     
-    def locuszoom(self, qtltable: pd.DataFrame(), threshold: float = 5.3591, suggestive_threshold: float = 5.58, qtl_r2_thresh: float = .6, padding: float = 2e5, annotate_genome: str = 'rn7'):
+    def locuszoom(self, qtltable: pd.DataFrame(), threshold: float = 5.3591, suggestive_threshold: float = 5.58, qtl_r2_thresh: float = .6, padding: float = 2e5, annotate_genome: str = 'rn7', skip_ld_calculation = False):
         '''
         Only works on TSCC
         '''
-        print(f'generating locuszoom info for project {self.project_name}')
+        printwithlog(f'generating locuszoom info for project {self.project_name}')
         out = qtltable.reset_index()
         causal_snps = []
-        for name, row in tqdm(list(out.iterrows())):
-            ldfilename = f'{self.path}results/lz/temp_qtl_n_@{row.trait}@{row.SNP}'
-            r2 = self.plink(bfile = self.genotypes_subset, chr = row.Chr, ld_snp = row.SNP, ld_window_r2 = 0.001, r2 = 'dprime',\
-                                    ld_window = 100000, thread_num = int(self.threadnum), ld_window_kb =  6000, nonfounders = '').loc[:, ['SNP_B', 'R2', 'DP']] 
-            gwas = pd.concat([pd.read_csv(x, sep = '\t') for x in glob(f'{self.path}results/gwas/regressedlr_{row.trait}.loco.mlma') \
-                                + glob(f'{self.path}results/gwas/regressedlr_{row.trait}_chrgwasx.mlma')]).drop_duplicates(subset = 'SNP')
-            tempdf = pd.concat([gwas.set_index('SNP'), r2.rename({'SNP_B': 'SNP'}, axis = 1).drop_duplicates(subset = 'SNP').set_index('SNP')], join = 'inner', axis = 1)
-            tempdf = self.annotate(tempdf.reset_index(), annotate_genome, 'SNP', save = False).set_index('SNP').fillna('UNK')
-            tempdf.to_csv( f'{self.path}results/lz/lzplottable@{row.trait}@{row.SNP}.tsv', sep = '\t')
-            
-            ## potential causal mutations
-            subcausal = tempdf.query("putative_impact not in ['UNK', 'MODIFIER']").assign(trait = row.trait, SNP_qtl = row.SNP)
-            subcausal.columns = subcausal.columns.astype(str)
-            if subcausal.shape[0] > 0:
-                subcausal = subcausal.loc[subcausal.R2 > qtl_r2_thresh,  ~subcausal.columns.str.contains('\d\d', regex = True) ]\
-                                     .sort_values('putative_impact', ascending = False).drop('errors', errors = 'ignore' , axis =1 ).reset_index()\
-                                     .drop(['Chr', 'bp', 'se', 'geneid'], errors = 'ignore' ,axis = 1).reset_index().set_index('SNP_qtl')
-                causal_snps += [subcausal]
-            else: pass
-            
-        causal_snps = pd.concat(causal_snps).to_csv(f'{self.path}results/qtls/possible_causal_snps.tsv', sep = '\t')
-        
+        if not skip_ld_calculation:
+            for name, row in tqdm(list(out.iterrows())):
+                ldfilename = f'{self.path}results/lz/temp_qtl_n_@{row.trait}@{row.SNP}'
+                r2 = self.plink(bfile = self.genotypes_subset, chr = row.Chr, ld_snp = row.SNP, ld_window_r2 = 0.001, r2 = 'dprime',\
+                                        ld_window = 100000, thread_num = int(self.threadnum), ld_window_kb =  6000, nonfounders = '').loc[:, ['SNP_B', 'R2', 'DP']] 
+                gwas = pd.concat([pd.read_csv(x, sep = '\t') for x in glob(f'{self.path}results/gwas/regressedlr_{row.trait}.loco.mlma') \
+                                    + glob(f'{self.path}results/gwas/regressedlr_{row.trait}_chrgwasx.mlma')]).drop_duplicates(subset = 'SNP')
+                tempdf = pd.concat([gwas.set_index('SNP'), r2.rename({'SNP_B': 'SNP'}, axis = 1).drop_duplicates(subset = 'SNP').set_index('SNP')], join = 'inner', axis = 1)
+                tempdf = self.annotate(tempdf.reset_index(), annotate_genome, 'SNP', save = False).set_index('SNP').fillna('UNK')
+                tempdf.to_csv( f'{self.path}results/lz/lzplottable@{row.trait}@{row.SNP}.tsv', sep = '\t')
+
+                ## potential causal mutations
+                subcausal = tempdf.query("putative_impact not in ['UNK', 'MODIFIER']").assign(trait = row.trait, SNP_qtl = row.SNP)
+                subcausal.columns = subcausal.columns.astype(str)
+                if subcausal.shape[0] > 0:
+                    subcausal = subcausal.loc[subcausal.R2 > qtl_r2_thresh,  ~subcausal.columns.str.contains('\d\d', regex = True) ]\
+                                         .sort_values('putative_impact', ascending = False).drop('errors', errors = 'ignore' , axis =1 ).reset_index()\
+                                         .drop(['Chr', 'bp', 'se', 'geneid'], errors = 'ignore' ,axis = 1).reset_index().set_index('SNP_qtl')
+                    causal_snps += [subcausal]
+                else: pass
+
+            causal_snps = pd.concat(causal_snps).to_csv(f'{self.path}results/qtls/possible_causal_snps.tsv', sep = '\t')
+
         genome_lz_path = {'rn6': 'rn6', 
                           'rn7':'rn7', 
                           'cfw': 'm38',
@@ -1575,7 +1594,7 @@ class gwas_pipe:
                 --refsnp {qtl_row.SNP} --chr {int(topsnpchr)} --start {int(range_interest["min"] - padding)} --end {int(range_interest["max"] + padding)} --build manual \
                 --db /projects/ps-palmer/gwas/databases/databases_lz/{genome_lz_path}.db \
                 --plotonly showRecomb=FALSE showAnnot=FALSE --prefix {self.path}temp/{qtl_row.trait} signifLine="{threshold},{suggestive_threshold}" signifLineColor="red,blue" \
-                title = "{qtl_row.trait} SNP {qtl_row.SNP}" > /dev/null 2>&1 ''')
+                title = "{qtl_row.trait} SNP {qtl_row.SNP}" > /dev/null 2>&1 ''') #
             
             #os.system(f'''conda run -n lzenv && \
             #    locuszoomfiles/bin/locuszoom \ 
@@ -1584,10 +1603,15 @@ class gwas_pipe:
             #    --db /projects/ps-palmer/gwas/databases/databases_lz/{genome_lz_path}.db \
             #    --plotonly showRecomb=FALSE showAnnot=FALSE --prefix {self.path}temp/{qtl_row.trait} signifLine="{threshold},{suggestive_threshold}" signifLineColor="red,blue" \
             #    title = "{qtl_row.trait} SNP {qtl_row.SNP}" > /dev/null 2>&1 ''') #--build u01_peter_kalivas_v7 module load R && module load python
-            path = glob(f'{self.path}temp/{qtl_row.trait}*{qtl_row.SNP}/*.pdf'.replace(':', '_'))[0]
-            for num,image in enumerate(convert_from_path(path)):
-                bn = basename(path).replace('.pdf', '.png')
-                if not num: image.save(f'{self.path}images/lz/lz__{qtl_row.trait}__{qtl_row.SNP}.png'.replace(':', '_'), 'png')
+            today_str = datetime.today().strftime('%y%m%d')
+            path = glob(f'{self.path}temp/{qtl_row.trait}*{qtl_row.SNP}/*.pdf'.replace(':', '_')) + \
+                   glob(f'{self.path}temp/{qtl_row.trait}_{today_str}_{qtl_row.SNP}*.pdf'.replace(':', '_'))
+            if not len(path): printwithlog(f'could not find any pdf with {self.path}temp/{qtl_row.trait}*{qtl_row.SNP}/*.pdf')
+            else:
+                path = path[0]
+                for num,image in enumerate(convert_from_path(path)):
+                    bn = basename(path).replace('.pdf', '.png')
+                    if not num: image.save(f'{self.path}images/lz/lz__{qtl_row.trait}__{qtl_row.SNP}.png'.replace(':', '_'), 'png')
     
     def phewas(self, qtltable: pd.DataFrame(), ld_window: int = int(3e6), pval_threshold: float = 1e-4, nreturn: int = 1 ,r2_threshold: float = .8,\
               annotate: bool = True, annotate_genome: str = 'rn7', **kwards) -> pd.DataFrame():
@@ -1629,7 +1653,7 @@ class gwas_pipe:
         9.if annotate is True, it annotates the PheWAS table using the annotate method and the provided annotate_genome
         10.return the final PheWAS table.
         '''
-        print(f'starting phewas ... {self.project_name}')  
+        printwithlog(f'starting phewas ... {self.project_name}')  
         if qtltable.shape == (0,0): qtltable = pd.read_csv(self.annotatedtablepath).set_index('SNP')
         db_vals = pd.read_parquet(self.phewas_db).query(f'p < {pval_threshold}')  #, compression='gzip'   and project != "{self.project_name}   
         db_vals.SNP = db_vals.SNP.str.replace('chr', '')
@@ -1658,7 +1682,7 @@ class gwas_pipe:
         self.phewas_window_r2 = f'{self.path}results/phewas/table_window_match.csv'
         
         if table_window_match.shape[0] == 0:
-            print('No QTL window matches')
+            printwithlog('No QTL window matches')
             pd.DataFrame().to_csv(self.phewas_window_r2, index = False)
             return -1
             
@@ -1744,7 +1768,7 @@ class gwas_pipe:
             7.if annotate is True, it annotates the eQTL table using the annotate method and the provided annotate_genome
             8.save the final eQTL table to a file and return the final eQTL table.
         '''
-        print(f'starting eqtl ... {self.project_name}') 
+        printwithlog(f'starting eqtl ... {self.project_name}') 
         #d =  {'rn6': '', 'rn7': '.rn7.2'}[genome]
         mygene_species = {'rn6': 'rat', 'rn7': 'rat', 'm38': 'mouse', 'cfw': 'mouse'}[genome]
         if qtltable.shape == (0,0): qtltable = pd.read_csv(self.annotatedtablepath).set_index('SNP')
@@ -1831,7 +1855,7 @@ class gwas_pipe:
             7.if annotate is True, it annotates the eQTL table using the annotate method and the provided annotate_genome
             8.save the final eQTL table to a file and return the final eQTL table.
         '''
-        print(f'starting spliceqtl ... {self.project_name}') 
+        printwithlog(f'starting spliceqtl ... {self.project_name}') 
         mygene_species = {'rn6': 'rat', 'rn7': 'rat', 'm38': 'mouse', 'cfw': 'mouse'}[genome]
         #d =  {'rn6': '', 'rn7': '.rn7.2'}[genome]
         if qtltable.shape == (0,0): qtltable = pd.read_csv(self.annotatedtablepath).set_index('SNP')
@@ -1893,7 +1917,7 @@ class gwas_pipe:
     
     def manhattanplot(self, traitlist: list = [], threshold: float = 5.3591, suggestive_threshold: float = 5.58, save_fmt: list = ['html', 'png'], display: bool = True):
         
-        print(f'starting manhattanplot ... {self.project_name}')
+        printwithlog(f'starting manhattanplot ... {self.project_name}')
         if len(traitlist) == 0: traitlist = self.traits
         for num, t in tqdm(list(enumerate(traitlist))):
             df_gwas,df_date = [], []
@@ -1913,9 +1937,9 @@ class gwas_pipe:
             append_position = df_gwas.groupby('Chr').bp.agg('max').sort_index().cumsum().shift(1,fill_value=0)
             df_gwas['Chromosome'] = df_gwas.apply(lambda row: row.bp + append_position[row.Chr], axis = 1)
             def mapcolor(c, thresh , p):
-                if -np.log10(p)> thresh : return 'black' 
+                if -np.log10(p)> thresh : return 'red' 
                 elif int(str(c).replace('X',str(self.n_autosome+1)).replace('Y', str(self.n_autosome+2)).replace('MT', str(self.n_autosome+4)))%2 == 0: return 'steelblue'
-                return 'firebrick'
+                return 'navy'
             df_gwas['color']= df_gwas.apply(lambda row: mapcolor(row.Chr, threshold, row.p) ,axis =1)
             fig2 =  go.Figure(data=go.Scattergl(
                 x = df_gwas['Chromosome'].values,
@@ -1938,7 +1962,7 @@ class gwas_pipe:
     def porcupineplot(self, qtltable: pd.DataFrame(), traitlist: list = [], threshold: float = 5.3591, run_only_qtls = True,
                       suggestive_threshold: float = 5.58, save_fmt: list = ['html', 'png'], display: bool = True, low_mem = False):
 
-        print(f'starting porcupineplot ... {self.project_name} reading files')
+        printwithlog(f'starting porcupineplot ... {self.project_name} reading files')
         samplen = int(1e5/30) if low_mem else int(1e5) 
         rangen = range(160,180) if low_mem else range(80,90)
         if len(traitlist) == 0: 
@@ -1954,7 +1978,7 @@ class gwas_pipe:
                 try: 
                     g = pd.read_csv(f'{self.path}results/gwas/{opt}', sep = '\t', dtype = {'Chr': int, 'bp': int}).assign(trait = t)
                     g['inv_prob'] = 1/np.clip(g.p, 1e-6, 1)
-                    g = pd.concat([g.query('p < 0.001'), g.query('p > 0.001').sample(samplen, weights='inv_prob'),
+                    g = pd.concat([g.query('p < 0.001'), g.query('p > 0.001').sample(min(samplen, g.shape[0]), weights='inv_prob'),
                                    g[::np.random.choice(rangen)]] ).sort_values(['Chr', 'bp']).reset_index(drop = True).dropna()
                     df_gwas += [g]
                 except: pass
@@ -1968,7 +1992,7 @@ class gwas_pipe:
             if -np.log10(p)> thresh : return d[trait] 
             elif int(str(c).replace('X',str(self.n_autosome+1)).replace('Y', str(self.n_autosome+2)).replace('MT', str(self.n_autosome+4)))%2 == 0: return 'black'
             return 'gray'
-        print(f'starting porcupineplot ... {self.project_name} colorcoding')
+        printwithlog(f'starting porcupineplot ... {self.project_name} colorcoding')
         df_gwas['color']= df_gwas.progress_apply(lambda row: mapcolor(row.Chr, threshold, row.p, row.trait) ,axis =1)
         df_gwas['annotate'] = (df_gwas.SNP+ df_gwas.trait.str.replace('regressedlr_', '') ).isin(qtl.reset_index().SNP+qtl.reset_index().trait.str.replace('regressedlr_', ''))
         fig2 =  go.Figure(data=go.Scattergl(
@@ -2107,7 +2131,7 @@ class gwas_pipe:
         bash(f'cp -r {out_path} {destination}{pjname}')
         if make_public:
             bash('/projects/ps-palmer/tsanches/mc anonymous set public myminio/tsanches_dash_genotypes --recursive')
-            print(f'{destination.replace("/projects/ps-palmer/s3/data", "https://palmerlab.s3.sdsc.edu")}/p50_david_dietz/results/gwas_report.html')
+            printwithlog(f'{destination.replace("/projects/ps-palmer/s3/data", "https://palmerlab.s3.sdsc.edu")}/p50_david_dietz/results/gwas_report.html')
 
 
     def print_watermark(self):
@@ -2131,3 +2155,28 @@ def get_trait_descriptions_f(data_dic, traits):
         except: out +=  ['UNK']
     return out
         
+def display_graph(G):
+    plt.figure(1, figsize=(8, 8))
+    # layout graphs with positions using graphviz neato
+    pos = graphviz_layout(G, prog="neato")
+    # color nodes the same in each connected subgraph
+    C = (G.subgraph(c) for c in nx.connected_components(G.to_undirected()))
+    for g in C:
+        c = [random.random()] * nx.number_of_nodes(g)  # random color...
+        nx.draw(g, pos, node_size=20, node_color=c, vmin=0.0, vmax=1.0, with_labels=False)
+    plt.show()
+
+def assembly(graph):
+    R = nx.dag_longest_path(nx.DiGraph(graph), weight='weight', default_weight=1)
+    return R[0] + ''.join([x[-1] for x in R[1:]])
+
+def assembly_complete(graph):
+    S = [nx.DiGraph(graph.subgraph(c).copy()) for c in nx.connected_components(graph.to_undirected())]
+    return np.array([assembly(subg) for subg in S])
+
+def tuple_to_graph_edge(graph, kmer1, kmer2,  ide):
+    if graph.has_edge(kmer1, kmer2):  
+        graph[kmer1][kmer2]['weight'] += 1 
+        graph[kmer1][kmer2]['label'][ide] += 1
+    else: graph.add_edge(kmer1, kmer2, weight=1, label = defaultdict(int, {ide:1}))
+    return

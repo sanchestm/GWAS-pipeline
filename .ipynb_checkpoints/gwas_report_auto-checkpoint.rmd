@@ -403,6 +403,8 @@ Defining columns:
 We examine if the identified SNP does significant alter the splicing patterns of genes in cis, possibly describing a pathway in which the SNP impact the phenotype. We also examine SNPs within 3 Mb window and a correlation above 0.6 of the topSNP from the current study, in case the selected SNP is in high LD with another SNP that can alter the splicing in cis.
 
 Defining columns:
+
+
 * SNP_sqtldb: SNP from sQTL database in LD with topSNP detected from GWAS 
 * -Log10(p)_sqtldb: -log10(p-value) for the association between the sqtlSNP and the gene in cis described in the column Ensembl_gene
 * tissue: tissue in which the splice patterns were measured
