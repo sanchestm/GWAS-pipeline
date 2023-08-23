@@ -1531,7 +1531,7 @@ class gwas_pipe:
             plt.show()
             plt.close()   
     
-    def locuszoom(self, qtltable: pd.DataFrame(), threshold: float = 5.3591, suggestive_threshold: float = 5.58, qtl_r2_thresh: float = .6, padding: float = 2e5, annotate_genome: str = 'rn7', skip_ld_calculation = False):
+    def locuszoom(self, qtltable: pd.DataFrame(), threshold: float = 5.3591, suggestive_threshold: float = 5.58, qtl_r2_thresh: float = .6, padding: float = 5e5, annotate_genome: str = 'rn7', skip_ld_calculation = False):
         '''
         Only works on TSCC
         '''
@@ -2217,9 +2217,9 @@ def generate_umap_chunks(chrom, win: int = int(2e6), overlap: float = .5,
     bim1i = bim1.set_index('pos')
     bim1isnp = bim1.set_index('snp')
     
-    if (tempvar := 2*bim1.pos.diff().max().round()) > win:
-        win = int(round(tempvar, -6))
-        print(f'increasing window to {win} ')
+    #if (tempvar := bim1.pos.diff().max().round()) > win:
+    #    win = int(round(tempvar, -6))
+    #    print(f'increasing window to {win} ')
     offset = win//2
     
     sampled_snps_names = list(bim1.loc[sampled_snps].snp)
@@ -2265,9 +2265,10 @@ def generate_umap_chunks(chrom, win: int = int(2e6), overlap: float = .5,
     if impute:
         print('doing KNN imputation and scaling  with...')
         metr = 'euclidean'
-        out['genotypes'] = out['genotypes'].progress_apply(lambda x: make_pipeline(KNNImputer(weights = 'distance'),
+        out['genotypes'] = out['genotypes'].progress_apply(lambda x: np.nan_to_num(make_pipeline(\
+                                                                                   KNNImputer(weights = 'distance'),
                                                                                    StandardScaler() )\
-                                                           .fit_transform(x).astype(np.float16))
+                                                           .fit_transform(x)))
     else:  metr = nan_euclidean_distances
     
     aligned_mapper = umap.AlignedUMAP(metric=metr, target_metric=metr).fit(out.genotypes.to_list(), \

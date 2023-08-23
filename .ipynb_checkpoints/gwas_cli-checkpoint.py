@@ -11,7 +11,10 @@ pj = dictionary['project'].rstrip('/')  if (dictionary['project'] ) else 'test'
 
 if not dictionary['genotypes']:
     dictionary['genotypes'] = '/projects/ps-palmer/gwas/databases/rounds/round10_1'
-
+    
+if not dictionary['threshold']:
+    dictionary['threshold'] = 5.58
+    
 if not dictionary['genome']: dictionary['genome'] = 'rn7'
     
 if not dictionary['researcher']: dictionary['researcher'] = 'tsanches'
@@ -25,7 +28,8 @@ if not dictionary['snpeff_path']: dictionary['snpeff_path'] = 'snpEff/'
 if not dictionary['phewas_path']: dictionary['phewas_path'] = 'phewasdb.parquet.gz'
     
 if not dictionary['regressout']:
-    df = pd.read_csv(f'{path}{pj}/processed_data_ready.csv', dtype = {'rfid': str}).drop_duplicates(subset = 'rfid') 
+    df = pd.read_csv(f'{path}{pj}/processed_data_ready.csv', 
+                     dtype = {'rfid': str}).drop_duplicates(subset = 'rfid') 
     if not dictionary['traits']:
         traits_ = df.columns[df.columns.str.startswith('regressedlr_')]#cluster_bysex
     elif 'prefix_' in dictionary['traits']: 
@@ -67,21 +71,34 @@ if dictionary['db']: gwas.addGWASresultsToDb(researcher=dictionary['researcher']
                                              gwas_version=dictionary['gwas_version'])
 if dictionary['qtl']: 
     qtl_add_founder = True if (dictionary['founder_genotypes'] not in [ 'none', 'None', 0]) else False
-    try: qtls = gwas.callQTLs( NonStrictSearchDir=False, add_founder_genotypes = qtl_add_founder)
-    except: qtls = gwas.callQTLs( NonStrictSearchDir=True)
+    try: qtls = gwas.callQTLs( NonStrictSearchDir=False, 
+                              add_founder_genotypes = qtl_add_founder,
+                             threshold = dictionary['threshold'])
+    except: qtls = gwas.callQTLs( NonStrictSearchDir=True, 
+                                threshold = dictionary['threshold'])
     gwas.annotate(qtls, genome = dictionary['genome'] )
 if dictionary['effect']: gwas.effectsize(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv')) 
 if dictionary['gcorr']: gwas.genetic_correlation_matrix()
-if dictionary['manhattanplot']: gwas.manhattanplot(display = False)
-if dictionary['porcupineplot']: gwas.porcupineplot(pd.read_csv(f'{gwas.path}/results/qtls/finalqtl.csv'), display = False)
+if dictionary['manhattanplot']: gwas.manhattanplot(display = False,
+                                                  threshold = dictionary['threshold'])
+if dictionary['porcupineplot']: gwas.porcupineplot(pd.read_csv(f'{gwas.path}/results/qtls/finalqtl.csv'),
+                                                   display = False,
+                                                  threshold = dictionary['threshold'])
 if dictionary['phewas']:gwas.phewas(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), annotate=True, pval_threshold = 1e-4, nreturn = 1, r2_threshold = .4, annotate_genome = dictionary['genome']) 
-if dictionary['eqtl']:gwas.eQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), annotate= True, genome = dictionary['genome'])
-if dictionary['sqtl']:gwas.sQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), genome = dictionary['genome'])
+if dictionary['eqtl']:gwas.eQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'),
+                                annotate= True, genome = dictionary['genome'])
+if dictionary['sqtl']:gwas.sQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'),
+                                genome = dictionary['genome'])
 if dictionary['locuszoom']: gwas.locuszoom(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv'), 
                                            annotate_genome = dictionary['genome'],
+                                           threshold = dictionary['threshold'],
                                            skip_ld_calculation = dictionary['skip_ld_calculation_locuszoom']) 
-if dictionary['report']:gwas.report(round_version=dictionary['round'], gwas_version=dictionary['gwas_version'])
-if dictionary['store']:gwas.store(researcher=dictionary['researcher'],round_version=dictionary['round'], gwas_version=dictionary['gwas_version'],  remove_folders=False)
+if dictionary['report']:gwas.report(round_version=dictionary['round'], 
+                                    gwas_version=dictionary['gwas_version'])
+if dictionary['store']:gwas.store(researcher=dictionary['researcher'],
+                                  round_version=dictionary['round'], 
+                                  gwas_version=dictionary['gwas_version'],  
+                                  remove_folders=False)
 try: 
     if dictionary['publish']:gwas.copy_results()
 except: 
