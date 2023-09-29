@@ -14,6 +14,7 @@ if not dictionary['genotypes']:
     
 if not dictionary['threshold']:
     dictionary['threshold'] = 5.58
+dictionary['threshold'] = float(dictionary['threshold'])
     
 if not dictionary['genome']: dictionary['genome'] = 'rn7'
     
@@ -57,15 +58,16 @@ gwas = gwas_pipe(path = f'{path}{pj}/',
 printwithlog(path)
 printwithlog(pj)
 for k,v in dictionary.items(): printwithlog(f'--{k} : {v}')
+if dictionary['clear_directories'] and not dictionary['skip_already_present_gwas']: gwas.clear_directories()
 if dictionary['regressout']: 
     if not dictionary['timeseries']:  gwas.regressout(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'))
-    else:  gwas.regressout_timeseries(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'))
+    else:  gwas.regressout_timeseries(data_dictionary=pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'))
 if dictionary['subset']: gwas.SubsetAndFilter()
-if dictionary['grm']:gwas.generateGRM()
+if dictionary['grm']: gwas.generateGRM()
 if dictionary['h2']: gwas.snpHeritability()
 if dictionary['BLUP']: gwas.BLUP()
 if dictionary['BLUP_predict']: gwas.BLUP_predict(dictionary['BLUP_predict']);
-if dictionary['gwas']: gwas.GWAS(skip_already_present = dictionary['skip_already_present_gwas'])
+if dictionary['gwas']: gwas.GWAS(skip_already_present=dictionary['skip_already_present_gwas'])
 if dictionary['db']: gwas.addGWASresultsToDb(researcher=dictionary['researcher'],
                                              round_version=dictionary['round'], 
                                              gwas_version=dictionary['gwas_version'])
@@ -84,10 +86,10 @@ if dictionary['manhattanplot']: gwas.manhattanplot(display = False,
 if dictionary['porcupineplot']: gwas.porcupineplot(pd.read_csv(f'{gwas.path}/results/qtls/finalqtl.csv'),
                                                    display = False,
                                                   threshold = dictionary['threshold'])
-if dictionary['phewas']:gwas.phewas(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), annotate=True, pval_threshold = 1e-4, nreturn = 1, r2_threshold = .4, annotate_genome = dictionary['genome']) 
-if dictionary['eqtl']:gwas.eQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'),
+if dictionary['phewas']:gwas.phewas(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP').loc[:, : 'significance_level'], annotate=True, pval_threshold = 1e-4, nreturn = 1, r2_threshold = .4, annotate_genome = dictionary['genome']) 
+if dictionary['eqtl']:gwas.eQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP').loc[:, : 'significance_level'],
                                 annotate= True, genome = dictionary['genome'])
-if dictionary['sqtl']:gwas.sQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'),
+if dictionary['sqtl']:gwas.sQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP').loc[:, : 'significance_level'],
                                 genome = dictionary['genome'])
 if dictionary['locuszoom']: gwas.locuszoom(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv'), 
                                            annotate_genome = dictionary['genome'],
