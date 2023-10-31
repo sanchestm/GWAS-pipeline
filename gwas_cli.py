@@ -81,6 +81,7 @@ if dictionary['qtl']:
     gwas.annotate(qtls, genome = dictionary['genome'] )
 if dictionary['effect']: gwas.effectsize(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv')) 
 if dictionary['gcorr']: gwas.genetic_correlation_matrix()
+if dictionary['h2fig']: gwas.make_heritability_figure(display = False)
 if dictionary['manhattanplot']: gwas.manhattanplot(display = False,
                                                   threshold = dictionary['threshold'])
 if dictionary['porcupineplot']: gwas.porcupineplot(pd.read_csv(f'{gwas.path}/results/qtls/finalqtl.csv'),
@@ -96,7 +97,8 @@ if dictionary['locuszoom']: gwas.locuszoom(pd.read_csv(f'{gwas.path}results/qtls
                                            threshold = dictionary['threshold'],
                                            skip_ld_calculation = dictionary['skip_ld_calculation_locuszoom']) 
 if dictionary['report']:gwas.report(round_version=dictionary['round'], 
-                                    gwas_version=dictionary['gwas_version'])
+                                    gwas_version=dictionary['gwas_version'],
+                                   threshold = dictionary['threshold'])
 if dictionary['store']:gwas.store(researcher=dictionary['researcher'],
                                   round_version=dictionary['round'], 
                                   gwas_version=dictionary['gwas_version'],  

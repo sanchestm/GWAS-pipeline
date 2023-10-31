@@ -72,7 +72,9 @@ Phenotype Info
 
 Genotype Info
 
-* round ROUND
+* genotypes version: ROUND
+
+* gwas pipeline version: GWASVERSION
 
 * number of snps: before filter NSNPSB4, after filter NSNPS
 
@@ -81,6 +83,7 @@ Genotype Info
 * maf filter (minor allele frequency): > MAF (MAFDROP snps removed)
 
 * hwe filter (hardy-weinberg equilibrium): < HWE (HWEDROP snps removed)
+ 
 
 
 ******
@@ -166,7 +169,6 @@ For the figure, the upper triangle represents the genetic correlation (ranges fr
 
 cat(str_interp("\n![](../images/genetic_correlation_matrix.png)\n\n\n"))
 
-
 gcorr = read.csv("heritability/genetic_correlation_melted_table.csv",header=T,stringsAsFactors = F) %>% mutate_if(is.numeric, ~round(., 3)) %>% select(-c('X'))
 gcorr$trait1 = str_remove_all(gcorr$trait1, 'regressedlr_')
 gcorr$trait2 = str_remove_all(gcorr$trait2, 'regressedlr_')
@@ -191,8 +193,10 @@ Column definitions:
 * heritability_se: standard error, variance that is affected by N and the distribution of trait values
 * pval: probability of observing the estimated heritability under the NULL hypothesis (that the SNP heritability is 0) 
 
+   
+```{r SNP heritability estimates,message=F,warning=F,eval=T,include=T,results = 'asis',echo=F}
 
-```{r SNP heritability estimates, echo=FALSE,eval=TRUE,message=FALSE,include=T}
+cat(str_interp("\n![](../images/heritability_sorted.png)\n\n\n"))
 
 df = read.csv("heritability/heritability.tsv",header=T,stringsAsFactors = F, sep= '\t')
 names(df) = c('trait', 'gen_var', 'env_var', 'phe_var', 'heritability', 'likelihood', 'lrt', 'df', 'pval', 'n', 'heritability_se')
@@ -250,6 +254,11 @@ sqtl = ""
 if (file.exists("sqtl/pretty_sqtl_table.csv")) {
 sqtl<-read.csv( 'sqtl/pretty_sqtl_table.csv',header=T,stringsAsFactors=F, sep = ',') %>%
       rename( '-Log10(p)' = 'X.log10.P.value.','-Log10(p)_sqtldb'= 'X.log10.pval_nominal.') #%>% select(-c('gene_id')) 
+}
+
+genes_inrange = ""
+if (file.exists("qtls/genes_in_range.csv")) {
+genes_inrange<-read.csv( "qtls/genes_in_range.csv",header=T,stringsAsFactors=F, sep = ',')
 }
 
 ```
@@ -419,10 +428,12 @@ Defining columns:
 
 ```{r dynamic chunks,message=F,warning=F,eval=T,include=T,results = 'asis',echo=F,cache=F}
 for( i in rownames(qtls) ){
-   cat(str_interp("  \n  \n## Trait: ${qtls[i, 'trait']} SNP: ${qtls[i, 'SNP']}\n"))
+   cat(str_interp("  \n  \n## Trait: ${qtls[i, 'trait']} SNP: ${qtls[i, 'SNP']}\n"))   
    pretify2(qtls_v2 %>% filter(TopSNP == qtls[i, 'SNP']) %>% filter(trait == qtls[i, 'trait']))
    snp_new_name = gsub(':', '_', qtls[i, 'SNP'] )
    cat(str_interp("\n![](../images/lz/lz__${qtls[i, 'trait']}__${snp_new_name}.png)\n\n\n"))
+   longstring <- genes_inrange %>% filter(SNP_origin == qtls[i, 'SNP']) %>% distinct( markdown, .keep_all = TRUE) %>% summarize(strconcat = paste(markdown, collapse = " "))
+   cat(str_interp(longstring$strconcat))
    cat(str_interp("\n![](../images/boxplot/boxplot${snp_new_name}__${qtls[i, 'trait']}.png)\n\n\n"))
     
    tryCatch(
