@@ -1,4 +1,4 @@
-name: GWAS-pipeline
+name: gwas
 channels:
   - conda-forge
   - defaults
@@ -12,11 +12,12 @@ dependencies:
   - dask
   - psycopg2
   - scikit-learn
-  - openjdk
+  - openjdk=11
   - ipykernel
   - pyarrow
   - plink
   - snpeff
+  - dask-jobqueue
   - gcta
   - plotly
   - biopython
@@ -36,8 +37,16 @@ dependencies:
   - shap
   - scikit-optimize
   - xgboost
+  - nltk
+  - pygraphviz
+  - sqlalchemy
+  - panel
+  - hvplot
+  - holoviews
   - pip
   - pip:
     - goatools
     - dash-bio==1.0.1
     - kaleido
+
+

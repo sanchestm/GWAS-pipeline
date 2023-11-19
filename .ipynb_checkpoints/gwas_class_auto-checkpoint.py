@@ -581,9 +581,9 @@ class gwas_pipe:
                  trait_descriptions: list = [],
                  chrList: list = [], 
                  n_autosome: int = 20,
-                 all_genotypes: str = '/projects/ps-palmer/gwas/databases/rounds/round10_1',
+                 all_genotypes: str = '/tscc/projects/ps-palmer/gwas/databases/rounds/round10_1',
                  founder_genotypes: str = '/projects/ps-palfounder_genotypes/Ref_panel_mRatBN7_2_chr_GT', 
-                 founderfile: str = '/projects/ps-palmer/gwas/databases/founder_genotypes/founders7.2',
+                 founderfile: str = '/tscc/projects/ps-palmer/gwas/databases/founder_genotypes/founders7.2',
                  gtca_path: str = '',
                  snpeff_path: str =  'snpEff/',
                  phewas_db: str = 'phewasdb.parquet.gz',
@@ -1709,15 +1709,27 @@ class gwas_pipe:
             plt.show()
             plt.close()   
     
-    def locuszoom(self, qtltable: pd.DataFrame(), threshold: float = 5.3591, suggestive_threshold: float = 5.58, qtl_r2_thresh: float = .6, padding: float = 5e5, annotate_genome: str = 'rn7', skip_ld_calculation = False):
+    def locuszoom(self, qtltable: pd.DataFrame() = '', 
+                  threshold: float = 5.3591, suggestive_threshold: float = 5.58, qtl_r2_thresh: float = .6, 
+                  padding: float = 3e6, annotate_genome: str = 'rn7', skip_ld_calculation = False, make_interactive = True):
         '''
         Only works on TSCC
         '''
         printwithlog(f'generating locuszoom info for project {self.project_name}')
+        if not qtltable:
+            qtltable = pd.read_csv(f'results/qtls/finalqtl.csv')
         out = qtltable.reset_index()
         causal_snps = []
         
-        gtf = pd.read_csv(f'http://hgdownload.soe.ucsc.edu/goldenPath/{annotate_genome}/bigZips/genes/refGene.gtf.gz', sep = '\t', header = None)\
+        os.makedirs(f'{self.path}results/lz/p/', exist_ok = True)
+        os.makedirs(f'{self.path}results/lz/r2/', exist_ok = True)
+        os.makedirs(f'{self.path}images/lz/', exist_ok = True)
+        
+        linkdict = {'rn7':f'http://hgdownload.soe.ucsc.edu/goldenPath/rn7/bigZips/genes/ncbiRefSeq.gtf.gz' , 
+            'rn6':'https://hgdownload.soe.ucsc.edu/goldenPath/rn6/bigZips/genes/rn6.ncbiRefSeq.gtf.gz',
+           'm38': 'https://hgdownload.soe.ucsc.edu/goldenPath/mm10/bigZips/genes/mm10.ncbiRefSeq.gtf.gz'}
+        
+        gtf = pd.read_csv(linkdict[annotate_genome], sep = '\t', header = None)\
            .set_axis(['Chr', 'source', 'biotype', 'start', 'end', 'score', 'strand', 'phase', 'ID'], axis = 1)
         gtf['ID'] = gtf['ID'].apply(lambda x: {y.split(' "')[0].strip(' '): y.split(' "')[-1][:-1] for y in x.strip(';').split(';')})
         gtf =pd.concat([gtf.drop('ID', axis = 1), pd.json_normalize(gtf['ID'].to_list())], axis = 1).query('biotype == "transcript"')
@@ -1753,6 +1765,11 @@ class gwas_pipe:
                           'm38': 'm38'}[annotate_genome]
 
         ff_lis = []
+        if make_interactive:
+            self.locuszoom_interactive(qtltable=qtltable, threshold = threshold, 
+                                       suggestive_threshold=suggestive_threshold, qtl_r2_thresh = qtl_r2_thresh, 
+                                       padding=padding, annotate_genome=annotate_genome)
+            
         
         for num, (_, qtl_row) in tqdm(list(enumerate(qtltable.reset_index().iterrows()))):
             topsnpchr, topsnpbp = qtl_row.SNP.split(':')
@@ -1769,9 +1786,7 @@ class gwas_pipe:
             range_interest = test.query('R2> .6')['bp'].agg(['min', 'max'])
             test = test.query(f'{range_interest["min"] - padding}<bp<{range_interest["max"] + padding}')
             test.SNP = 'chr'+test.SNP
-            os.makedirs(f'{self.path}results/lz/p/', exist_ok = True)
-            os.makedirs(f'{self.path}results/lz/r2/', exist_ok = True)
-            os.makedirs(f'{self.path}images/lz/', exist_ok = True)
+            
             lzpvalname, lzr2name = f'{self.path}results/lz/p/{qtl_row.trait}@{qtl_row.SNP}.tsv', f'{self.path}results/lz/r2/{qtl_row.trait}@{qtl_row.SNP}.tsv'
             test.rename({'SNP': 'MarkerName', 'p':"P-value"}, axis = 1)[['MarkerName', 'P-value']].to_csv(lzpvalname, index = False, sep = '\t')
             test.assign(snp1 = 'chr'+qtl_row.SNP).rename({"SNP": 'snp2', 'R2': 'rsquare', 'DP': 'dprime'}, axis = 1)\
@@ -1812,7 +1827,162 @@ class gwas_pipe:
         ff_lis['markdown'] = ff_lis.apply(lambda x: f'[{x.gene_id}]({x.webpage})', axis = 1)
         ff_lis.to_csv(f'{self.path}results/qtls/genes_in_range.csv', index = False)
     
-    def phewas(self, qtltable: pd.DataFrame(), ld_window: int = int(3e6), pval_threshold: float = 1e-4, nreturn: int = 1 ,r2_threshold: float = .8,\
+    def get_ncbi_gtf(self, genome, extractall = False):
+        printwithlog('reading gene list from NCBI RefSeq from NCBI GTF...')
+        linkdict = {'rn7':f'https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/015/227/675/GCF_015227675.2_mRatBN7.2/GCF_015227675.2_mRatBN7.2_genomic.gtf.gz' , 
+                        'rn6':'https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/895/GCF_000001895.5_Rnor_6.0/GCF_000001895.5_Rnor_6.0_genomic.gtf.gz',
+                       'm38': 'https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/635/GCF_000001635.26_GRCm38.p6/GCF_000001635.26_GRCm38.p6_genomic.gtf.gz'}
+        gtf = pd.read_csv(linkdict[genome], sep = '\t', header = None, comment='#')\
+                   .set_axis(['Chr', 'source', 'biotype', 'start', 'end', 'score', 'strand', 'phase', 'ID'], axis = 1)
+        gtf = gtf[gtf.biotype != 'transcript']
+        gtf['biotype'] = gtf['biotype'].str.replace('gene','transcript')
+        gtf['gene'] = gtf.ID.str.extract('gene_id "([^"]+)"')
+        gtf = gtf[~gtf.gene.str.contains('-ps')]
+        gtf['Chr'] = gtf['Chr'].map(lambda x: translatechr[x])
+        gtf = gtf[~gtf.Chr.str.lower().str.contains('un')]
+        gtf = gtf.dropna(subset = 'gene')
+        gtf = gtf[~gtf.gene.str.startswith('LOC')&~gtf.gene.str.startswith('NEW')]
+        gtf['Chr'] = gtf['Chr'].map(lambda x: self.replaceXYMTtonums(x.split('_')[0]))
+        if extractall:
+            o = gtf.ID.str.extractall('([\w\d_]+) "([^"]*)"').reset_index()\
+                   .drop_duplicates(['level_0', 0])\
+                   .pivot(index = 'level_0', columns= 0, values= 1).reset_index(drop = True)
+            gtf = pd.concat([gtf, o], axis = 1)
+        return gtf
+
+    def get_ucsc_gtf(self, genome, extractall = False):
+        printwithlog('reading gene list from NCBI RefSeq from UCSC...')
+        linkdict = {'rn7':f'http://hgdownload.soe.ucsc.edu/goldenPath/rn7/bigZips/genes/ncbiRefSeq.gtf.gz' , 
+                        'rn6':'https://hgdownload.soe.ucsc.edu/goldenPath/rn6/bigZips/genes/rn6.ncbiRefSeq.gtf.gz',
+                       'm38': 'https://hgdownload.soe.ucsc.edu/goldenPath/mm10/bigZips/genes/mm10.ncbiRefSeq.gtf.gz'}
+        gtf = pd.read_csv(linkdict[genome], sep = '\t', header = None)\
+                   .set_axis(['Chr', 'source', 'biotype', 'start', 'end', 'score', 'strand', 'phase', 'ID'], axis = 1)
+        gtf['ID'] = gtf['ID'].apply(lambda x: {y.split(' "')[0].strip(' '): y.split(' "')[-1][:-1] for y in x.strip(';').split(';')})
+        gtf =pd.concat([gtf.drop('ID', axis = 1), pd.json_normalize(gtf['ID'].to_list())], axis = 1)#.query('biotype == "transcript"')
+        gtf = gtf[~gtf.Chr.str.lower().str.contains('un')].rename({'gene_id':"gene"}, axis = 1).drop('gene_name', axis = 1)
+        gtf = gtf[~gtf.gene.str.startswith('LOC')&~gtf.gene.str.startswith('NEW')]
+        gtf['Chr'] = gtf['Chr'].map(lambda x: self.replaceXYMTtonums(x.split('_')[0]))
+        if extractall:
+            o = gtf.ID.str.extractall('([\w\d_]+) "([^"]*)"').reset_index()\
+                   .drop_duplicates(['level_0', 0])\
+                   .pivot(index = 'level_0', columns= 0, values= 1).reset_index(drop = True)
+            gtf = pd.concat([gtf, o], axis = 1)
+        return gtf
+        
+    def locuszoom_interactive(self, qtltable:pd.DataFrame() = '', 
+                          threshold: float = 5.3591, suggestive_threshold: float = 5.58, qtl_r2_thresh: float = .5, 
+                          padding: float = 5e5, annotate_genome: str = 'rn7'):
+
+        printwithlog('starting interactive locuszoom generator...') 
+        if not qtltable:
+            qtltable = pd.read_csv(f'results/qtls/finalqtl.csv')
+        gtf = self.get_ncbi_gtf(annotate_genome)
+        def glk(gene):
+            return f'<a href="https://www.genecards.org/cgi-bin/carddisp.pl?gene={gene}">{gene}</a>'
+        def rn(x,n = 3):
+            try: o = round(float(x), int(n))
+            except: o = x
+            return o
+
+        for _, topsnp in tqdm(list(qtltable.reset_index().iterrows())):
+            #printwithlog(f'starting interactive locuszoom for SNP {topsnp.SNP}...')
+            data = pd.read_csv(f'{self.path}results/lz/lzplottable@{topsnp.trait}@{topsnp.SNP}.tsv', sep = '\t')
+            data['-log10(P)'] = -np.log10(data.p) 
+            minval, maxval = data.query(f'R2 > {qtl_r2_thresh}').agg({'bp': [min, max]}).values.flatten() + np.array([-padding, padding])
+            #minval = max(minval, data.bp.min())
+            #maxval = min(maxval, data.bp.max())
+            genes_in_section = gtf.query(f'Chr == {topsnp.Chr} and  end > {minval} and start < {maxval}').reset_index(drop = True)
+            causal = pd.read_csv(f'{self.path}results/qtls/possible_causal_snps.tsv' , sep = '\t')\
+                       .query(f'SNP_qtl == "{topsnp.SNP}"')
+            causal['bp'] = causal.SNP.str.extract(':(\d+)')
+            causal = causal.merge(data[['SNP', '-log10(P)']], on='SNP')
+
+            phewas = pd.read_csv(f'{self.path}results/phewas/pretty_table_both_match.tsv' , sep = '\t')\
+                       .query(f'SNP_QTL == "{topsnp.SNP}"')
+            phewas['bp'] = phewas.SNP_PheDb.str.extract(':(\d+)')
+            phewas = phewas.merge(data[['SNP', '-log10(P)']], left_on='SNP_PheDb', right_on='SNP')
+
+            eqtl = pd.read_csv(f'{self.path}results/eqtl/pretty_eqtl_table.csv' )
+            eqtl['SNP'] = eqtl['SNP'].str.replace('chr', '')#\
+            eqtl = eqtl.query(f'SNP == "{topsnp.SNP}"')
+            eqtl['bp'] = eqtl.SNP_eqtldb.str.extract(':(\d+)')
+            eqtl = eqtl.merge(data[['SNP', '-log10(P)']], left_on='SNP_eqtldb', right_on='SNP')
+
+            sqtl = pd.read_csv(f'{self.path}results/sqtl/pretty_sqtl_table.csv' )
+            sqtl['SNP'] = sqtl['SNP'].str.replace('chr', '')#\
+            sqtl = sqtl.query(f'SNP == "{topsnp.SNP}"')
+            sqtl['bp'] = sqtl.SNP_sqtldb.str.extract(':(\d+)')
+            sqtl = sqtl.merge(data[['SNP', '-log10(P)']], left_on='SNP_sqtldb', right_on='SNP')
+
+            fig = px.scatter(data_frame=data.query('@minval<bp<@maxval'), x= 'bp', y= '-log10(P)', #hover_data=data.columns,ice_r
+                             color = 'R2', color_continuous_scale= 'Jet', hover_data =['R2'])
+            fig.update_traces(marker = dict(size=10, opacity = .6, line_color = 'lightgray', line_width = 1,  symbol = 'asterisk-open'),
+                              hoverinfo='none', hovertemplate='' )
+            fig.add_scattergl(x = causal.bp,y = causal['-log10(P)'],mode='markers', name = 'non synonymous',
+                               marker=dict( line_width = 1, size = 14, color ='orange', line_color = 'black',),
+                               text = [f'{x.SNP}<br>{glk(x.gene)}:{x.annotation}<br>R2: {x.R2}' for name, x in causal.iterrows()],
+                               hovertemplate='%{text}',marker_symbol = 'circle-x',  visible='legendonly')
+            fig.add_scattergl(x = sqtl.bp,y = sqtl['-log10(P)'],mode='markers',name = 'sqtl',
+                               marker=dict( line_width = 1, size = 14, color ='green', line_color = 'black',),
+                              text = [f'{x.SNP_sqtldb}<br>tissue:{x.tissue}<br>gene:{glk(x.Ensembl_gene)}<br>-log10(p): {rn(x["-log10(pval_nominal)"])}<br>R2: {rn(x.R2)}'
+                                                               for name, x in sqtl.iterrows()],  hovertemplate='%{text}',
+                               marker_symbol = 'diamond-x',  visible='legendonly')
+            fig.add_scattergl(x = eqtl.bp,y = eqtl['-log10(P)'],mode='markers',name = 'eqtl',
+                               marker=dict( line_width = 1, size = 14, color ='green', line_color = 'black',),
+                              text = [f'{x.SNP_eqtldb}<br>tissue:{x.tissue}<br>gene:{glk(x.Ensembl_gene)}<br>-log10(p): {rn(x["-log10(pval_nominal)"])}<br>R2: {rn(x.R2)}'
+                                                               for name, x in eqtl.iterrows()],  hovertemplate='%{text}',
+                               marker_symbol = 'diamond-cross',  visible='legendonly')
+            fig.add_scattergl(x = phewas.bp,y = phewas['-log10(P)'],mode='markers', name = 'phewas', 
+                              hovertemplate='%{text}', text = [f'{x.SNP_PheDb}<br>{x.project}:{x.trait_PheDb}<br>-log10(p): {rn(x.p_PheDb)}<br>R2: {rn(x.R2)}'
+                                                               for name, x in phewas.iterrows()],
+                               marker=dict( line_width = 1, size = 14, color ='steelblue', line_color = 'black',),
+                               marker_symbol = 'star-square-dot')
+            topsnpcols = ['Freq', 'b', 'se', 'p', 'trait', 'interval_size', 'significance_level']
+            fig.add_scattergl(x = [topsnp.bp],y = [topsnp.p],mode='markers',name = 'TopSNP<br>'+ topsnp.SNP,
+                               marker=dict( line_width = 1, size = 20, color ='firebrick', line_color = 'black',),
+                              hovertemplate = '%{text}', text = ['<br>'.join([f'{k}: {rn(v)}' for k,v in topsnp[topsnpcols].to_dict().items()])],
+                               marker_symbol = 'star-diamond-dot')
+            translation_table = pd.DataFrame(list(zip(['black', 'gray', 'steelblue', 'black', 'lightblue', 'green', 'red'], 
+                                                          [500,500,500,500,500,500,500])),
+                                                 index =['transcript', 'exon', '5UTR', 'CDS', '3UTR', 'start_codon','stop_codon'], columns = ['color', 'width'])
+            already_shown = set()
+            for idx, i in genes_in_section.iterrows():
+                    ini, fin = (i.start, i.end) # if i.strand == "+" else (i.start, i.end)[::-1]
+                    annotation = glk(i['gene']) if i.biotype =='transcript' else i.biotype
+                    fig.add_trace(go.Scatter(y=-.5 -(idx%1/2) + np.array([-1, -1, 1, 1, -1])/(5 if i.biotype !='transcript' else 50),#[i.yaxis,i.yaxis], 
+                                            x = [ini, fin, fin, ini, ini],
+                                            fill='toself', hoverinfo='text',
+                                            showlegend=False,hovertemplate = '%{text}',
+                                            text=annotation, mode="lines",  opacity=0.5,
+                                            marker = dict(color = translation_table.loc[i.biotype, 'color']))) #
+                    if i.biotype not in ['exon', 'CDS', '3UTR', '5UTR','start_codon','stop_codon']:
+                        if (i.biotype == 'transcript') and (i.gene in already_shown): pass
+                        else:
+                            fig.add_trace(go.Scatter(x = np.linspace(ini,fin +1e-10, 8), y=8*[-.5 -(idx%1/2)] , text=annotation ,#+ ' ' + i.strand, 
+                                                           showlegend=False, hoverinfo='text',  mode='lines',
+                                                     marker = dict(color = translation_table.loc[i.biotype, 'color']),
+                                                          textposition="bottom center"))
+                            already_shown.add(i.gene)
+                    if i.biotype =='transcript':
+                        _, __ = i[['start', 'end']][:: -1 if i.strand == '-' else 1]
+                        fig.add_annotation(x=__, y=-.5,ax=_, ay=-.5,
+                          xref='x', yref='y', axref='x', ayref='y',text='',  
+                          showarrow=True,arrowhead=1,arrowsize=1, arrowwidth=3, arrowcolor='black')
+            fig.add_hline(y=threshold, line_width=2,  line_color="red", annotation_text="10% threshold",  line_dash="dot",
+                          annotation_position="top right")
+            fig.add_hline(y=suggestive_threshold, line_width=2, line_color="blue", annotation_text="5% threshold",  line_dash="dot",
+                          annotation_position="top right")
+            fig.add_hline(y=0, line_width=1, line_color="black", opacity = 1)
+            fig.update_xaxes(showline=False, title="Chromosome",rangeslider=dict( visible=True), range=[minval+padding, maxval-padding])
+            fig.update_yaxes(title="-log<sub>10</sub>(p)", title_font_family="Arial",
+                             title_font_size = 40, tick0 = 0, tickmode = 'linear', dtick = 0.5)
+            fig.update_layout(template='simple_white',width = 1200, height = 800, coloraxis_colorbar_x=1.05,
+                              coloraxis_colorbar_y = .3,coloraxis_colorbar_len = .8,hovermode='x unified')
+            #fig.show()
+            fig.write_html(f'{self.path}images/lz/lz__{topsnp.trait}__{topsnp.SNP}.html'.replace(':', '_'))
+    
+    def phewas(self, qtltable: pd.DataFrame() = pd.DataFrame(), 
+               ld_window: int = int(3e6), pval_threshold: float = 1e-4, nreturn: int = 1 ,r2_threshold: float = .8,\
               annotate: bool = True, annotate_genome: str = 'rn7', **kwards) -> pd.DataFrame():
         '''
         This function performs a phenotype-wide association study (PheWAS) on a 
@@ -1853,7 +2023,8 @@ class gwas_pipe:
         10.return the final PheWAS table.
         '''
         printwithlog(f'starting phewas ... {self.project_name}')  
-        if qtltable.shape == (0,0): qtltable = pd.read_csv(self.annotatedtablepath).set_index('SNP')
+        if not len(qtltable): pd.read_csv(f'{self.path}results/qtls/finalqtl.csv').set_index('SNP').loc[:, : 'significance_level']
+        #if not len(qtltable): qtltable = pd.read_csv(self.annotatedtablepath).set_index('SNP').loc[:, : 'significance_level']
         db_vals = pd.read_parquet(self.phewas_db).query(f'p < {pval_threshold}')  #, compression='gzip'   and project != "{self.project_name}   
         db_vals.SNP = db_vals.SNP.str.replace('chr', '')
         db_vals.trait_description = db_vals.trait_description.astype(str).apply(lambda x: re.sub(r'[^\d\w ]+',' ', x))
@@ -1926,7 +2097,8 @@ class gwas_pipe:
         
         return oo
         
-    def eQTL(self, qtltable: pd.DataFrame(), pval_thresh: float = 1e-4, r2_thresh: float = .6, nreturn: int =1, ld_window: int = 3e6,\
+    def eQTL(self, qtltable: pd.DataFrame()= pd.DataFrame(),
+             pval_thresh: float = 1e-4, r2_thresh: float = .6, nreturn: int =1, ld_window: int = 3e6,\
             tissue_list: list = ['BLA','Brain','Eye','IL','LHb','NAcc','NAcc2','OFC','PL','PL2'],\
             annotate = True, genome = 'rn7', **kwards) -> pd.DataFrame():
         
@@ -1972,7 +2144,7 @@ class gwas_pipe:
         printwithlog(f'starting eqtl ... {self.project_name}') 
         #d =  {'rn6': '', 'rn7': '.rn7.2'}[genome]
         mygene_species = {'rn6': 'rat', 'rn7': 'rat', 'm38': 'mouse', 'cfw': 'mouse'}[genome]
-        if qtltable.shape == (0,0): qtltable = pd.read_csv(self.annotatedtablepath).set_index('SNP')
+        if not len(qtltable): pd.read_csv(f'{self.path}results/qtls/finalqtl.csv').set_index('SNP').loc[:, : 'significance_level']
         out = []
         for tissue in tqdm(tissue_list,  position=0, desc="tissue", leave=True):
 
@@ -2014,7 +2186,8 @@ class gwas_pipe:
         return eqtl_info
     
     
-    def sQTL(self, qtltable: pd.DataFrame(), pval_thresh: float = 1e-4, r2_thresh: float = .6, nreturn: int =1, ld_window: int = 3e6, just_cis = True,
+    def sQTL(self, qtltable: pd.DataFrame() =pd.DataFrame(),
+             pval_thresh: float = 1e-4, r2_thresh: float = .6, nreturn: int =1, ld_window: int = 3e6, just_cis = True,
              tissue_list: list = ['BLA','Brain','Eye','IL','LHb','NAcc','NAcc2','OFC','PL','PL2'], annotate = True, genome = 'rn7', **kwards) -> pd.DataFrame():
         
         '''
@@ -2059,7 +2232,7 @@ class gwas_pipe:
         printwithlog(f'starting spliceqtl ... {self.project_name}') 
         mygene_species = {'rn6': 'rat', 'rn7': 'rat', 'm38': 'mouse', 'cfw': 'mouse'}[genome]
         #d =  {'rn6': '', 'rn7': '.rn7.2'}[genome]
-        if qtltable.shape == (0,0): qtltable = pd.read_csv(self.annotatedtablepath).set_index('SNP')
+        if not len(qtltable): pd.read_csv(f'{self.path}results/qtls/finalqtl.csv').set_index('SNP').loc[:, : 'significance_level']
         out = []
         loop_str = [('cis','cis_qtl_signif')] if just_cis else [('cis','cis_qtl_signif'), ('trans','trans_qtl_pairs')]
         
@@ -2346,7 +2519,7 @@ class gwas_pipe:
             extra_folders = ' '.join([self.path + x for x in ['logerr', 'temp']])
             bash(f'rm -r {extra_folders}')
             
-    def copy_results(self, destination: str = '/projects/ps-palmer/s3/data/tsanches_dash_genotypes/gwas_results', make_public = True):
+    def copy_results(self, destination: str = '/projects/ps-palmer/s3/data/tsanches_dash_genotypes/gwas_results', make_public = True, tscc = 1):
         '''
         zip project remove folders if remove folders is True
         '''
@@ -2355,10 +2528,16 @@ class gwas_pipe:
         #print(f'copying {self.project_name} to {destination}')
         os.makedirs(f'{destination}', exist_ok = True)
         out_path, pjname = (self.path, '') if self.path else ('.', f'/{self.project_name}')
+        if tscc == 2: 
+            destination = '/tscc' + destination
         bash(f'cp -r {out_path} {destination}{pjname}')
         if make_public:
-            bash('/projects/ps-palmer/tsanches/mc anonymous set public myminio/tsanches_dash_genotypes --recursive')
-            printwithlog(f'{destination.replace("/projects/ps-palmer/s3/data", "https://palmerlab.s3.sdsc.edu")}/{self.project_name}/results/gwas_report.html')
+            if tscc == 2:
+                bash('/tscc/projects/ps-palmer/tsanches/mc anonymous set public /tscc/projects/ps-palmer/s3/data/tsanches_dash_genotypes --recursive')
+                printwithlog(f'{destination.replace("/tscc/projects/ps-palmer/s3/data", "https://palmerlab.s3.sdsc.edu")}/{self.project_name}/results/gwas_report.html')
+            else:
+                bash('/projects/ps-palmer/tsanches/mc anonymous set public myminio/tsanches_dash_genotypes --recursive')
+                printwithlog(f'{destination.replace("/projects/ps-palmer/s3/data", "https://palmerlab.s3.sdsc.edu")}/{self.project_name}/results/gwas_report.html')
 
 
     def print_watermark(self):
@@ -2420,8 +2599,8 @@ def find_overlap(r1, r2):
 def generate_umap_chunks(chrom, win: int = int(2e6), overlap: float = .5,
                         nsampled_snps: int = 40000,nsampled_rats: int = 20000,
                         random_sample_snps: bool = False,nautosomes=20,
-                        founderfile = '/projects/ps-palmer/gwas/databases/founder_genotypes/founders7.2',
-                        latest_round = '/projects/ps-palmer/gwas/databases/rounds/r10.1.1',
+                        founderfile = '/tscc/projects/ps-palmer/gwas/databases/founder_genotypes/founders7.2',
+                        latest_round = '/tscc/projects/ps-palmer/gwas/databases/rounds/r10.1.1',
                         pickle_output = False, impute = True,
                         save_path = ''):
     print(f'starting umap chunks for {chrom}, nsnps = {nsampled_snps}, maxrats = {nsampled_rats}')
@@ -2581,3 +2760,33 @@ def generate_umap_chunks(chrom, win: int = int(2e6), overlap: float = .5,
             pickle.dump(out.drop('genotypes', axis = 1), fil )
     #fig2.show()
     return out
+
+
+translatechr = defaultdict(lambda: 'UNK',{k.split('\t')[1]: k.split('\t')[0] for k in'''1	NC_051336.1
+2	NC_051337.1
+3	NC_051338.1
+4	NC_051339.1
+5	NC_051340.1
+6	NC_051341.1
+7	NC_051342.1
+8	NC_051343.1
+9	NC_051344.1
+10	NC_051345.1
+11	NC_051346.1
+12	NC_051347.1
+13	NC_051348.1
+14	NC_051349.1
+15	NC_051350.1
+16	NC_051351.1
+17	NC_051352.1
+18	NC_051353.1
+19	NC_051354.1
+20	NC_051355.1
+X	NC_051356.1
+Y	NC_051357.1
+MT	NC_001665.2'''.split('\n')})
+
+
+# def jzfy(s, name = 'o'):
+#     x, y = zip(*[y for x in s.split(';') if (y:= x.split('='))])
+#     return pd.Series(y, index = x, name = name)
