@@ -1,12 +1,15 @@
 #gene2go = download_ncbi_associations()
 #geneid2gos_rat= Gene2GoReader(gene2go, taxids=[10116])
 #import sleep
-from  os.path import dirname, basename
-from hdbscan import HDBSCAN
-from IPython.display import display
-from IPython.utils import io
+
+from bokeh.resources import INLINE
 from collections import Counter, defaultdict, namedtuple
 from datetime import datetime
+from hdbscan import HDBSCAN
+import holoviews as hv
+import hvplot.pandas
+from IPython.display import display
+from IPython.utils import io
 from glob import glob
 from goatools.anno.genetogo_reader import Gene2GoReader
 from goatools.base import download_ncbi_associations
@@ -48,9 +51,12 @@ import mygene
 import numpy as np
 import numba
 import os
+from  os.path import dirname, basename
 import pandas as pd
 import pandas_plink
+import panel as pn
 import plotly.express as px
+import plotly.io as plotio
 import plotly.graph_objects as go
 import prophet
 import psycopg2
@@ -63,10 +69,12 @@ import subprocess
 import sys
 import utils
 import warnings
+
 mg = mygene.MyGeneInfo()
 tqdm.pandas()
 sys.setrecursionlimit(10000)
 warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
+pn.extension()
 #warnings.filterwarnings('ignore')
 #conda create --name gpipe -c conda-forge openjdk=17 ipykernel pandas seaborn scikit-learn umap-learn psycopg2 dask
 #conda activate gpipe
@@ -198,7 +206,7 @@ def _distance_to_founders(subset_geno,founderfile,fname,c, scaler: str = 'ss', v
     merged1 = pd.concat([ys[shared_snps], founder_gens[shared_snps]])
     merged1.loc[:, :] = Scaler[scaler].fit_transform(merged1) if scaler != 'tfidf' \
                         else Scaler[scaler].fit_transform(merged1).toarray()
-    dist2f = pd.DataFrame( cdist(merged1.loc[ys.index], merged1.loc[founder_gens.index] , metric = nan_sim),
+    dist2f = pd.DataFrame(cdist(merged1.loc[ys.index], merged1.loc[founder_gens.index] , metric = nan_sim),
                           index = ys.index, columns=founder_gens.index)
     matchdf = dist2f.apply(lambda x: pd.Series(get_topk_values(x,2)), axis = 1)\
                     .set_axis(['TopMatch', "2ndMatch"], axis = 1)\
@@ -458,7 +466,32 @@ def regressout_timeseries(dataframe = '', data_dictionary = '', covariates_thres
     outdf['regressedlr_'+ddtraits.measure] = quantiletrasform(outdf,'regressedlr_'+ ddtraits.measure)
     if save_explained_vars: outdf.to_csv(f'{path}processed_data_ready.csv', index = False)
     return outdf
+
+def plotly_read_from_html(file):
+    import json
+    import plotly
+    with open(file, 'r') as f:
+        html = f.read()
+    call_arg_str = re.findall(r'Plotly\.newPlot\((.*)\)', html[-2**16:])[0]
+    call_args = json.loads(f'[{call_arg_str}]')
+    plotly_json = {'data': call_args[1], 'layout': call_args[2]}    
+    return plotly.io.from_json(json.dumps(plotly_json))
     
+def fancy_display(df):
+    numeric_cols = df.select_dtypes(include=np.number).columns.to_list()
+    df[numeric_cols] = df[numeric_cols].applymap(round, ndigits=3)
+    d = {x : {'type': 'number', 'func': '>=', 'placeholder': 'Enter minimum'} for x in numeric_cols} | \
+        {x : {'type': 'input', 'func': 'like', 'placeholder': 'Similarity'} for x in df.columns[~df.columns.isin(numeric_cols)]}
+    return pn.widgets.Tabulator(df,pagination='local' ,page_size= 15, header_filters=d, layout = 'fit_data_fill')
+    
+def plotly_histograms_to_percent(fig):
+    for trace in fig.data:
+        if type(trace) == plotly.graph_objs._histogram.Histogram:
+            trace.histfunc = 'count'
+            trace.histnorm = 'probability'
+            trace.nbinsx = trace.nbinsy = 30
+            trace.hovertemplate = trace.hovertemplate.replace('<br>count=%', '<br>percent=%')
+    return fig
     
 class gwas_pipe:
     '''
@@ -1711,7 +1744,7 @@ class gwas_pipe:
     
     def locuszoom(self, qtltable: pd.DataFrame() = '', 
                   threshold: float = 5.3591, suggestive_threshold: float = 5.58, qtl_r2_thresh: float = .6, 
-                  padding: float = 3e6, annotate_genome: str = 'rn7', skip_ld_calculation = False, make_interactive = True):
+                  padding: float = 3e6, annotate_genome: str = 'rn7', skip_ld_calculation = False, make_interactive = True, make_classic = True):
         '''
         Only works on TSCC
         '''
@@ -1784,43 +1817,45 @@ class gwas_pipe:
             except: raise Exception(f"couldn't open this file {self.path}results/lz/lzplottable@{qtl_row.trait}@{qtl_row.SNP}.tsv") 
             test['-log10(P)'] = -np.log10(test.p)
             range_interest = test.query('R2> .6')['bp'].agg(['min', 'max'])
-            test = test.query(f'{range_interest["min"] - padding}<bp<{range_interest["max"] + padding}')
-            test.SNP = 'chr'+test.SNP
-            
-            lzpvalname, lzr2name = f'{self.path}results/lz/p/{qtl_row.trait}@{qtl_row.SNP}.tsv', f'{self.path}results/lz/r2/{qtl_row.trait}@{qtl_row.SNP}.tsv'
-            test.rename({'SNP': 'MarkerName', 'p':"P-value"}, axis = 1)[['MarkerName', 'P-value']].to_csv(lzpvalname, index = False, sep = '\t')
-            test.assign(snp1 = 'chr'+qtl_row.SNP).rename({"SNP": 'snp2', 'R2': 'rsquare', 'DP': 'dprime'}, axis = 1)\
-                        [['snp1', 'snp2', 'rsquare', 'dprime']].to_csv(lzr2name, index = False, sep = '\t')
-            os.system(f'chmod +x {lzpvalname}')
-            os.system(f'chmod +x {lzr2name}')
             ff_lis += [gtf.query(f'(end> {range_interest["min"] - padding}) and (start< {range_interest["max"] + padding}) and (Chr == {int(topsnpchr)})').sort_values('gene_id').assign(SNP_origin = qtl_row.SNP)]
-            for filest in glob(f'{self.path}temp/{qtl_row.trait}*{qtl_row.SNP}'): os.system(f'rm -r {filest}')
-            
-            os.system(f'''module load R && module load python && \
-                /projects/ps-palmer/software/local/src/locuszoom/bin/locuszoom \
-                --metal {lzpvalname} --ld {lzr2name} \
-                --refsnp {qtl_row.SNP} --chr {int(topsnpchr)} --start {int(range_interest["min"] - padding)} --end {int(range_interest["max"] + padding)} --build manual \
-                --db /projects/ps-palmer/gwas/databases/databases_lz/{genome_lz_path}.db \
-                --plotonly showRecomb=FALSE showAnnot=FALSE --prefix {self.path}temp/{qtl_row.trait} signifLine="{threshold},{suggestive_threshold}" signifLineColor="red,blue" \
-                title = "{qtl_row.trait} SNP {qtl_row.SNP}" > /dev/null 2>&1 ''') #
-            os.makedirs(f'{self.path}images/lz/12Mb/', exist_ok = True)
-            os.system(f'''module load R && module load python && \
-                /projects/ps-palmer/software/local/src/locuszoom/bin/locuszoom \
-                --metal {lzpvalname} --ld {lzr2name} \
-                --refsnp {qtl_row.SNP} --chr {int(topsnpchr)} --start {int(range_interest["min"] - int(6e6))} --end {int(range_interest["max"] + int(6e6))} --build manual \
-                --db /projects/ps-palmer/gwas/databases/databases_lz/{genome_lz_path}.db \
-                --plotonly showRecomb=FALSE showAnnot=FALSE --prefix {self.path}images/lz/12Mb/{qtl_row.trait}_12Mb signifLine="{threshold},{suggestive_threshold}" signifLineColor="red,blue" \
-                title = "{qtl_row.trait} SNP {qtl_row.SNP} 12Mb" > /dev/null 2>&1 ''')
-            today_str = datetime.today().strftime('%y%m%d')
-            path = glob(f'{self.path}temp/{qtl_row.trait}*{qtl_row.SNP}/*.pdf'.replace(':', '_')) + \
-                   glob(f'{self.path}temp/{qtl_row.trait}_{today_str}_{qtl_row.SNP}*.pdf'.replace(':', '_'))
-            if not len(path): printwithlog(f'could not find any pdf with {self.path}temp/{qtl_row.trait}*{qtl_row.SNP}/*.pdf')
-            else:
-                path = path[0]
-                os.system(f'cp {path} {self.path}images/lz/lz__{qtl_row.trait}__{qtl_row.SNP}.pdf'.replace(':', '_'))
-                for num,image in enumerate(convert_from_path(path)):
-                    bn = basename(path).replace('.pdf', '.png')
-                    if not num: image.save(f'{self.path}images/lz/lz__{qtl_row.trait}__{qtl_row.SNP}.png'.replace(':', '_'), 'png')
+            if make_classic:
+                test = test.query(f'{range_interest["min"] - padding}<bp<{range_interest["max"] + padding}')
+                test.SNP = 'chr'+test.SNP
+                
+                lzpvalname, lzr2name = f'{self.path}results/lz/p/{qtl_row.trait}@{qtl_row.SNP}.tsv', f'{self.path}results/lz/r2/{qtl_row.trait}@{qtl_row.SNP}.tsv'
+                test.rename({'SNP': 'MarkerName', 'p':"P-value"}, axis = 1)[['MarkerName', 'P-value']].to_csv(lzpvalname, index = False, sep = '\t')
+                test.assign(snp1 = 'chr'+qtl_row.SNP).rename({"SNP": 'snp2', 'R2': 'rsquare', 'DP': 'dprime'}, axis = 1)\
+                            [['snp1', 'snp2', 'rsquare', 'dprime']].to_csv(lzr2name, index = False, sep = '\t')
+                os.system(f'chmod +x {lzpvalname}')
+                os.system(f'chmod +x {lzr2name}')
+                
+                for filest in glob(f'{self.path}temp/{qtl_row.trait}*{qtl_row.SNP}'): os.system(f'rm -r {filest}')
+                
+                os.system(f'''module load R && module load python && \
+                    /tscc/projects/ps-palmer/software/local/src/locuszoom/bin/locuszoom \
+                    --metal {lzpvalname} --ld {lzr2name} \
+                    --refsnp {qtl_row.SNP} --chr {int(topsnpchr)} --start {int(range_interest["min"] - padding)} --end {int(range_interest["max"] + padding)} --build manual \
+                    --db /tscc/projects/ps-palmer/gwas/databases/databases_lz/{genome_lz_path}.db \
+                    --plotonly showRecomb=FALSE showAnnot=FALSE --prefix {self.path}temp/{qtl_row.trait} signifLine="{threshold},{suggestive_threshold}" signifLineColor="red,blue" \
+                    title = "{qtl_row.trait} SNP {qtl_row.SNP}" > /dev/null 2>&1 ''') #
+                os.makedirs(f'{self.path}images/lz/12Mb/', exist_ok = True)
+                os.system(f'''module load R && module load python && \
+                    /tscc/projects/ps-palmer/software/local/src/locuszoom/bin/locuszoom \
+                    --metal {lzpvalname} --ld {lzr2name} \
+                    --refsnp {qtl_row.SNP} --chr {int(topsnpchr)} --start {int(range_interest["min"] - int(6e6))} --end {int(range_interest["max"] + int(6e6))} --build manual \
+                    --db /tscc/projects/ps-palmer/gwas/databases/databases_lz/{genome_lz_path}.db \
+                    --plotonly showRecomb=FALSE showAnnot=FALSE --prefix {self.path}images/lz/12Mb/{qtl_row.trait}_12Mb signifLine="{threshold},{suggestive_threshold}" signifLineColor="red,blue" \
+                    title = "{qtl_row.trait} SNP {qtl_row.SNP} 12Mb" > /dev/null 2>&1 ''')
+                today_str = datetime.today().strftime('%y%m%d')
+                path = glob(f'{self.path}temp/{qtl_row.trait}*{qtl_row.SNP}/*.pdf'.replace(':', '_')) + \
+                       glob(f'{self.path}temp/{qtl_row.trait}_{today_str}_{qtl_row.SNP}*.pdf'.replace(':', '_'))
+                if not len(path): printwithlog(f'could not find any pdf with {self.path}temp/{qtl_row.trait}*{qtl_row.SNP}/*.pdf')
+                else:
+                    path = path[0]
+                    os.system(f'cp {path} {self.path}images/lz/lz__{qtl_row.trait}__{qtl_row.SNP}.pdf'.replace(':', '_'))
+                    for num,image in enumerate(convert_from_path(path)):
+                        bn = basename(path).replace('.pdf', '.png')
+                        if not num: image.save(f'{self.path}images/lz/lz__{qtl_row.trait}__{qtl_row.SNP}.png'.replace(':', '_'), 'png')
                     
         ff_lis = pd.concat(ff_lis)
         ff_lis['webpage'] = 'https://www.genecards.org/cgi-bin/carddisp.pl?gene=' + ff_lis['gene_id']
@@ -1874,7 +1909,7 @@ class gwas_pipe:
                           padding: float = 5e5, annotate_genome: str = 'rn7'):
 
         printwithlog('starting interactive locuszoom generator...') 
-        if not qtltable:
+        if type(qtltable) != pd.core.frame.DataFrame:
             qtltable = pd.read_csv(f'results/qtls/finalqtl.csv')
         gtf = self.get_ncbi_gtf(annotate_genome)
         def glk(gene):
@@ -1886,8 +1921,8 @@ class gwas_pipe:
 
         for _, topsnp in tqdm(list(qtltable.reset_index().iterrows())):
             #printwithlog(f'starting interactive locuszoom for SNP {topsnp.SNP}...')
-            data = pd.read_csv(f'{self.path}results/lz/lzplottable@{topsnp.trait}@{topsnp.SNP}.tsv', sep = '\t')
-            data['-log10(P)'] = -np.log10(data.p) 
+            data = pd.read_csv(f'{self.path}results/lz/lzplottable@{topsnp.trait}@{topsnp.SNP}.tsv', sep = '\t').query('p != "UNK"')
+            data['-log10(P)'] = -np.log10(pd.to_numeric(data.p, errors = 'coerce')) 
             minval, maxval = data.query(f'R2 > {qtl_r2_thresh}').agg({'bp': [min, max]}).values.flatten() + np.array([-padding, padding])
             #minval = max(minval, data.bp.min())
             #maxval = min(maxval, data.bp.max())
@@ -1980,6 +2015,7 @@ class gwas_pipe:
                               coloraxis_colorbar_y = .3,coloraxis_colorbar_len = .8,hovermode='x unified')
             #fig.show()
             fig.write_html(f'{self.path}images/lz/lz__{topsnp.trait}__{topsnp.SNP}.html'.replace(':', '_'))
+            plotio.write_json(fig, f'{self.path}images/lz/lz__{topsnp.trait}__{topsnp.SNP}.json'.replace(':', '_'))
     
     def phewas(self, qtltable: pd.DataFrame() = pd.DataFrame(), 
                ld_window: int = int(3e6), pval_threshold: float = 1e-4, nreturn: int = 1 ,r2_threshold: float = .8,\
@@ -2519,17 +2555,17 @@ class gwas_pipe:
             extra_folders = ' '.join([self.path + x for x in ['logerr', 'temp']])
             bash(f'rm -r {extra_folders}')
             
-    def copy_results(self, destination: str = '/projects/ps-palmer/s3/data/tsanches_dash_genotypes/gwas_results', make_public = True, tscc = 1):
+    def copy_results(self, destination: str = '/projects/ps-palmer/s3/data/tsanches_dash_genotypes/gwas_results', make_public = True, tscc = 2):
         '''
         zip project remove folders if remove folders is True
         '''
         
-        #destination += '/'+ self.project_name
-        #print(f'copying {self.project_name} to {destination}')
-        os.makedirs(f'{destination}', exist_ok = True)
-        out_path, pjname = (self.path, '') if self.path else ('.', f'/{self.project_name}')
+        print(f'copying {self.project_name} to {destination}')
         if tscc == 2: 
             destination = '/tscc' + destination
+        os.makedirs(f'{destination}', exist_ok = True)
+        out_path, pjname = (self.path, '') if self.path else ('.', f'/{self.project_name}')
+        
         bash(f'cp -r {out_path} {destination}{pjname}')
         if make_public:
             if tscc == 2:
