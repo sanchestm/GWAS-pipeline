@@ -5,6 +5,7 @@
 from bokeh.resources import INLINE
 from collections import Counter, defaultdict, namedtuple
 from datetime import datetime
+from fancyimpute import SoftImpute, BiScaler, IterativeSVD
 from hdbscan import HDBSCAN
 import holoviews as hv
 import hvplot.pandas
@@ -24,7 +25,7 @@ from scipy.spatial import distance
 from scipy.stats import pearsonr
 from sklearn.decomposition import PCA
 from sklearn.feature_extraction.text import TfidfTransformer
-from sklearn.impute import KNNImputer
+from sklearn.impute import KNNImputer,SimpleImputer, IterativeImputer, MissingIndicator
 from sklearn.linear_model import LinearRegression#, RobustRegression
 from sklearn.metrics.pairwise import nan_euclidean_distances
 from sklearn.multioutput import MultiOutputRegressor
@@ -325,6 +326,50 @@ def bash(call, verbose = 0, return_stdout = True, print_call = True):
 
 def vcf2plink(vcf = 'round9_1.vcf.gz', n_autosome = 20, out_path = 'zzplink_genotypes/allgenotypes_r9.1'):
     bash(f'plink --thread-num 16 --vcf {vcf} --chr-set {n_autosome} no-xy --keep_allele_order --set-hh-missing --set-missing-var-ids @:# --make-bed --out {out_path}')
+
+def regressoutgb(dataframe: pd.DataFrame(), data_dictionary: pd.DataFrame(), covariates_threshold: float = 0.02, groupby = ['sex']):
+    if type(data_dictionary) == str: data_dictionary = pd.read_csv(data_dictionary)
+    df, datadic = dataframe.copy(), data_dictionary
+    def getcols(df, string): return df.columns[df.columns.str.contains(string)].to_list()
+    if type(groupby) == 'str': groupby = [groupby]
+    categorical_all = list(datadic.query('trait_covariate == "covariate_categorical"').measure)
+    dfohe = df.copy()
+    ohe = OneHotEncoder()
+    oheencoded = ohe.fit_transform(dfohe[categorical_all].astype(str)).todense()
+    dfohe[[f'OHE_{x}'for x in ohe.get_feature_names_out(categorical_all)]] = oheencoded
+    alltraits = list(datadic.query('trait_covariate == "trait"').measure.unique())
+    def getdatadic_covars(trait):
+        covars = set(datadic.set_index('measure').loc[trait, 'covariates'].split(','))
+        covars =  covars - set(groupby)
+        covars = covars | set(itertools.chain.from_iterable([ getcols(dfohe, F'OHE_{x}') for x in covars]))
+        covars = covars - set(datadic.query('trait_covariate == "covariate_categorical"').measure)
+        return list(covars)
+    continuousall = list(set(datadic.query('trait_covariate == "covariate_continuous"').measure) & set(df.columns))
+    explained_vars = []
+    reglist = []
+    if not len(groupby): dfohe, groupby = dfohe.assign(tempgrouper = 'A'), ['tempgrouper']
+    for group, gdf in tqdm(dfohe.groupby(groupby)):
+        groupaddon = '|'.join(group)
+        if continuousall:
+            gdf.loc[:, continuousall] = QuantileTransformer(n_quantiles = min(100, gdf.shape[0])).fit_transform(gdf.loc[:, continuousall])
+        for trait in alltraits:
+            expvars = statsReport.stat_check(gdf)\
+                                .explained_variance([trait],getdatadic_covars(trait))\
+                                .dropna(how = 'any')
+            expvars = expvars[expvars > covariates_threshold].dropna()
+            explained_vars += [expvars.rename(lambda x: f"{x}_{groupaddon}", axis = 1).reset_index(names = 'group').melt(id_vars='group')]
+            gdf[list(expvars.index)] = gdf[list(expvars.index)].fillna(gdf[list(expvars.index)].mean())
+            reg = statsReport.regress_out(gdf.set_index('rfid'), list(expvars.columns),  list(expvars.index)).rename(lambda x: x.lower(), axis = 1)
+            reg = statsReport.quantileTrasformEdited(reg, reg.columns)
+            reglist += [reg.reset_index().melt(id_vars='rfid')]
+    melted_explained_vars = pd.concat(explained_vars).reset_index(drop = True)[['variable', 'group', 'value']]
+    regresseddf = pd.concat(reglist).pivot(columns= 'variable', index = 'rfid').droplevel(0, axis = 1)
+    regresseddf = statsReport.quantileTrasformEdited(regresseddf, regresseddf.columns)
+    outdf = pd.concat([df.set_index('rfid'), regresseddf], axis = 1)
+    outdf = outdf.loc[:,~outdf.columns.duplicated()]
+    return {'regressed_dataframe': outdf.reset_index().sort_values('rfid'), 
+            'covariatesr2': melted_explained_vars,
+            'covariatesr2pivoted': pd.DataFrame(melted_explained_vars.groupby('variable')['group'].apply(list)).reset_index()}
     
 def _prophet_reg(dforiginal = "",y_column = 'y', 
                  categorical_regressors=[], regressors = [], 
@@ -384,7 +429,9 @@ def _prophet_reg(dforiginal = "",y_column = 'y',
         try: prev = pd.read_csv(f'{path}melted_explained_variances.csv')
         except: prev = pd.DataFrame()
         temp2 = temp.melt().assign(group = temp.index[0])[['group','variable','value']].set_axis(['variable', 'group', 'value'], axis = 1)
-        if extra_label: temp2.variable = temp2.variable +'_'+extra_label 
+        if extra_label: 
+            if type(extra_label) != str: extra_label = '|'.join(extra_label)
+            temp2.variable = temp2.variable +'_'+extra_label 
         pd.concat([prev,temp2]).to_csv(f'{path}melted_explained_variances.csv', index = False)
     
     #### fit model 
@@ -607,10 +654,11 @@ class gwas_pipe:
                  chrList: list = [], 
                  n_autosome: int = 20,
                  all_genotypes: str = '/tscc/projects/ps-palmer/gwas/databases/rounds/round10_1',
-                 founder_genotypes: str = '/projects/ps-palfounder_genotypes/Ref_panel_mRatBN7_2_chr_GT', 
+                 founder_genotypes: str = '/tsc/projects/ps-palfounder_genotypes/Ref_panel_mRatBN7_2_chr_GT', 
                  founderfile: str = '/tscc/projects/ps-palmer/gwas/databases/founder_genotypes/founders7.2',
                  gtca_path: str = '',
                  snpeff_path: str =  'snpEff/',
+                 locuszoom_path: str = 'locuszoom/',
                  phewas_db: str = 'phewasdb.parquet.gz',
                  use_tscc_modules: list = [],
                  threads: int = os.cpu_count()): 
@@ -621,6 +669,7 @@ class gwas_pipe:
         self.all_genotypes = all_genotypes
         self.founder_genotypes = founder_genotypes
         self.snpeff_path = snpeff_path
+        self.locuszoom_path = locuszoom_path
         self.n_autosome = n_autosome
         
         logging.basicConfig(filename=f'{self.path}gwasRun.log', 
@@ -729,15 +778,35 @@ class gwas_pipe:
             os.system(f'rm -r {self.path}{folder}')
             printwithlog(f'removing file {self.path}{folder}')
         self.make_dir_structure()
+
+    def regressout_groupby(self, data_dictionary: pd.DataFrame(), covariates_threshold: float = 0.02, groupby_columns = ['sex']):
+        printwithlog(f'running regressout groupedby {",".join(groupby_columns)}...')
+        reg = regressoutgb(dataframe=self.df, data_dictionary=data_dictionary, groupby = groupby_columns, covariates_threshold = covariates_threshold)
+        self.df = reg['regressed_dataframe']
         
+        self.traits = self.df.filter(regex='regressedlr_*').columns.to_list()
+        display(self.df[self.traits].count())
+        statsReport.stat_check(self.df).make_report(f'{self.path}data_distributions.html')
+        
+        self.df.to_csv(f'{self.path}processed_data_ready.csv', index = False)
+        reg['covariatesr2'].to_csv(f'{self.path}melted_explained_variances.csv', index = False)
+        reg['covariatesr2pivoted'].to_csv(f'{self.path}pivot_explained_variances.csv',index = False)
+        
+        for trait in self.traits:
+            self.df[['rfid', 'rfid', trait]].fillna('NA').astype(str).to_csv(f'{self.path}data/pheno/{trait}.txt' ,  index = False, sep = ' ', header = None)
+        simplified_traits = [x.replace('regressedlr_', '') for x in self.traits]
+    
+        if type(data_dictionary) == str: data_dictionary = pd.read_csv(data_dictionary)
+        trait_descriptions = [data_dictionary.set_index('measure').loc[x, 'description'] if (x in data_dictionary.measure.values) else 'UNK' for x in simplified_traits]
+        self.get_trait_descriptions = defaultdict(lambda: 'UNK', {k:v for k,v in zip(self.traits, trait_descriptions)})
+        return self.df.copy()
         
     def regressout(self, data_dictionary: pd.DataFrame(), covariates_threshold: float = 0.02, verbose = False):
+        printwithlog(f'running regressout...')
         if type(data_dictionary) == str: data_dictionary = pd.read_csv(data_dictionary)
         df, datadic = self.df.copy(), data_dictionary
         datadic = datadic[datadic.measure.isin(df.columns)].drop_duplicates(subset = ['measure'])
         def getcols(df, string): return df.columns[df.columns.str.contains(string)].to_list()
-        dfohe = df.copy()
-        ohe = OneHotEncoder()
         categorical_all = list(datadic.query('trait_covariate == "covariate_categorical"').measure)
         dfohe = df.copy()
         ohe = OneHotEncoder()
@@ -801,6 +870,7 @@ class gwas_pipe:
     
     def regressout_timeseries(self, data_dictionary: pd.DataFrame(), covariates_threshold: float = 0.02,
                               verbose = False, groupby_columns = ['sex'], ds_column = 'age', save = True):
+        printwithlog(f'running timeseries regressout groupedby {",".join(groupby_columns)}...')
         if type(data_dictionary) == str: data_dictionary = pd.read_csv(data_dictionary)
         df, datadic = self.df.copy(), data_dictionary
         display(df.count())
@@ -1870,13 +1940,14 @@ class gwas_pipe:
                     --plotonly showRecomb=FALSE showAnnot=FALSE --prefix {self.path}temp/{qtl_row.trait} signifLine="{threshold},{suggestive_threshold}" signifLineColor="red,blue" \
                     title = "{qtl_row.trait} SNP {qtl_row.SNP}" > /dev/null 2>&1 ''') #module load R && module load python &&
                 os.makedirs(f'{self.path}images/lz/12Mb/', exist_ok = True)
-                os.system(f'''conda run -n lzenv \
-                    /tscc/projects/ps-palmer/software/local/src/locuszoom/bin/locuszoom \
+                lz12mbCall = f'''conda run -n lzenv /tscc/projects/ps-palmer/software/local/src/locuszoom/bin/locuszoom\
                     --metal {lzpvalname} --ld {lzr2name} \
                     --refsnp {qtl_row.SNP} --chr {int(topsnpchr)} --start {int(range_interest["min"] - int(6e6))} --end {int(range_interest["max"] + int(6e6))} --build manual \
                     --db /tscc/projects/ps-palmer/gwas/databases/databases_lz/{genome_lz_path}.db \
                     --plotonly showRecomb=FALSE showAnnot=FALSE --prefix {self.path}images/lz/12Mb/{qtl_row.trait}_12Mb signifLine="{threshold},{suggestive_threshold}" signifLineColor="red,blue" \
-                    title = "{qtl_row.trait} SNP {qtl_row.SNP} 12Mb" > /dev/null 2>&1 ''') #module load R && module load python &&
+                    title = "{qtl_row.trait} SNP {qtl_row.SNP} 12Mb" > /dev/null 2>&1  '''
+                os.system(lz12mbCall) #module load R && module load python && {self.locuszoom_path}bin/locuszoom 
+                #print(lz12mbCall)
                 today_str = datetime.today().strftime('%y%m%d')
                 path = glob(f'{self.path}temp/{qtl_row.trait}*{qtl_row.SNP}/*.pdf'.replace(':', '_')) + \
                        glob(f'{self.path}temp/{qtl_row.trait}_{today_str}_{qtl_row.SNP}*.pdf'.replace(':', '_'))
@@ -3201,42 +3272,3 @@ X	NC_051356.1
 Y	NC_051357.1
 MT	NC_001665.2'''.split('\n')})
 
-
-# def jzfy(s, name = 'o'):
-#     x, y = zip(*[y for x in s.split(';') if (y:= x.split('='))])
-#     return pd.Series(y, index = x, name = name)
-
-    # def report(self, round_version: str = '10', threshold: float = 5.3591, suggestive_threshold: float = 5.58, reportpath: str = 'gwas_report_auto.rmd',
-    #            covariate_explained_var_threshold: float = 0.02, gwas_version='current'):
-    #     pqfile = pd.read_parquet(self.phewas_db)
-    #     pqfile.value_counts(['project','trait']).reset_index().rename({0:'number of SNPS below 1e-4 Pvalue'}, axis = 1).to_csv(f'{self.path}temp/phewas_t_temp.csv', index = False)
-    #     PROJECTLIST = '* '+' \n* '.join(pqfile.project.unique())
-    #     REGRESSTHRS = str(round(covariate_explained_var_threshold*100, 2)) + '%'
-    #     with open(reportpath, 'r') as f: 
-    #         report_txt = f.read()
-    #     with open(f'{self.path}genotypes/parameter_thresholds.txt', 'r') as f: 
-    #         out = f.read()
-    #         params = {x:re.findall(f"--{x} ([^\n]+)", out)[0] for x in ['geno', 'maf', 'hwe']}
-    #     with open(f'{self.path}genotypes/genotypes.log') as f:
-    #         out = f.read()
-    #         params['snpsb4'] = re.findall(f"(\d+) variants loaded from .bim file.", out)[0]
-    #         params['snpsafter'], params['nrats'] = re.findall("(\d+) variants and (\d+) samples pass filters and QC.", out)[0]
-    #         params['removed_geno'], params['removedmaf'], params['removedhwe'] = \
-    #                (~pd.read_parquet(f'{self.path}genotypes/snpquality.parquet.gz')[['PASS_MISS','PASS_MAF','PASS_HWE']])\
-    #                .sum().astype(str)
-        
-    #     for i,j in [('PROJECTNAME', self.project_name),('PATHNAME', self.path),('ROUND', round_version), 
-    #                 ('NSNPSB4', params['snpsb4'] ), ('NSNPS', params['snpsafter']),
-    #                 ('GENODROP', params['removed_geno']), ('MAFDROP', params['removedmaf']), ('HWEDROP', params['removedhwe']),
-    #                 ('GENO', params['geno']), ('MAF', params['maf']), ('HWE', params['hwe']), ('PROJECTLIST', PROJECTLIST), ('REGRESSTHRS', REGRESSTHRS ),
-    #                 ('THRESHOLD10',str(round(threshold, 2))),('THRESHOLD',str(round(suggestive_threshold, 2))),
-    #                 ('NSAMPLES',params['nrats']),('GWASVERSION', gwas_version)]:
-    #         report_txt = report_txt.replace(i,j)
-    #     with open(f'{self.path}results/gwas_report.rmd', 'w') as f: f.write(report_txt)
-    #     try:bash(f'rm -r {self.path}results/gwas_report_cache')
-    #     except:pass
-    #     os.system(f'''conda run -n renv Rscript -e "rmarkdown::render('{self.path}results/gwas_report.rmd')" | grep -oP 'Output created: gwas_report.html' '''); #> /dev/null 2>&1 r-environment
-    #     bash(f'''cp {self.path}results/gwas_report.html {self.path}results/gwas_report_{self.project_name}_round{round_version}_threshold{threshold}_n{self.df.shape[0]}_date{datetime.today().strftime('%Y-%m-%d')}_gwasversion_{gwas_version}.html''')
-    #     #print('Output created: gwas_report.html') if 'Output created: gwas_report.html' in ''.join(repout) else print(''.join(repout))
-    #     try:bash(f'rm -r {self.path}results/gwas_report_cache')
-    #     except:pass

@@ -43,6 +43,8 @@ dependencies:
   - panel
   - hvplot
   - holoviews
+  - fancyimpute
+  - filterpy
   - pip
   - pip:
     - goatools

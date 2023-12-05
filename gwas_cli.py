@@ -10,7 +10,7 @@ path = dictionary['path'].rstrip('/') + '/' if (dictionary['path'] ) else ''
 pj = dictionary['project'].rstrip('/')  if (dictionary['project'] ) else 'test'
 
 if not dictionary['genotypes']:
-    dictionary['genotypes'] = '/projects/ps-palmer/gwas/databases/rounds/round10_1'
+    dictionary['genotypes'] = '/tscc/projects/ps-palmer/gwas/databases/rounds/round10_1'
     
 if not dictionary['threshold']:
     dictionary['threshold'] = 5.58
@@ -60,8 +60,13 @@ printwithlog(pj)
 for k,v in dictionary.items(): printwithlog(f'--{k} : {v}')
 if dictionary['clear_directories'] and not dictionary['skip_already_present_gwas']: gwas.clear_directories()
 if dictionary['regressout']: 
-    if not dictionary['timeseries']:  gwas.regressout(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'))
-    else:  gwas.regressout_timeseries(data_dictionary=pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'))
+    if not dictionary['timeseries']:  
+        if not dictionary['groupby']: gwas.regressout(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'))
+        else: gwas.regressout_groupby(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'), groupby_columns=dictionary['groupby'].split(','))
+    else:  
+        if not dictionary['groupby']: gwas.regressout_timeseries(data_dictionary=pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'))
+        else: gwas.regressout_timeseries(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'), groupby_columns=dictionary['groupby'].split(','))
+        
 if dictionary['subset']: gwas.SubsetAndFilter()
 if dictionary['grm']: gwas.generateGRM()
 if dictionary['h2']: gwas.snpHeritability()
