@@ -1,7 +1,3 @@
-#gene2go = download_ncbi_associations()
-#geneid2gos_rat= Gene2GoReader(gene2go, taxids=[10116])
-#import sleep
-
 from bokeh.resources import INLINE
 from collections import Counter, defaultdict, namedtuple
 from datetime import datetime
@@ -71,6 +67,9 @@ import subprocess
 import sys
 import utils
 import warnings
+
+# gene2go = download_ncbi_associations()
+# geneid2gos_rat= Gene2GoReader(gene2go, taxids=[10116])
 
 mg = mygene.MyGeneInfo()
 tqdm.pandas()
@@ -351,7 +350,7 @@ def regressoutgb(dataframe: pd.DataFrame(), data_dictionary: pd.DataFrame(), cov
     for group, gdf in tqdm(dfohe.groupby(groupby)):
         groupaddon = '|'.join(group)
         if continuousall:
-            gdf.loc[:, continuousall] = QuantileTransformer(n_quantiles = min(100, gdf.shape[0])).fit_transform(gdf.loc[:, continuousall])
+            gdf.loc[:, continuousall] = QuantileTransformer(n_quantiles = min(100, gdf.shape[0]), output_distribution='normal').fit_transform(gdf.loc[:, continuousall])
         for trait in alltraits:
             expvars = statsReport.stat_check(gdf)\
                                 .explained_variance([trait],getdatadic_covars(trait))\
@@ -359,7 +358,10 @@ def regressoutgb(dataframe: pd.DataFrame(), data_dictionary: pd.DataFrame(), cov
             expvars = expvars[expvars > covariates_threshold].dropna()
             explained_vars += [expvars.rename(lambda x: f"{x}_{groupaddon}", axis = 1).reset_index(names = 'group').melt(id_vars='group')]
             gdf[list(expvars.index)] = gdf[list(expvars.index)].fillna(gdf[list(expvars.index)].mean())
-            reg = statsReport.regress_out(gdf.set_index('rfid'), list(expvars.columns),  list(expvars.index)).rename(lambda x: x.lower(), axis = 1)
+            if not list(expvars.index):
+                reg = gdf.set_index('rfid')[list(expvars.columns)].rename(lambda x: 'regressedlr_'+x, axis =1)
+            else:
+                reg = statsReport.regress_out(gdf.set_index('rfid'), list(expvars.columns),  list(expvars.index)).rename(lambda x: x.lower(), axis = 1)
             reg = statsReport.quantileTrasformEdited(reg, reg.columns)
             reglist += [reg.reset_index().melt(id_vars='rfid')]
     melted_explained_vars = pd.concat(explained_vars).reset_index(drop = True)[['variable', 'group', 'value']]

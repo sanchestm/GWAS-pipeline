@@ -28,7 +28,6 @@ dependencies:
   - h5py
   - pandas-plink
   - hdbscan
-  - pandas-profiling
   - ydata-profiling
   - arviz
   - matplotlib-venn
@@ -44,7 +43,9 @@ dependencies:
   - hvplot
   - holoviews
   - fancyimpute
+  - scikit-image
   - filterpy
+  - datashader
   - pip
   - pip:
     - goatools

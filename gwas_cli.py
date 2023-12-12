@@ -67,7 +67,9 @@ if dictionary['regressout']:
         if not dictionary['groupby']: gwas.regressout_timeseries(data_dictionary=pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'))
         else: gwas.regressout_timeseries(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'), groupby_columns=dictionary['groupby'].split(','))
         
-if dictionary['subset']: gwas.SubsetAndFilter()
+if dictionary['subset']: 
+    if not dictionary['subset_skip_figures'] : gwas.SubsetAndFilter()
+    else: gwas.SubsetAndFilter(makefigures = False)
 if dictionary['grm']: gwas.generateGRM()
 if dictionary['h2']: gwas.snpHeritability()
 if dictionary['BLUP']: gwas.BLUP()
