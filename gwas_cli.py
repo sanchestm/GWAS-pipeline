@@ -59,6 +59,9 @@ printwithlog(path)
 printwithlog(pj)
 for k,v in dictionary.items(): printwithlog(f'--{k} : {v}')
 if dictionary['clear_directories'] and not dictionary['skip_already_present_gwas']: gwas.clear_directories()
+if dictionary['impute']: 
+    gbcols =  [] if not dictionary['groupby'] else dictionary['groupby'].split(',')
+    gwas.impute_traits(crosstrait_imputation = dictionary['crosstrait_imputation'],  groupby_columns=dictionary['groupby'].split(','))
 if dictionary['regressout']: 
     if not dictionary['timeseries']:  
         if not dictionary['groupby']: gwas.regressout(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'))
@@ -68,13 +71,13 @@ if dictionary['regressout']:
         else: gwas.regressout_timeseries(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'), groupby_columns=dictionary['groupby'].split(','))
         
 if dictionary['subset']: 
-    if not dictionary['subset_skip_figures'] : gwas.SubsetAndFilter()
+    if dictionary['subset_make_figures'] : gwas.SubsetAndFilter(makefigures = True)
     else: gwas.SubsetAndFilter(makefigures = False)
 if dictionary['grm']: gwas.generateGRM()
 if dictionary['h2']: gwas.snpHeritability()
 if dictionary['BLUP']: gwas.BLUP()
 if dictionary['BLUP_predict']: gwas.BLUP_predict(dictionary['BLUP_predict']);
-if dictionary['gwas']: gwas.GWAS(skip_already_present=dictionary['skip_already_present_gwas'])
+if dictionary['gwas']: gwas.fastGWAS(skip_already_present=dictionary['skip_already_present_gwas'])
 if dictionary['db']: gwas.addGWASresultsToDb(researcher=dictionary['researcher'],
                                              round_version=dictionary['round'], 
                                              gwas_version=dictionary['gwas_version'])
@@ -98,6 +101,8 @@ if dictionary['phewas']:gwas.phewas(pd.read_csv(f'{gwas.path}results/qtls/finalq
 if dictionary['eqtl']:gwas.eQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP').loc[:, : 'significance_level'],
                                 annotate= True, genome = dictionary['genome'])
 if dictionary['sqtl']:gwas.sQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP').loc[:, : 'significance_level'],
+                                genome = dictionary['genome'])
+if dictionary['goea']:gwas.GeneEnrichment(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP').loc[:, : 'significance_level'],
                                 genome = dictionary['genome'])
 if dictionary['locuszoom']: gwas.locuszoom(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv'), 
                                            annotate_genome = dictionary['genome'],
