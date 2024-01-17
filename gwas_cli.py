@@ -90,7 +90,7 @@ if dictionary['qtl']:
                                 threshold = dictionary['threshold'])
     gwas.annotate(qtls, genome = dictionary['genome'] )
 if dictionary['effect']: gwas.effectsize(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv')) 
-if dictionary['gcorr']: gwas.genetic_correlation_matrix()
+if dictionary['gcorr']: gwas.genetic_correlation_matrix_old()
 if dictionary['h2fig']: gwas.make_heritability_figure(display = False)
 if dictionary['manhattanplot']: gwas.manhattanplot(display = False,
                                                   threshold = dictionary['threshold'])
@@ -102,9 +102,9 @@ if dictionary['eqtl']:gwas.eQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.c
                                 annotate= True, genome = dictionary['genome'])
 if dictionary['sqtl']:gwas.sQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP').loc[:, : 'significance_level'],
                                 genome = dictionary['genome'])
-if dictionary['goea']:gwas.GeneEnrichment(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP').loc[:, : 'significance_level'],
+if dictionary['goea']:gwas.GeneEnrichment(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').loc[:, : 'errors'],
                                 genome = dictionary['genome'])
-if dictionary['locuszoom']: gwas.locuszoom(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv'), 
+if dictionary['locuszoom']: gwas.locuszoom(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), 
                                            annotate_genome = dictionary['genome'],
                                            threshold = dictionary['threshold'],
                                            skip_ld_calculation = dictionary['skip_ld_calculation_locuszoom']) 

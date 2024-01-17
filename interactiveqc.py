@@ -5,6 +5,7 @@ from scipy.stats import norm
 from datetime import datetime
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 class interactive_QC:
     def __init__(self, raw_data: pd.DataFrame, data_dictionary: pd.DataFrame):
@@ -17,9 +18,11 @@ class interactive_QC:
 
         self.traits = self.dd.query('trait_covariate == "trait"').measure.to_list()
         self.covs = self.dd[self.dd['trait_covariate'].str.contains('covariate')].measure.to_list()
+        self.covs_cat = self.dd[self.dd['trait_covariate'].str.contains('covariate_categorical')].measure.to_list()
+        self.covs_cont = self.dd[self.dd['trait_covariate'].str.contains('covariate_continuous')].measure.to_list()
 
-        self.dfog[self.traits] = self.dfog[self.traits].applymap(lambda x: (str(x).replace('#DIV/0!', 'nan').replace('#VALUE!', 'nan')  
-                                                .replace('n/a ','nan' ).replace('#REF!','nan' ))).astype(float)
+        self.dfog[self.traits] = self.dfog[self.traits].applymap(lambda x: (str(x).replace(' ', '').replace('#DIV/0!', 'nan').replace('#VALUE!', 'nan')  
+                                                .replace('n/a','nan' ).replace('#REF!','nan' ))).astype(float)
 
         self.dffinal = ''
     
@@ -34,6 +37,9 @@ class interactive_QC:
             self.value_dict.loc[t] = [wid, tags2, widgets.Text(value = t, disable = True), widgets.Text(value = '', 
                                                                                                    description = 'extra code',  
                                                                                            layout = widgets.Layout(width='1000px'))]
+        self.value_dict_rat = pd.DataFrame(index = self.dfog.reset_index().rfid.to_list())
+        self.value_dict_rat['wid_text'] =  [widgets.Text(value = '', description = f'extra code rat {i}',  layout = widgets.Layout(width='1000px')) \
+                                             for i in self.dfog.reset_index().rfid]
         self.outdfname = f'raw_data_curated_n{self.dfog.shape[0]}_{datetime.today().strftime("%Y%m%d")}.csv'
 
     def quick_view(self):
@@ -51,7 +57,7 @@ class interactive_QC:
         todo = '|'.join(sorted(set(self.traits) - set(self.dffinal.columns) - set([trait])))
         if todo: print(f'traits still to do...\n{todo}')
         else: print('curation was performed for all traits')
-        df = self.dfog.copy()
+        df = self.dfog.copy().reset_index()#.set_index('rfid')#  if not len(self.dffinal) else self.dffinal.copy().reset_index()
         df.loc[df.rfid.isin(remove_rfids) | (df[trait] < ranger[0]) | (df[trait] > ranger[1]), trait] = np.nan
         if len(extra):
             for ex_ in extra.split(';'):
@@ -102,7 +108,8 @@ class interactive_QC:
         #return df.loc[:, trait]
 
     def QC(self):
-        self.dffinal = self.dfog[['rfid']+self.covs]
+        if not len(self.dffinal): self.dffinal = self.dfog[['rfid']+self.covs].copy() 
+        if 'rfid' not in self.dffinal.columns: self.dffinal = self.dffinal.reset_index()
         interact(lambda single_trait : interact_manual(self._f, 
                         trait = self.value_dict.loc[single_trait,'wid_trait'], 
                         ranger = self.value_dict.loc[single_trait,'wid_range'], 
@@ -110,10 +117,79 @@ class interactive_QC:
                         extra= self.value_dict.loc[single_trait,'wid_extra']),
                  single_trait =  widgets.Dropdown(options=sorted(self.traits)))
 
+    def _fi(self, rfid, extra):
+        df = self.dfog.reset_index().set_index('rfid') #if not len(self.dffinal) else self.dffinal.reset_index().set_index('rfid')
+        rat = df.loc[rfid]
+        #self.value_dict_rat.loc[rfid, 'wid_text'].value = extra
+        if 'rfid' in self.dffinal.columns: self.dffinal = self.dffinal.set_index('rfid')
+        if len(extra):
+            for ex_ in extra.replace('=', '->').replace(' ','').split(';'):
+                if '->' not in ex_: 
+                    if ex_ not in df.columns: ex_ = df.columns[df.columns.str.startswith(ex_)].to_list()
+                    df.loc[rat.name, ex_] = np.nan
+                    self.dffinal.loc[rat.name, ex_] = np.nan 
+                else:
+                    a_,b_ = ex_.split('->')[:2]
+                    if a_ not in df.columns: a_ = df.columns[df.columns.str.startswith(a_)].to_list()
+                    df.loc[rat.name, a_] = eval(b_)
+                    self.dffinal.loc[rat.name, a_] = eval(b_)
+    
+        from sklearn.preprocessing import LabelEncoder
+    
+        df[self.covs_cat] = df[self.covs_cat].astype(str)
+        describedall = df.describe(include = 'all', percentiles = [.05, .1, .9, .95])
+        describedall.index = describedall.index + '_all'
+        describecoh = df.query('cohort == @rat.cohort').describe(include = 'all')
+        describecoh.index = describecoh.index + f"_c{rat['cohort']}"
+        df = pd.concat([df, describedall, describecoh])
+        df = df[~df.index.to_series().str.contains('count|std|50%')]
+        df[self.covs_cat] = df[self.covs_cat].astype(str)
+        for i in self.covs_cat: df[f'LE{i}'] = LabelEncoder().fit_transform(df[i])
+    
+        ncols = 2
+        categories = set(map(lambda x: x.split('_')[0] + '_', self.traits))
+        fig = make_subplots(rows=(len(categories)+2)//ncols +1, cols=ncols)
+        hm1 = [rat.name] + df.index[df.index.to_series().str.contains(f'_all|_c{rat.cohort}')].to_list() 
+        hm1df =  df.loc[hm1,self.covs_cat].replace('nan', np.nan).dropna(how = 'all').sort_index(axis = 1)
+        fig.add_trace(go.Heatmap(z = df.loc[hm1df.index, 'LE'+hm1df.columns][::-1].fillna(-10), texttemplate="%{text}", y = hm1df.index[::-1], x = hm1df.columns,
+                   textfont={"size":10},text = hm1df[::-1], colorscale='Jet'), row = 1, col = 1 )
+        #display(df.loc[hm1df.index, 'LE'+hm1df.columns][::-1].fillna(-10))
+        
+        hm1df =  df.loc[hm1,self.covs_cont].dropna(how = 'all').sort_index(axis = 1)
+        fig.add_trace(go.Heatmap(z = hm1df[::-1], texttemplate="%{text}", y = hm1df.index[::-1], x = hm1df.columns,
+                   textfont={"size":10},text = hm1df[::-1].round(2), colorscale='RdBu'), row = 1, col = 2 )
+        
+        cnt = 2
+        for cattemp in sorted(categories):
+            hm1df =  df.loc[hm1,df.columns.str.startswith(cattemp)].dropna(how = 'all').sort_index(axis = 1)
+            if rat.name in hm1df.index:
+                fig.add_trace(go.Heatmap(z = hm1df[::-1], texttemplate="%{text}", y = hm1df.index[::-1], x = hm1df.columns,
+                           textfont={"size":10 if len(hm1df.columns)< 10 else 7},text = hm1df[::-1].round(2) if len(hm1df.columns)< 15 else hm1df.applymap(lambda x: ''),
+                                         colorscale='RdBu'), row = cnt//ncols +1, col = cnt%ncols +1)
+            else:
+                fig.add_trace(go.Heatmap(z = [[0]], textfont={"size":30}, texttemplate="%{text}",
+                                         text = [[f'No {cattemp} values for <br> rat {rat.name}']]), 
+                              row = cnt//ncols +1, col = cnt%ncols +1)
+            cnt += 1
+        
+        fig.update_layout(width = 1200, height = 400*(len(categories)+2)//ncols +1, title = f'Rat: {rat.name} sex: {rat.sex} cohort: {rat.cohort}', template = 'simple_white')
+        fig.update_traces(showscale=False)
+        display(fig)
+        self.dffinal = self.dffinal.reset_index()
+    
+    def QCiid(self):
+        if not len(self.dffinal): self.dffinal = self.dfog[['rfid']+self.covs].copy() 
+        interact(lambda ratid : interact_manual(self._fi,
+                                rfid = ratid,
+                                extra= self.value_dict_rat.loc[ratid,'wid_text']),
+                         ratid =  widgets.Dropdown(options=sorted(self.dfog.reset_index()['rfid'].to_list())))
+        
+
     def save_curated(self):
         print('saving boundaries to "QC_set_boundaries.csv"')
         print(f'saving data to "{self.outdfname}"')
         self.value_dict.applymap(lambda x: x.value).to_csv('QC_set_boundaries.csv')
+        self.value_dict_rat.applymap(lambda x: x.value).to_csv('QC_set_boundaries_rat.csv')
         self.dffinal.set_index('rfid').sort_index().to_csv(self.outdfname)
 
     def get_df(self):

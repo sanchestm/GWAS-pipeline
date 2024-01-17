@@ -152,12 +152,20 @@ def plink(print_call = False, **kwargs):
     bash(call, print_call=print_call)
     return
 
-def generate_datadic(rawdata, trait_prefix = ['pr', 'sha', 'lga', 'shock'], main_cov = 'sex,cohort,weight_surgery,box,coatcolor', project_name = ''):
+def generate_datadic(rawdata, trait_prefix = ['pr', 'sha', 'lga', 'shock'], main_cov = 'sex,cohort,weight_surgery,box,coatcolor', project_name = '', save = False):
     dd_new = rawdata.describe(include = 'all').T.reset_index(names= ['measure'])
     dd_new['trait_covariate'] = dd_new['unique'].apply(lambda x: 'covariate_categorical' if not np.isnan(x) else 'covariate_continuous')
-    dd_new.loc[dd_new.measure.str.contains('^'+'|'.join(trait_prefix), regex = True), ['trait_covariate', 'covariates']] = ['trait', main_cov]
+    dd_new.loc[dd_new.measure.str.contains('^'+'|^'.join(trait_prefix), regex = True), ['trait_covariate', 'covariates']] = ['trait', main_cov]
+    dd_new.loc[dd_new.measure.str.endswith('_age') , ['trait_covariate', 'covariates']] = ['covariate_continuous', '']
     dd_new['description'] = dd_new['measure']
-    dd_new#.to_csv(f'data_dict_{project_name}.csv')
+    for pref in trait_prefix:
+        addcov = ','.join(dd_new.loc[dd_new.measure.str.endswith('_age') &  dd_new.measure.str.startswith(pref)].description)
+        if len(addcov): 
+            dd_new.loc[dd_new.measure.str.startswith(pref), 'covariates'] = dd_new.loc[dd_new.measure.str.startswith(pref), 'covariates'] + ',' + addcov
+    dd_new.loc[dd_new.measure.isin(['rfid', 'labanimalid']), 'trait_covariate'] = 'metadata'
+    dd_new = dd_new.loc[~dd_new.measure.str.startswith('Unnamed: ')]
+    if save:
+        dd_new.to_csv(f'data_dict_{project_name}.csv')
     return dd_new
 
 def make_LD_plot(ys: pd.DataFrame, fname: str):
@@ -1045,7 +1053,7 @@ class gwas_pipe:
         call = f'{self.gcta} ' + ' '.join([f'--{k.replace("_", "-")} {v}'
                                     for k,v in kwargs.items()])
         if 'out' not in kwargs.items():
-            call += ' --out temp/temp'
+            call += f' --out {self.path}temp/temp'
         bash(call, print_call=False)
         return
     
@@ -1268,8 +1276,8 @@ class gwas_pipe:
     
     def make_genetic_PCA_fig(self) -> tuple:
         self._gcta(grm_bin = f'{self.path}grm/AllchrGRM', pca=20, thread_num = self.threadnum)
-        eigenvals = pd.read_csv('temp/temp.eigenval', header = None ).rename(lambda x: f'gPC{x+1}').set_axis(['eigenvalues'],axis = 1)
-        pcs = pd.read_csv('temp/temp.eigenvec', header = None, sep = '\s+', index_col=[0,1] ).rename(lambda x: f'gPC{x-1}', axis = 1).droplevel(0)
+        eigenvals = pd.read_csv(f'{self.path}temp/temp.eigenval', header = None ).rename(lambda x: f'gPC{x+1}').set_axis(['eigenvalues'],axis = 1)
+        pcs = pd.read_csv(f'{self.path}temp/temp.eigenvec', header = None, sep = '\s+', index_col=[0,1] ).rename(lambda x: f'gPC{x-1}', axis = 1).droplevel(0)
         pcs['hdbscan'] = HDBSCAN(min_cluster_size=50).fit_predict(pcs)
         nclasses = len(pcs['hdbscan'].unique())
         pcs.index.names = ['rfid']
@@ -1575,8 +1583,9 @@ class gwas_pipe:
                            index_col=0).applymap(lambda x: float(x.split('+-')[0]))
         classes = pd.DataFrame(HDBSCAN(metric = 'precomputed', min_cluster_size = 3).fit_predict(gcor.loc[her.index, her.index]), 
                                index = her.index, columns = ['cluster']).astype(str)
-        her = pd.concat([classes, her], axis = 1)
+        her = pd.concat([classes, her], axis = 1).sort_index().sort_values('heritability')
         fig = px.scatter(her.reset_index(names = 'trait'), x="trait", y="heritability", color="cluster", error_y="heritability_SE")
+        fig.update_xaxes(categoryorder='array', categoryarray= her.index)
         fig.add_hline(y=0., line = {'color':'black', 'width': 3}, opacity= .7)
         for i in [0.1,0.2, 0.3]:
             fig.add_hline(y=i, line = {'color':'black', 'width': .7}, opacity= .7, line_dash="dot")
@@ -1877,7 +1886,7 @@ class gwas_pipe:
         
         
     def callQTLs(self, threshold: float = 5.3591, suggestive_threshold: float = 5.58, window: int = 2e6, subterm: int = 2,  add_founder_genotypes: bool = True,
-                 ldwin = int(12e6), ldkb = 12000, ldr2 = .8, qtl_dist = 12*1e6, NonStrictSearchDir = True, **kwards): # annotate_genome: str = 'rn7',
+                 ldwin = int(12e6), ldkb = 12000, ldr2 = .8, qtl_dist = 12*1e6, NonStrictSearchDir = True, parallel_conditional_analysis = False, **kwards): # annotate_genome: str = 'rn7',
         
         '''
         The function callQTLs() is used to call quantitative trait loci (QTLs) from GWAS results. 
@@ -1926,7 +1935,8 @@ class gwas_pipe:
                     if os.path.exists(filename):
                         #topSNPs = pd.concat([topSNPs, pd.read_csv(filename, sep = '\t').query(f'p < {thresh}').assign(trait=t)])
                         topSNPslist += [pd.read_csv(filename, sep = '\t').query(f'p < {thresh}').assign(trait=t)]
-                    else: printwithlog(f'could not locate {filename}')
+                    else: pass
+                        #printwithlog(f'could not locate {filename}')
             topSNPs = pd.concat(topSNPslist).drop_duplicates(subset= 'SNP', keep = 'first')
                     
 
@@ -1986,7 +1996,9 @@ class gwas_pipe:
         printwithlog('running conditional analysis...')
         self.pbim, self.pfam, self.pgen = pandas_plink.read_plink(self.genotypes_subset)
         display(out)
-        out = self.conditional_analysis_filter_chain(pd.read_csv(f'{self.path}results/qtls/QTLSb4CondAnalysis.csv').query('QTL').reset_index(drop=True), threshold)
+        qtlb4cond = pd.read_csv(f'{self.path}results/qtls/QTLSb4CondAnalysis.csv').query('QTL').reset_index(drop=True)
+        if parallel_conditional_analysis: out = self.conditional_analysis_filter_chain_parallel(qtlb4cond, threshold)
+        else: out = self.conditional_analysis_filter_chain(qtlb4cond, threshold)
         #out = self.conditional_analysis_filter_chain(out[out.QTL].reset_index(drop=True), threshold)
         if add_founder_genotypes:
             dffounder = pd.read_csv(self.founder_genotypes, sep = '\t')
@@ -2094,13 +2106,13 @@ class gwas_pipe:
 
     def conditional_analysis_filter_chain_parallel(self, qtltable: pd.DataFrame(), threshold: float = 5.3591):
         self.pbim, self.pfam, self.pgen = pandas_plink.read_plink(self.genotypes_subset)
-        cline = y if (y:=client._get_global_client()) else Client( processes = False ) 
+        cline = y if (y:=client._get_global_client()) else Client(processes = False) 
         ddqtl = dd.from_pandas(qtltable, npartitions=200)
         ddgb = ddqtl.groupby(['Chr', 'trait'], group_keys=False)
         threadnum = max(self.threadnum//ddqtl.npartitions,1)
         ddgb = ddqtl.groupby(['Chr', 'trait'], group_keys=False)
-        _ = ddgb.apply(lambda df: self.conditional_analysis_chain_singletrait(threshold = 5.3591, print_call =  False, nthread = threadnum)  if df.shape[0] > 1 else df
-                       , meta = qtl).reset_index(drop= True)#.compute()
+        _ = ddgb.apply(lambda df: self.conditional_analysis_chain_singletrait(snpdf = df, threshold = threshold, print_call =  False, nthread = threadnum)  if df.shape[0] > 1 else df
+                       , meta = qtltable).reset_index(drop= True)#.compute()
         future = cline.compute(_)
         progress(future,notebook = False,  interval="300s")
         out = future.result().sort_values(['trait', 'Chr', 'bp'])
@@ -2142,7 +2154,7 @@ class gwas_pipe:
         Only works on TSCC
         '''
         printwithlog(f'generating locuszoom info for project {self.project_name}')
-        if not qtltable or type(qtltable) == str:
+        if not len(qtltable) or type(qtltable) == str:
             qtltable = pd.read_csv(f'results/qtls/finalqtl.csv')
         out = qtltable.reset_index()
         causal_snps = []
@@ -2168,9 +2180,10 @@ class gwas_pipe:
                 r2 = self.plink(bfile = self.genotypes_subset, chr = row.Chr, ld_snp = row.SNP, ld_window_r2 = 0.001, r2 = 'dprime',\
                                         ld_window = 100000, thread_num = int(self.threadnum), ld_window_kb =  12000, nonfounders = '').loc[:, ['SNP_B', 'R2', 'DP']] 
                 gwas = pd.concat([pd.read_csv(x, sep = '\t') for x in glob(f'{self.path}results/gwas/regressedlr_{row.trait}.loco.mlma') \
-                                    + glob(f'{self.path}results/gwas/regressedlr_{row.trait}_chrgwas[xy].mlma')\
-                                    + glob(f'{self.path}results/gwas/regressedlr_{row.trait}_chrgwas\d+.mlma')]).drop_duplicates(subset = 'SNP')
+                                    + glob(f'{self.path}results/gwas/regressedlr_{row.trait}_chrgwas*.mlma')]).drop_duplicates(subset = 'SNP')
+                #+ glob(f'{self.path}results/gwas/regressedlr_{row.trait}_chrgwas\d+.mlma')
                 tempdf = pd.concat([gwas.set_index('SNP'), r2.rename({'SNP_B': 'SNP'}, axis = 1).drop_duplicates(subset = 'SNP').set_index('SNP')], join = 'inner', axis = 1)
+                #display(tempdf)
                 tempdf = self.annotate(tempdf.reset_index(), annotate_genome, 'SNP', save = False).set_index('SNP').fillna('UNK')
                 tempdf.to_csv( f'{self.path}results/lz/lzplottable@{row.trait}@{row.SNP}.tsv', sep = '\t')
 
@@ -2783,15 +2796,18 @@ class gwas_pipe:
                         f'regressedlr_{t.replace("regressedlr_", "")}.mlma']+ \
             [f'regressedlr_{t.replace("regressedlr_", "")}_chrgwas{chromp2}.mlma' for chromp2 in self.chrList]:
                 if glob(f'{self.path}results/gwas/{opt}'): 
+                    samplenuse = samplen//20 if '_chrgwas' in opt else samplen
                     g = pd.read_csv(f'{self.path}results/gwas/{opt}', sep = '\t', dtype = {'Chr': int, 'bp': int}).assign(trait = t)
                     g['p'] = g['p'].fillna(1)
                     #g=g.applymap(np.nan_to_num)
                     g['inv_prob'] = 1/(np.clip(g.p, 1e-6, 1)) 
-                    g = pd.concat([g.query('p < 0.05'), g.query('p > 0.05').sample(min(samplen, g.query('p > 0.05').shape[0], childlock_val),\
-                                                                                     weights='inv_prob'),\
-                                   g[::np.random.choice(rangen)].sample(frac = (trait_pos< maxtraits))] )\
+                    if  g.query('p > 0.05').shape[0] > 0:
+                        gweighted = [g.query('p > 0.05').sample(min(samplenuse, g.query('p > 0.05').shape[0], childlock_val), weights='inv_prob')]
+                    else: gweighted = []
+                    g = pd.concat([g.query('p < 0.05'),g[::np.random.choice(rangen)].sample(frac = (trait_pos< maxtraits))]+ gweighted )\
                     .sort_values(['Chr', 'bp']).reset_index(drop = True).dropna()
                     df_gwas += [g]
+                    if sum(map(len, df_gwas)) > 1e6: maxtraits = 0
                 else: pass
         df_gwas = pd.concat(df_gwas).sort_values(['Chr', 'bp']).reset_index(drop = True)
 
@@ -2996,13 +3012,13 @@ Genotype Info
         pn.pane.Alert(text_sidepanel, alert_type="primary")
         ])
         ##### adding data dictionary
-        dd = pd.read_csv(f'data_dict_{self.project_name}.csv').fillna('')\
+        dd = pd.read_csv(f'{self.path}data_dict_{self.project_name}.csv').fillna('')\
            [['measure', 'trait_covariate','covariates', 'description']]\
            .query("measure != ''")
         template.main.append( pn.Card('Collaborative data dictionary google document: ',
                                       fancy_display(dd), title = 'Trait Descriptions', collapsed=True))
         
-        explained_vars =  pd.read_csv('melted_explained_variances.csv').pivot(columns = 'group', values='value', index = 'variable')
+        explained_vars =  pd.read_csv(f'{self.path}melted_explained_variances.csv').pivot(columns = 'group', values='value', index = 'variable')
         fig_exp_vars = px.imshow(explained_vars, text_auto=True, aspect="auto", color_continuous_scale='Reds')
         fig_exp_vars.update_layout(template = 'simple_white', width=800,height=800,autosize=False)
         
@@ -3083,9 +3099,9 @@ Column definitions:
         template.main.append( pn.Card(qtlstext, fancy_display(qtls), title = 'QTL', collapsed=True))
         
         
-        porcupinetext = '''# **Porcupine Plot**
+        porcupinetext = f'''# **Porcupine Plot**
         
-    Porcupine plot is a graphical tool that combines multiple Manhattan plots, each representing a single trait, into a single plot. The resulting plot provides a visual representation of the regions of the genome that influence multiple traits, enabling researchers to identify genetic loci that have pleiotropic effects. These plots allow for a quick and efficient analysis of multiple traits simultaneously. For the porcupine plots shown below, only traits with at least one significant QTL are shown.'''
+Porcupine plot is a graphical tool that combines multiple Manhattan plots, each representing a single trait, into a single plot. The resulting plot provides a visual representation of the regions of the genome that influence multiple traits, enabling researchers to identify genetic loci that have pleiotropic effects. These plots allow for a quick and efficient analysis of multiple traits simultaneously. For the porcupine plots shown below, only traits with at least one significant QTL are shown.'''
         
         porcfig = pn.pane.PNG(f'{self.path}images/porcupineplot.png', max_width=1000, max_height=600, width = 1000, height = 600)
         template.main.append( pn.Card(porcupinetext, porcfig, title = 'Porcupine Plot', collapsed=True))
@@ -3256,17 +3272,17 @@ Defining columns:
         template.main.append(pn.Card(*out, title = 'Regional Association Plots', collapsed = True))
         
         faqtable = pd.read_parquet(self.phewas_db)[['project' ,'trait']].value_counts().to_frame().rename({0: 'number of SNPs'}, axis =1).reset_index()
-        faqtext = '''Do the traits look approximately normally distributed? 
+        faqtext = f'''Do the traits look approximately normally distributed? 
     
-    * Our pipeline performs a quantile normalization, which is a transformation that preserves the rank of each subject but reassigns values such that the final distribution is perfectly normally distributed. When two or more subjects have identical values, the ‘tie’ is broken randomly (with a spefic random seed of 42), if there is a large proportion of ties, then that part of the distribution is random noise, which is bad (however, in our defense, there are no good solutions when multiple values are ties). 
+* Our pipeline performs a quantile normalization, which is a transformation that preserves the rank of each subject but reassigns values such that the final distribution is perfectly normally distributed. When two or more subjects have identical values, the ‘tie’ is broken randomly (with a spefic random seed of 42), if there is a large proportion of ties, then that part of the distribution is random noise, which is bad (however, in our defense, there are no good solutions when multiple values are ties). 
     
-    Are there extreme outliers that might be errors? 
+Are there extreme outliers that might be errors? 
     
-    * By the time we send this report we would typically have tried to identify outliers/errors, but it is possible we’ve missed some so please let us know if you have concerns. 
+* By the time we send this report we would typically have tried to identify outliers/errors, but it is possible we’ve missed some so please let us know if you have concerns. 
     
-    Are there sex differences? 
+Are there sex differences? 
     
-    * We regress out the effect of sex, so the GWAS essentially assumes that alleles have similar effects of the trait in males and females. This means we would not detect an interaction (e.g. an allele that affects a trait only in males). While it is possible to do GWAS for males and females separately, we don’t do this by default because the loss of power makes it hard to interpret the results. If sex differences are of major interest we can discuss ways of examining these.
+* We regress out the effect of sex, so the GWAS essentially assumes that alleles have similar effects of the trait in males and females. This means we would not detect an interaction (e.g. an allele that affects a trait only in males). While it is possible to do GWAS for males and females separately, we don’t do this by default because the loss of power makes it hard to interpret the results. If sex differences are of major interest we can discuss ways of examining these.
     
     Which traits are included in the PheWAS database:'''
         faqtext = pn.pane.Markdown(faqtext)
@@ -3318,7 +3334,7 @@ Defining columns:
                 bash('/projects/ps-palmer/tsanches/mc anonymous set public myminio/tsanches_dash_genotypes --recursive')
                 printwithlog(f'{destination.replace("/projects/ps-palmer/s3/data", "https://palmerlab.s3.sdsc.edu")}/{self.project_name}/results/gwas_report.html')
 
-    def GeneEnrichment(self, qtls: pd.DataFrame = None, annotate_genome: str = 'rn7', padding: int = 2e6, r2thresh: float = .9,
+    def GeneEnrichment(self, qtls: pd.DataFrame = None, genome: str = 'rn7', padding: int = 2e6, r2thresh: float = .9,
                    append_nearby_genes:bool = False, select_nearby_genes_by:str = 'r2'):
         from goatools.base import download_go_basic_obo
         from goatools.obo_parser import GODag
@@ -3338,15 +3354,15 @@ Defining columns:
                     'rn6':'https://hgdownload.soe.ucsc.edu/goldenPath/rn6/bigZips/genes/rn6.ncbiRefSeq.gtf.gz',
                    'm38': 'https://hgdownload.soe.ucsc.edu/goldenPath/mm10/bigZips/genes/mm10.ncbiRefSeq.gtf.gz'}
         #
-        gtf = pd.read_csv(linkdict[annotate_genome], sep = '\t', header = None)\
+        gtf = pd.read_csv(linkdict[genome], sep = '\t', header = None)\
            .set_axis(['Chr', 'source', 'biotype', 'start', 'end', 'score', 'strand', 'phase', 'ID'], axis = 1)
         gtf['ID'] = gtf['ID'].apply(lambda x: {y.split(' "')[0].strip(' '): y.split(' "')[-1][:-1] for y in x.strip(';').split(';')})
         gtf =pd.concat([gtf.drop('ID', axis = 1), pd.json_normalize(gtf['ID'].to_list())], axis = 1).query('biotype == "transcript"')
         gtf = gtf[~gtf.Chr.str.lower().str.contains('un')]
         gtf['Chr'] = gtf['Chr'].apply(lambda x: self.replaceXYMTtonums(x.split('_')[0])).apply(lambda x: self.replacenumstoXYMT(x)).str.upper()
         
-        if type(qlts) == str: qtls = pd.read_csv(qtls)
-        if type(qlts) != type(pd.DataFrame()): qtls = pd.read_csv(f'{self.path}results/qtls/finalqtl.csv')
+        #if type(qlts) == str: qtls = pd.read_csv(qtls)
+        if type(qtls) != type(pd.DataFrame()): qtls = pd.read_csv(f'{self.path}results/qtls/finalqtl.csv')
         
         def get_entrez_ids(genes):
             if type(genes) == str: genes = genes.split('-') + [genes]
@@ -3381,7 +3397,7 @@ Defining columns:
         merged_qtls = qtls.groupby('trait')[['gene', 'gene_id_nearby','entrezid_nearby']].agg(sum)
         print('getting entrezid per qtl...')
         merged_qtls['entrezid'] = merged_qtls['gene'].progress_apply(get_entrez_ids)
-        print(f'getting entrezid per for all {annotate_genome} genes...')
+        print(f'getting entrezid per for all {genome} genes...')
         allentrez = get_entrez_ids(gtf.gene_name.unique())
         
         print(f'initializing GO study...')
