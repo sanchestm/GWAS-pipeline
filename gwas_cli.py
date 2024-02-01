@@ -102,7 +102,7 @@ if dictionary['eqtl']:gwas.eQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.c
                                 annotate= True, genome = dictionary['genome'])
 if dictionary['sqtl']:gwas.sQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP').loc[:, : 'significance_level'],
                                 genome = dictionary['genome'])
-if dictionary['goea']:gwas.GeneEnrichment(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').loc[:, : 'errors'],
+if dictionary['goea']:gwas.GeneEnrichment(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv'),#.loc[:, : 'errors'],
                                 genome = dictionary['genome'])
 if dictionary['locuszoom']: gwas.locuszoom(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), 
                                            annotate_genome = dictionary['genome'],
