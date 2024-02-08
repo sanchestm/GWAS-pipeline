@@ -5,6 +5,10 @@ import pandas as pd
 
 dictionary = defaultdict(lambda: 0, {k.replace('-', ''):v for k,v in [(x + '=1' if '=' not in x else x).split('=') for x in sys.argv[1:]] })
 
+def kw(d, prefix):
+    if prefix[-1] != '_': prefix += '_'
+    return {k.replace(prefix, ''):v for k,v in d.items() if (k[:len(prefix)] == prefix)}
+
 path = dictionary['path'].rstrip('/') + '/' if (dictionary['path'] ) else ''
 
 pj = dictionary['project'].rstrip('/')  if (dictionary['project'] ) else 'test'
@@ -12,9 +16,11 @@ pj = dictionary['project'].rstrip('/')  if (dictionary['project'] ) else 'test'
 if not dictionary['genotypes']:
     dictionary['genotypes'] = '/tscc/projects/ps-palmer/gwas/databases/rounds/round10_1'
     
-if not dictionary['threshold']:
-    dictionary['threshold'] = 5.58
-dictionary['threshold'] = float(dictionary['threshold'])
+if not dictionary['threshold']: dictionary['threshold'] = 5.58
+if dictionary['threshold'] != 'auto':  dictionary['threshold']= float(dictionary['threshold'])
+
+if not dictionary['suggestive_threshold']: dictionary['suggestive_threshold'] = 5.58
+dictionary['suggestive_threshold'] = float(dictionary['suggestive_threshold'])
     
 if not dictionary['genome']: dictionary['genome'] = 'rn7'
     
@@ -71,9 +77,13 @@ if dictionary['regressout']:
         else: gwas.regressout_timeseries(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'), groupby_columns=dictionary['groupby'].split(','))
         
 if dictionary['subset']: 
-    if dictionary['subset_make_figures'] : gwas.SubsetAndFilter(makefigures = True)
-    else: gwas.SubsetAndFilter(makefigures = False)
+    kws = {k:float(v) for k, v in kw(dictionary, 'subset_')}
+    if dictionary['subset_make_figures'] : gwas.SubsetAndFilter(makefigures = True, **kws)
+    else: gwas.SubsetAndFilter(makefigures = False, **kws)
 if dictionary['grm']: gwas.generateGRM()
+if dictionary['threshold'] == 'auto':
+    newthresh = gwas.estimate_pval_threshold(1000 if not dictionary['replicates'] else int(dictionary['replicates']))
+    dictionary['threshold'],dictionary['suggestive_threshold'] = newthresh.loc[['5%', '10%'], 'thresholds'].tolist()
 if dictionary['h2']: gwas.snpHeritability()
 if dictionary['BLUP']: gwas.BLUP()
 if dictionary['BLUP_predict']: gwas.BLUP_predict(dictionary['BLUP_predict']);
@@ -85,19 +95,19 @@ if dictionary['qtl']:
     qtl_add_founder = True if (dictionary['founder_genotypes'] not in [ 'none', 'None', 0]) else False
     try: qtls = gwas.callQTLs( NonStrictSearchDir=False, 
                               add_founder_genotypes = qtl_add_founder,
-                             threshold = dictionary['threshold'])
+                             threshold = dictionary['threshold'],suggestive_threshold = dictionary['suggestive_threshold'])
     except: qtls = gwas.callQTLs( NonStrictSearchDir=True, 
-                                threshold = dictionary['threshold'])
+                                threshold = dictionary['threshold'],suggestive_threshold = dictionary['suggestive_threshold'])
     gwas.annotate(qtls, genome = dictionary['genome'] )
 if dictionary['effect']: gwas.effectsize(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv')) 
 if dictionary['gcorr']: gwas.genetic_correlation_matrix_old()
 if dictionary['h2fig']: gwas.make_heritability_figure(display = False)
-if dictionary['manhattanplot']: gwas.manhattanplot(display = False,
-                                                  threshold = dictionary['threshold'])
-if dictionary['porcupineplot']: gwas.porcupineplot(pd.read_csv(f'{gwas.path}/results/qtls/finalqtl.csv'),
-                                                   display = False,
-                                                  threshold = dictionary['threshold'])
-if dictionary['phewas']:gwas.phewas(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP').loc[:, : 'significance_level'], annotate=True, pval_threshold = 1e-4, nreturn = 1, r2_threshold = .4, annotate_genome = dictionary['genome']) 
+if dictionary['manhattanplot']: gwas.manhattanplot(display = False, threshold = dictionary['threshold'],suggestive_threshold = dictionary['suggestive_threshold'])
+if dictionary['porcupineplot']: 
+    gwas.porcupineplot(pd.read_csv(f'{gwas.path}/results/qtls/finalqtl.csv'), display = False, 
+                       threshold = dictionary['threshold'],suggestive_threshold = dictionary['suggestive_threshold'])
+if dictionary['phewas']:gwas.phewas(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP').loc[:, : 'significance_level'], annotate=True, 
+                                    pval_threshold = 1e-4, nreturn = 1, r2_threshold = .4, annotate_genome = dictionary['genome']) 
 if dictionary['eqtl']:gwas.eQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP').loc[:, : 'significance_level'],
                                 annotate= True, genome = dictionary['genome'])
 if dictionary['sqtl']:gwas.sQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP').loc[:, : 'significance_level'],
@@ -105,12 +115,12 @@ if dictionary['sqtl']:gwas.sQTL(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.c
 if dictionary['goea']:gwas.GeneEnrichment(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv'),#.loc[:, : 'errors'],
                                 genome = dictionary['genome'])
 if dictionary['locuszoom']: gwas.locuszoom(pd.read_csv(f'{gwas.path}results/qtls/finalqtl.csv').set_index('SNP'), 
-                                           annotate_genome = dictionary['genome'],
-                                           threshold = dictionary['threshold'],
-                                           skip_ld_calculation = dictionary['skip_ld_calculation_locuszoom']) 
+                                           annotate_genome = dictionary['genome'],threshold = dictionary['threshold'],
+                                           skip_ld_calculation = dictionary['skip_ld_calculation_locuszoom'],suggestive_threshold = dictionary['suggestive_threshold']) 
 if dictionary['report']:gwas.report(round_version=dictionary['round'], 
                                     gwas_version=dictionary['gwas_version'],
-                                   threshold = dictionary['threshold'])
+                                   threshold = dictionary['threshold'],
+                                   suggestive_threshold = dictionary['suggestive_threshold'])
 if dictionary['store']:gwas.store(researcher=dictionary['researcher'],
                                   round_version=dictionary['round'], 
                                   gwas_version=dictionary['gwas_version'],  
