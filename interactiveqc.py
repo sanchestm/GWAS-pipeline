@@ -1,6 +1,7 @@
 import pandas as pd
 from ipywidgets import interact, interact_manual, widgets
 import numpy as np
+from tqdm import tqdm
 from scipy.stats import norm
 from datetime import datetime
 import plotly.express as px
@@ -22,12 +23,12 @@ class interactive_QC:
         self.covs_cont = self.dd[self.dd['trait_covariate'].str.contains('covariate_continuous')].measure.to_list()
 
         self.dfog[self.traits] = self.dfog[self.traits].applymap(lambda x: (str(x).replace(' ', '').replace('#DIV/0!', 'nan').replace('#VALUE!', 'nan')  
-                                                .replace('n/a','nan' ).replace('#REF!','nan' ))).astype(float)
+                                                .replace('n/a','nan' ).replace('#REF!','nan' ).replace('True','1' ).replace('False','0' ))).astype(float)
 
         self.dffinal = ''
     
         self.value_dict = pd.DataFrame(columns = ['wid_range', 'wid_exclude_rfid', 'wid_trait', 'wid_extra'])
-        for t in self.traits:
+        for t in tqdm(self.traits):
             minv, maxv = self.dfog[t].astype(float).agg(['min', 'max']).to_list()
             wid = widgets.FloatRangeSlider(value=[minv, maxv],min=minv,max=maxv,step=0.0001,disabled=False,
                 continuous_update=False, orientation='horizontal',readout=True,layout = widgets.Layout(width='1000px'),

@@ -47,6 +47,8 @@ dependencies:
   - selenium
   - filterpy
   - datashader
+  - firefox
+  - geckodriver
   - pip
   - pip:
     - goatools
