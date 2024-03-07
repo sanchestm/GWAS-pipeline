@@ -800,6 +800,7 @@ class gwas_pipe:
             sample_list_inside_genotypes = pd.read_csv(self.all_genotypes+'.fam', header = None, sep='\s+', dtype = str)[1].to_list()
         df = df.sort_values('rfid').reset_index(drop = True).dropna(subset = 'rfid').drop_duplicates(subset = ['rfid'])
         self.df = df[df.rfid.astype(str).isin(sample_list_inside_genotypes)].copy()#.sample(frac = 1)
+        self.df = self.df.loc[self.df.rfid.astype(str).map(hash).sort_values().index, :].reset_index(drop = True)
         
         if self.df.shape[0] != df.shape[0]:
             missing = set(df.rfid.astype(str).unique()) - set(self.df.rfid.astype(str).unique())
@@ -2255,8 +2256,12 @@ class gwas_pipe:
         #### getting only nearby snps to reduce time 
         subset_snp_path = f'{self.path}temp/cojo/accepted_snps_{c}_{trait}'
         genotypesCA = f'{self.path}temp/cojo/genotypesCA_{c}_{trait}'
-        snps_of_int = pd.concat([bim.query(f'chrom == "{c}"').query(f'{pos}-8e6<pos<{pos}+8e6') for pos in snpdf2.bp]).reset_index().drop_duplicates(subset = ['snp'])
-        snps_of_int.to_csv(subset_snp_path,index = False, header = None)
+        # snps_of_int = pd.concat([bim.query(f'chrom == "{c}"').query(f'{pos}-4e6<pos<{pos}+4e6') for pos in snpdf2.bp]).reset_index().drop_duplicates(subset = ['snp'])
+        # snps_of_int[['snp']].to_csv(subset_snp_path,index = False, header = None)
+
+        mlmares = pd.read_csv(f'{self.path}results/gwas/regressedlr_{trait}_chrgwas{self.replacenumstoXYMT(c)}.mlma', sep = '\t')
+        snps_of_int = pd.concat([mlmares.query('p<1e-4').query(f'{pos}-8e6<bp<{pos}+8e6') for pos in snpdf2.bp]).drop_duplicates(subset = ['SNP'])
+        snps_of_int[['SNP']].to_csv(subset_snp_path,index = False, header = None)
 
         plink(bfile = self.genotypes_subset, extract = subset_snp_path, make_bed = '', thread_num =  self.threadnum,
               set_missing_var_ids = '@:#', keep_allele_order = '',  set_hh_missing = '' , make_founders = '', 
@@ -2301,6 +2306,7 @@ class gwas_pipe:
                                                emergent_qtl = True, trait = trait, QTL = True,
                                                trait_description = snpdf['trait_description'].mode()[0])
                 covarlist = pd.concat([covarlist,add2ingsnp ])
+        return covarlist
 
     def conditional_analysis_filter_chain(self, qtltable: pd.DataFrame()):
         self.pbim, self.pfam, self.pgen = pandas_plink.read_plink(self.genotypes_subset)
