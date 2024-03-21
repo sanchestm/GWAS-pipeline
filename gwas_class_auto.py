@@ -801,6 +801,7 @@ class gwas_pipe:
         df = df.sort_values('rfid').reset_index(drop = True).dropna(subset = 'rfid').drop_duplicates(subset = ['rfid'])
         self.df = df[df.rfid.astype(str).isin(sample_list_inside_genotypes)].copy()#.sample(frac = 1)
         self.df = self.df.loc[self.df.rfid.astype(str).map(hash).sort_values().index, :].reset_index(drop = True)
+        self.df = self.df.sample(frac=1, random_state=42).reset_index(drop = True)
         
         if self.df.shape[0] != df.shape[0]:
             missing = set(df.rfid.astype(str).unique()) - set(self.df.rfid.astype(str).unique())
@@ -1073,7 +1074,7 @@ class gwas_pipe:
         self.df = self.df.loc[:,~self.df.columns.duplicated()]
         strcomplete = statsReport.stat_check(self.df.reset_index(drop = True))
         self.df.to_csv(f'{self.path}processed_data_ready.csv', index = False)
-        appended_traits = list(self.df.columns[ self.df.columns.str.startswith('regressedlr_umap') |  self.df.columns.str.startswith('regressedlr_pc')])
+        appended_traits = list(self.df.columns[ self.df.columns.str.startswith('regressedlr_umap') | self.df.columns.str.startswith('regressedlr_pc')])
         strcomplete.make_report(f'{self.path}data_distributions.html')
         display(self.df.loc[:,  appended_traits].count())
         for trait in appended_traits: 
@@ -1089,7 +1090,7 @@ class gwas_pipe:
         '''
         random_id = np.random.randint(1e8)
         
-        full_call = re.sub(r' +', ' ', call + f'--out {self.path}{temp_out_filename}{random_id}')
+        full_call = re.sub(r' +', ' ', call + f' --out {self.path}{temp_out_filename}{random_id}')
         
         ### add line to delete temp_out_filename before doing the 
         bash(full_call, print_call = False)
@@ -1230,11 +1231,11 @@ class gwas_pipe:
             if len(full_sm): full += [pd.concat(full_sm, axis = 1)]
         full = pd.concat(full)
 
-        full['PASS_MISS'] = ((full.F_MISS < thresh_m) + \
+        full['PASS_MISS'] = ((full.F_MISS <= thresh_m) + \
                              (full.CHR == self.n_autosome + 2 )) > 0 
         full['PASS_MAF'] = ((full.MAF - .5).abs() <= .5 - thresh_maf)# +
                             #(full.CHR == self.n_autosome + 2)) > 0 
-        full['PASS_HWE']= ((full.HWE > thresh_hwe) + \
+        full['PASS_HWE']= ((full.HWE >= thresh_hwe) + \
                           (full.CHR == self.n_autosome + 4) + \
                           (full.CHR == self.n_autosome + 2 )) > 0 
         full['PASS'] = full['PASS_MISS'] * full['PASS_MAF'] * full['PASS_HWE']
@@ -1636,7 +1637,7 @@ class gwas_pipe:
         a = sns.clustermap(outmixed.applymap(lambda x: float(x.split('+-')[0])).copy().T,  cmap="RdBu_r", col_cluster= False, row_cluster=False,
                 annot=outmixed.applymap(lambda x: '' if '*' not in x else '*').copy().T, vmin =-1, vmax =1, center = 0 , fmt = '', square = True, linewidth = .3, figsize=(15, 15) )
         dendrogram(hie, ax = a.ax_col_dendrogram)
-        a.ax_cbar.set_position([.1, .2, .05, 0.5])
+        a.ax_cbar.set_position([.2, .2, .03, 0.5])
         a.ax_heatmap.plot([0,outmixed.shape[0]], [0, outmixed.shape[0]], color = 'black')
         plt.savefig(f'{self.path}images/genetic_correlation_matrix.png', dpi = 400)
         plt.savefig(f'{self.path}images/genetic_correlation_matrix.eps')
@@ -1646,8 +1647,9 @@ class gwas_pipe:
         a = sns.clustermap(outmixed2.applymap(lambda x: float(x.split('+-')[0])).copy().T,  cmap="RdBu_r", col_cluster= False, row_cluster=False,
                         annot=outmixed2.applymap(lambda x: '' if '*' not in x else '*').copy().T, vmin =-1, vmax =1, center = 0 , fmt = '', square = True, linewidth = .3, figsize=(15, 15) )
         a.ax_heatmap.plot([0,outmixed2.shape[0]], [0, outmixed2.shape[0]], color = 'black')
-        a.ax_cbar.set_position([.1, .2, .05, 0.5])
+        a.ax_cbar.set_position([.2, .2, .03, 0.5])
         plt.savefig(f'{self.path}images/genetic_correlation_matrix_sorted.png', dpi = 400)
+        plt.savefig(f'{self.path}images/genetic_correlation_matrix_sorted.eps')
         return outmixed
     
     def make_heritability_figure(self, traitlist: list = [], save_fmt = ['png', 'html'], display = True):
@@ -2084,7 +2086,7 @@ class gwas_pipe:
         return oo   
         
         
-    def callQTLs(self, window: int = 1e4, subterm: int = 2,  add_founder_genotypes: bool = True, save = True, displayqtl = True,
+    def callQTLs(self, window: int = 0.5e6, subterm: int = 4,  add_founder_genotypes: bool = True, save = True, displayqtl = True,
                  ldwin = int(12e6), ldkb = 12000, ldr2 = .8, qtl_dist = 12*1e6, NonStrictSearchDir = True, conditional_analysis = True, **kwards): # annotate_genome: str = 'rn7',
         
         '''
@@ -2191,7 +2193,9 @@ class gwas_pipe:
         else: qtlb4cond = out.query('QTL').reset_index(drop=True)
         if conditional_analysis:    
             printwithlog('running conditional analysis...')
-            if conditional_analysis == 'parallel': out = self.conditional_analysis_filter_chain_parallel(qtlb4cond)
+            if conditional_analysis == 'parallel': 
+                printwithlog('running parallel conditional analysis...')
+                out = self.conditional_analysis_filter_chain_parallel(qtlb4cond)
             else: out = self.conditional_analysis_filter_chain(qtlb4cond)
         else: pass
         if add_founder_genotypes and len(self.foundersbimfambed):
@@ -2645,7 +2649,7 @@ class gwas_pipe:
             #plotio.write_json(fig, f'{self.path}images/lz/lz__{topsnp.trait}__{topsnp.SNP}.json'.replace(':', '_'))
     
     def phewas(self, qtltable: pd.DataFrame() = '', 
-               ld_window: int = int(3e6), pval_threshold: float = 1e-4, nreturn: int = 1 ,r2_threshold: float = .8,\
+               ld_window: int = int(3e6), save:bool = True, pval_threshold: float = 1e-4, nreturn: int = 1 ,r2_threshold: float = .8,\
               annotate: bool = True, **kwards) -> pd.DataFrame():
         '''
         This function performs a phenotype-wide association study (PheWAS) on a 
@@ -2697,13 +2701,14 @@ class gwas_pipe:
         table_exact_match = db_vals.merge(qtltable.reset_index(), on = 'SNP', how = 'inner', suffixes = ('_phewasdb', '_QTL'))
         table_exact_match = table_exact_match.query(f'project != "{self.project_name}" or trait_phewasdb != trait_QTL ')
         self.phewas_exact_match_path = f'{self.path}results/phewas/table_exact_match.csv'
-        table_exact_match.to_csv(self.phewas_exact_match_path )
+        if save: table_exact_match.to_csv(self.phewas_exact_match_path )
         #pd.concat([qtltable, db_vals] ,join = 'inner', axis = 1)
         
         nearby_snps = pd.concat([
-             self.plink(bfile = self.genotypes_subset, chr = row.Chr, r2 = 'dprime', ld_snp = row.name,
-               ld_window = ld_window, thread_num = 12, nonfounders = '')\
+             self.plink(bfile = self.genotypes_subset, chr = row.Chr, r2 = 'dprime', ld_snp = row.name, ld_window_r2 = 0.00001,
+                        ld_window = 100000, thread_num = int(self.threadnum), ld_window_kb =  12000, nonfounders = '')\
               .query(f'R2 > {r2_threshold}')\
+              .query(f'@row.bp-{ld_window}/2<BP_B<@row.bp+{ld_window}/2')\
               .drop(['CHR_A', 'BP_A', 'CHR_B'], axis = 1)\
               .rename({'SNP_A': 'SNP', 'SNP_B': 'NearbySNP', 'BP_B': 'NearbyBP'}, axis = 1)\
               .assign(**row.to_dict())\
@@ -2718,47 +2723,55 @@ class gwas_pipe:
         
         if table_window_match.shape[0] == 0:
             printwithlog('No QTL window matches')
-            pd.DataFrame().to_csv(self.phewas_window_r2, index = False)
+            if save: pd.DataFrame().to_csv(self.phewas_window_r2, index = False)
             return -1
             
-        out = table_window_match.groupby([ 'SNP_QTL','project', 'trait_phewasdb'])\
+        if annotate:
+            table_window_match = self.annotate(table_window_match.rename({'A1_phewasdb':'A1', 'A2_phewasdb': 'A2',
+                                            'Chr_phewasdb':'Chr', 'bp_phewasdb':'bp'}, axis = 1), \
+                                 'NearbySNP', save = False).rename({'gene': 'gene_phewasdb', 'annotation':'annotation_phewasdb'}, axis = 1)
+            table_exact_match = self.annotate(table_exact_match.rename({'A1_QTL':'A1', 'A2_QTL': 'A2','Chr_QTL':'Chr', 'bp_QTL':'bp'}, axis = 1))\
+                                    .rename({'A1': 'A1_QTL', 'A2':'A2_QTL','Chr':'Chr_QTL', 'bp':'bp_QTL'}, axis = 1)
+            table_exact_match= table_exact_match.assign(**{i:'' for i in set(['gene', 'annotation'])-set(table_window_match.columns)})\
+                                                .rename({'gene': 'gene_phewasdb', 'annotation':'annotation_phewasdb'}, axis = 1)
+            
+        out = table_window_match.groupby([ 'SNP_QTL','project', 'trait_phewasdb', 'gene_phewasdb', 'annotation_phewasdb'])\
                                 .apply(lambda df : df[df.uploadeddate == df.uploadeddate.max()]\
                                                    .nsmallest(n = nreturn, columns = 'p_phewasdb'))\
                                 .reset_index(drop = True)\
                                 .assign(phewas_r2_thresh = r2_threshold, phewas_p_threshold = pval_threshold )
-        if annotate:
-            out = self.annotate(out.rename({'A1_phewasdb':'A1', 'A2_phewasdb': 'A2',
-                                            'Chr_phewasdb':'Chr', 'bp_phewasdb':'bp'}, axis = 1), \
-                                 'NearbySNP', save = False)
-        out.to_csv(self.phewas_window_r2, index = False)
+        
+        if save: out.to_csv(self.phewas_window_r2, index = False)
         
         
         ##### make prettier tables
-        phewas_info =   pd.read_csv(self.phewas_exact_match_path).drop('QTL', axis = 1).reset_index()
+        #phewas_info =   pd.read_csv(self.phewas_exact_match_path).drop('QTL', axis = 1).reset_index()
+        phewas_info = table_exact_match.drop('QTL', axis = 1).reset_index()
         phewas_info = phewas_info.loc[:, ~phewas_info.columns.str.contains('Chr|A\d|bp_|b_|se_|Nearby|research|filename')]\
                                   .rename(lambda x: x.replace('_phewasdb', '_PheDb'), axis = 1)\
                                   .drop(['genotypes_file'], axis = 1)
         phewas_info['p_PheDb'] = -np.log10(phewas_info.p_PheDb)
         aa = phewas_info[ ['SNP', 'trait_QTL','project','trait_PheDb', 
                       'trait_description_PheDb' ,'Freq_PheDb', 
-                       'p_PheDb','round_version' ,'uploadeddate']].drop_duplicates()
-        aa.to_csv(f'{self.path}results/phewas/pretty_table_exact_match.tsv', index = False, sep = '\t')
+                       'p_PheDb','gene_PheDb', 'annotation_PheDb','round_version' ,'uploadeddate']].drop_duplicates()
+        if save: aa.to_csv(f'{self.path}results/phewas/pretty_table_exact_match.tsv', index = False, sep = '\t')
         aa['SNP_QTL'], aa['SNP_PheDb'] = aa.SNP, aa.SNP
         aa = aa.drop('SNP', axis = 1)
         
-        phewas_info =   pd.read_csv(self.phewas_window_r2).drop('QTL', axis = 1).reset_index()
+        #phewas_info =   pd.read_csv(self.phewas_window_r2).drop('QTL', axis = 1).reset_index()
+        phewas_info = out.drop('QTL', axis = 1).reset_index()
         phewas_info = phewas_info.loc[:, ~phewas_info.columns.str.contains('Chr|A\d|bp_|b_|se_|Nearby|research|filename')]\
                                   .rename(lambda x: x.replace('_phewasdb', '_PheDb'), axis = 1)\
                                   .drop(['genotypes_file'], axis = 1)
         phewas_info['p_PheDb'] = -np.log10(phewas_info.p_PheDb)
         bb = phewas_info[ ["R2", 'DP','SNP_QTL', 'trait_QTL','project','SNP_PheDb', 
                       'trait_PheDb', 'trait_description_PheDb' ,'Freq_PheDb', 
-                       'p_PheDb','round_version' ,'uploadeddate']].drop_duplicates()
-        bb.to_csv(f'{self.path}results/phewas/pretty_table_window_match.tsv', index = False, sep = '\t')
+                       'p_PheDb','gene_PheDb', 'annotation_PheDb','round_version' ,'uploadeddate']].drop_duplicates()
+        if save: bb.to_csv(f'{self.path}results/phewas/pretty_table_window_match.tsv', index = False, sep = '\t')
         
         oo = pd.concat([aa, bb]).fillna('Exact match SNP')
         #oo.drop_duplicates(subset = [])
-        oo.to_csv(f'{self.path}results/phewas/pretty_table_both_match.tsv', index = False, sep = '\t')
+        if save: oo.to_csv(f'{self.path}results/phewas/pretty_table_both_match.tsv', index = False, sep = '\t')
         
         return oo
         
@@ -3233,8 +3246,7 @@ class gwas_pipe:
         fdf = pd.concat(fdf, axis = 1)
         
         from sklearn.decomposition import SparsePCA, NMF, FactorAnalysis, FastICA, DictionaryLearning
-        
-        npc= 10
+        npc= min(len(traitlist)-1, 10)
         pca = {'nmf': NMF(n_components=npc), 'pca':  PCA(n_components=npc), 'ica': FastICA(n_components=npc),  'da': DictionaryLearning(n_components=npc),  
                'spca':  SparsePCA(n_components=npc), 'fa': FactorAnalysis(n_components=npc) }[method]
         if len(fdf.count().unique()): display(fdf.count().agg(['max', 'min']))
@@ -3339,7 +3351,9 @@ class gwas_pipe:
         and the results are parsed into a new DataFrame.  If save is True, the final annotated table is saved to a file. 
         The function returns the final annotated table.
         '''
-        if qtltable.shape == (0,0): qtltable = pd.read_csv(self.allqtlspath).set_index('SNP')
+        if len(qtltable) == 0: 
+            printwithlog('dataframe is empty, returning same dataframe')
+            return qtltable #qtltable = pd.read_csv(self.allqtlspath).set_index('SNP')
         d = {'rn6': 'Rnor_6.0.99', 'rn7':'mRatBN7.2.105', 'cfw': 'GRCm38.99','m38': 'GRCm38.99'}[self.genome]
         #bash('java -jar snpEff/snpEff.jar download -v Rnor_6.0.99')
         #bash('java -jar snpEff/snpEff.jar download -v mRatBN7.2.105')
@@ -3762,26 +3776,25 @@ Defining columns:
             #
             
         template.main.append(pn.Card(*out, title = 'Regional Association Plots', collapsed = True))
-        geneenrichmenttext = f'''# **GeneEnrichment Plot**
+        #geneenrichmenttext = f'''# **GeneEnrichment Plot**
         
-This network plot shows the connectivity between traits through: 
-* 1) the significant snps of each trait 
-* 2) the closest gene associated with each SNP on (1)
-* 3) for each trait we perform gene enrichment of the genes for associated with all the top SNPS linked to the trait
-* 4) for each trait we perform gene enrichment of all the genes within all the qtls ideintified for this trait '''
-        goeafig = pn.pane.HoloViews(self.GeneEnrichment_figure(),width=1000,height=1000, min_height=1000, min_width=1000)
-        goeacard =  pn.Card(geneenrichmenttext, goeafig, title = 'Gene Enrichment', collapsed=True)
-
-
+        # This network plot shows the connectivity between traits through: 
+        # * 1) the significant snps of each trait 
+        # * 2) the closest gene associated with each SNP on (1)
+        # * 3) for each trait we perform gene enrichment of the genes for associated with all the top SNPS linked to the trait
+        # * 4) for each trait we perform gene enrichment of all the genes within all the qtls ideintified for this trait '''
+        # goeafig = pn.pane.HoloViews(self.GeneEnrichment_figure(),width=1000,height=1000, min_height=1000, min_width=1000)
+        # goeacard =  pn.Card(geneenrichmenttext, goeafig, title = 'Gene Enrichment', collapsed=True)
         graphviewtext = f'''# **Graph View Plot**
         
 This network plot shows the connectivity between traits, topSNPS, eQTLS, sQTLS, annotated variants '''
         pjgraph = pn.pane.HoloViews(self.project_graph_view(),width=1000,height=1000, min_height=1000, min_width=1000)
         projviewcard = pn.Card(graphviewtext, pjgraph, title = 'Project Graph View', collapsed=True)
-        add2card = [panel_genetic_pca,goeacard,projviewcard, ]
+        add2card = [panel_genetic_pca,projviewcard] #goeacard
         if add_gwas_latent_space != 'none':
             if add_gwas_latent_space in [True, 1, '1', 'True']: add_gwas_latent_space = 'nmf'
             add2card += [self.GWAS_latent_space(method = add_gwas_latent_space)[0]]
+            add2card += [self.steiner_tree()]
         template.main.append( pn.Card(*add2card, title = 'Experimental', collapsed=True))
         faqtable = pd.read_parquet(self.phewas_db)[['project' ,'trait']].value_counts().to_frame().rename({0: 'number of SNPs'}, axis =1).reset_index()
         faqtext = f'''Do the traits look approximately normally distributed? 
@@ -3987,6 +4000,78 @@ Are there sex differences?
         #hvg = hvg * labels.opts(text_font_size='2pt', text_color='white')
         return hvg
 
+    def steiner_tree(self):
+        import scipy.sparse as sps
+        from itertools import chain
+        from nltk import ngrams
+        mg = self.project_graph_view(obj2return='networkx')
+        qtls =  pd.read_pickle(f'{self.path}results/geneEnrichment/gene_enrichmentqtls.pkl') 
+        merged_qtls =  pd.read_pickle(f'{self.path}results/geneEnrichment/gene_enrichment_mergedqtls.pkl') 
+        allgenesproject = list(chain.from_iterable([x.split('-') for x in  mg.nodes  if mg.nodes[x]['color'] == 'seagreen']))
+        allgeneswithnearby = list(set(allgenesproject + list(chain.from_iterable(qtls.gene_id_nearby))))
+        if not os.path.isfile(f'{self.path}kg.csv'):
+            bash(f'wget -O {self.path}kg.csv https://dataverse.harvard.edu/api/access/datafile/6180620', return_stdout=False)
+        kg = pd.read_csv(f'{self.path}kg.csv',  low_memory=False)
+        kg_ppi = kg.query('y_type == "gene/protein" and x_type == "gene/protein"')
+        x_w = kg_ppi.x_name.value_counts().to_frame().set_axis(['x_w'], axis =1).reset_index()
+        y_w = kg_ppi.y_name.value_counts().to_frame().set_axis(['y_w'],axis = 1).reset_index()
+        kg_ppi = kg_ppi.merge(x_w, on='x_name', how = 'left').merge(y_w, on='y_name', how = 'left')
+        kg_ppi['weight'] = kg_ppi.x_w *kg_ppi.y_w
+        kg_ppi[['x_id', 'y_id']] = kg_ppi[['x_id', 'y_id']].astype(int)
+        kg_ppi_piv = kg_ppi.pivot(index = 'x_id', columns = 'y_id', values = 'weight')
+        kg_ppi_piv_order = kg_ppi.drop_duplicates('x_id').set_index('x_id').loc[kg_ppi_piv.index, 'x_name'].reset_index().reset_index(names = 'sps_index')
+        sparse_ppi = sps.csr_matrix(kg_ppi_piv.fillna(0).values)
+        
+        gene_hits_list = kg_ppi_piv_order[kg_ppi_piv_order.x_name.isin(list(map(str.upper, allgenesproject)))]
+        display('Could not find these genes in ppi: ' + '|'.join( set(map(str.upper, allgenesproject)) - set(kg_ppi_piv_order.x_name.values)))
+        gene_hits_list_w_nearby = kg_ppi_piv_order[kg_ppi_piv_order.x_name.isin(list(map(str.upper, allgeneswithnearby)))]
+        
+        indices2search = gene_hits_list.sps_index.values if len(gene_hits_list_w_nearby)> 100 else gene_hits_list_w_nearby.sps_index.values
+        display(f'searching for {len(indices2search)} genes in ppi, calculating distance matrix')
+        distmat, preds = sps.csgraph.shortest_path(csgraph=sparse_ppi, directed=False, indices=indices2search, return_predecessors=True)
+        aa = sps.coo_matrix(preds)
+        invmap = {i:j for i,j in enumerate(indices2search)}
+        aa.row = np.array(list(map(lambda x: invmap[x], aa.row)))
+        new_preds = sps.csr_matrix((aa.data, (aa.row, aa.col)), shape = (preds.shape[1], preds.shape[1]))
+        #cstree = sps.csgraph.reconstruct_path(csgraph=sparse_ppi, predecessors=new_preds, directed=False)
+        def reconstruct_path(predecessors, i, j):
+            cnt = 0
+            path = [j]
+            while path[-1] != i:
+                path.append(predecessors[i, path[-1]])
+                if path[-1] in [0, -9999]: return []
+            return path[::-1]
+        
+        sps_index2gene = {row.sps_index: row.x_name for idx, row in kg_ppi_piv_order.iterrows()}
+        vec_transf = np.vectorize(lambda x :sps_index2gene[x])
+        edgelist = np.array(list(chain.from_iterable([(map(vec_transf, ngrams(reconstruct_path(new_preds, i,j),2))) for i, j in itertools.combinations(indices2search, 2)])))
+        
+        sps_index2gene = {row.sps_index: row.x_name for idx, row in kg_ppi_piv_order.iterrows()}
+        vec_transf = np.vectorize(lambda x :sps_index2gene[x])
+        
+        edgelist = pd.DataFrame(list(chain.from_iterable([(map(vec_transf, ngrams(reconstruct_path(new_preds, i,j),2))) for i, j in itertools.combinations(indices2search, 2)])), columns = ['in', 'out'])
+        edgelistid = pd.DataFrame(list(chain.from_iterable([( ngrams(reconstruct_path(new_preds, i,j),2)) for i, j in itertools.combinations(indices2search, 2)])), columns = ['in', 'out'])
+        edgelist = pd.concat([edgelist, edgelist.set_axis(['out', 'in'], axis = 1)])
+        edgelistid = pd.concat([edgelistid, edgelistid.set_axis(['out', 'in'], axis = 1)])
+        edgesmat = sps.csr_matrix((np.ones(shape=len(edgelistid)),(edgelistid['in'], edgelistid['out'])), shape = sparse_ppi.shape)
+        edgesmat.data = np.ones(shape = edgesmat.data.shape)
+        ml = sparse_ppi.multiply(edgesmat)
+        ml.eliminate_zeros()
+        steinertree = sps.csgraph.minimum_spanning_tree(ml).tocoo()
+        pdst = pd.DataFrame([1/steinertree.data,  kg_ppi_piv_order.set_index('sps_index').loc[steinertree.row, 'x_name'].values, 
+                      kg_ppi_piv_order.set_index('sps_index').loc[steinertree.col, 'x_name'].values]).set_axis(['weight','source', 'target']).T
+        st = nx.from_pandas_edgelist(pdst)
+        for node in st.nodes: 
+            st.nodes[node]['size'] = 20 if node in gene_hits_list.x_name.values else 10
+            st.nodes[node]['color'] = 'firebrick' if node in gene_hits_list.x_name.values else 'steelblue'
+        kwargs = dict(width=800, height=800, xaxis=None, yaxis=None)
+        hv.opts.defaults(hv.opts.Nodes(**kwargs), hv.opts.Graph(**kwargs))
+        hvg = hv.Graph.from_networkx(st, nx.layout.spectral_layout) #spring_layout, k=1
+        hvg.opts(node_size='size', edge_line_width=1,tools=['hover'], shared_axes=False,
+                      node_line_color='black', node_color='color', directed=False,  arrowhead_length=0.01)
+        labels = hv.Labels(hvg.nodes, ['x', 'y'], 'index')
+        hv.save(hvg, f'{self.path}images/steiner_tree.html')
+        return pn.Card(hvg, title='Steiner tree', collapsed=True)
 
     def project_graph_view(self, append_nearby_genes = False, add_gene_enriched = False, add_phewas= True,
                            add_eqtl = True,add_sqtl = True,add_variants = True, obj2return = 'image'):
@@ -4137,7 +4222,7 @@ Are there sex differences?
         for node in MG.nodes: MG.nodes[node]['what'] =  ' | '.join(map(lambda x : f'{x[0]}:{x[1]}', MG.nodes[node]['what'].items()))
         kwargs = dict(width=800, height=800, xaxis=None, yaxis=None)
         hv.opts.defaults(hv.opts.Nodes(**kwargs), hv.opts.Graph(**kwargs))
-        hvg = hv.Graph.from_networkx(MG, nx.layout.spring_layout, k=1) #spring_layout, k=1
+        hvg = hv.Graph.from_networkx(MG, nx.layout.spring_layout, k=1) #
         hvg.opts(node_size='size', edge_line_width=1,tools=['hover'], shared_axes=False,
                       node_line_color='black', node_color='color', directed=True,  arrowhead_length=0.01)
         labels = hv.Labels(hvg.nodes, ['x', 'y'], 'index')

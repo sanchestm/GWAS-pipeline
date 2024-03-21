@@ -112,8 +112,7 @@ if dictionary['gcorr']:
     gwas.genetic_correlation_matrix_old()
     gwas.make_heritability_figure(display = False)
 if dictionary['manhattanplot'] or dictionary['porcupineplot']: gwas.porcupineplotv2()
-if dictionary['phewas']:gwas.phewas(annotate=True, 
-                                    pval_threshold = 1e-4, nreturn = 1, r2_threshold = .4) 
+if dictionary['phewas']:gwas.phewas(annotate=True, pval_threshold = 1e-4, nreturn = 1, r2_threshold = .4) 
 if dictionary['eqtl']:gwas.eQTL(annotate= True)
 if dictionary['sqtl']:gwas.sQTL()
 if dictionary['goea']:gwas.GeneEnrichment()
