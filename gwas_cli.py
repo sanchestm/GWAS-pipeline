@@ -23,7 +23,7 @@ path = dictionary['path'].rstrip('/') + '/' if (dictionary['path'] ) else ''
 pj = dictionary['project'].rstrip('/')  if (dictionary['project'] ) else 'test'
 
 if not dictionary['genotypes']:
-    dictionary['genotypes'] = '/tscc/projects/ps-palmer/gwas/databases/rounds/round10_1'
+    dictionary['genotypes'] = '/tscc/projects/ps-palmer/gwas/databases/rounds/r10.2.1'
     
 if not dictionary['threshold']: dictionary['threshold'] = 5.58
 if dictionary['threshold'] != 'auto':  dictionary['threshold']= float(dictionary['threshold'])
@@ -89,45 +89,45 @@ if dictionary['regressout']:
         else: gwas.regressout_timeseries(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'), groupby_columns=dictionary['groupby'].split(','))
 
 if dictionary['latent_space']: gwas.add_latent_spaces()
-if dictionary['subset']: 
+if dictionary['subset']:  ###essential
     kws = kw(dictionary, 'subset_')
     if dictionary['subset_make_figures'] : gwas.SubsetAndFilter(makefigures = True, **kws)
     else: gwas.SubsetAndFilter(makefigures = False, **kws)
-if dictionary['grm']: gwas.generateGRM()
-if dictionary['h2']:  gwas.snpHeritability()
+if dictionary['grm']: gwas.generateGRM() ###essential
+if dictionary['h2']:  gwas.snpHeritability() ###essential
 if dictionary['BLUP']: gwas.BLUP()
 if dictionary['BLUP_predict']: gwas.BLUP_predict(dictionary['BLUP_predict']);
-if dictionary['gwas']: gwas.fastGWAS(skip_already_present=dictionary['skip_already_present_gwas'])
+if dictionary['gwas']: gwas.fastGWAS(skip_already_present=dictionary['skip_already_present_gwas']) ###essential
 if dictionary['db']: gwas.addGWASresultsToDb(researcher=dictionary['researcher'],
                                              round_version=dictionary['round'], 
                                              gwas_version=dictionary['gwas_version'])
-if dictionary['qtl']: 
+if dictionary['qtl']: ###essential
     qtl_add_founder = True if (dictionary['founder_genotypes'] not in [ 'none', 'None', 0]) else False
     try: qtls = gwas.callQTLs( NonStrictSearchDir=False,   add_founder_genotypes = qtl_add_founder )
     except: qtls = gwas.callQTLs( NonStrictSearchDir=True)
-    gwas.annotate(qtls)
+    #gwas.annotate(qtls)
     gwas.effectsize() 
 if dictionary['effect']: gwas.effectsize() 
-if dictionary['gcorr']: 
+if dictionary['gcorr']: ###essential
     gwas.genetic_correlation_matrix_old()
     gwas.make_heritability_figure(display = False)
-if dictionary['manhattanplot'] or dictionary['porcupineplot']: gwas.porcupineplotv2()
-if dictionary['phewas']:gwas.phewas(annotate=True, pval_threshold = 1e-4, nreturn = 1, r2_threshold = .4) 
-if dictionary['eqtl']:gwas.eQTL(annotate= True)
-if dictionary['sqtl']:gwas.sQTL()
-if dictionary['goea']:gwas.GeneEnrichment()
-if dictionary['locuszoom']: gwas.locuszoom(skip_ld_calculation = dictionary['skip_ld_calculation_locuszoom']) 
-if dictionary['h2fig']: gwas.make_heritability_figure(display = False)
+if dictionary['manhattanplot'] or dictionary['porcupineplot']: gwas.porcupineplotv2() ###essential
+if dictionary['phewas']:gwas.phewas(annotate=True, pval_threshold = 1e-4, nreturn = 1, r2_threshold = .4)  ###essential
+if dictionary['eqtl']:gwas.eQTL(annotate= True) ###essential
+if dictionary['sqtl']:gwas.sQTL() ###essential
+if dictionary['goea']:gwas.GeneEnrichment() ###essential
+if dictionary['locuszoom']: gwas.locuszoom(skip_ld_calculation = dictionary['skip_ld_calculation_locuszoom'])  ###essential
+if dictionary['h2fig']: gwas.make_heritability_figure(display = False) 
 if dictionary['report']:
     kws = kw(dictionary, 'report_')
     gwas.report(round_version=dictionary['round'], gwas_version=dictionary['gwas_version'], **kws)
-    gwas.copy_results()
+    gwas.copy_results() ###essential
 if dictionary['store']:gwas.store(researcher=dictionary['researcher'],
                                   round_version=dictionary['round'], 
                                   gwas_version=dictionary['gwas_version'],  
-                                  remove_folders=False)
+                                  remove_folders=False) ###essential
 try: 
-    if dictionary['publish']:gwas.copy_results()
+    if dictionary['publish']:gwas.copy_results() ###essential
 except: 
     print('setting up the minio is necessary')
 gwas.print_watermark()

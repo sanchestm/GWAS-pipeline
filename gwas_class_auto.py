@@ -170,6 +170,16 @@ def generate_datadic(rawdata, trait_prefix = ['pr', 'sha', 'lga', 'shock'], main
             dd_new.loc[dd_new.measure.str.startswith(pref), 'covariates'] = dd_new.loc[dd_new.measure.str.startswith(pref), 'covariates'] + ',' + addcov
     dd_new.loc[dd_new.measure.isin(['rfid', 'labanimalid']), 'trait_covariate'] = 'metadata'
     dd_new = dd_new.loc[~dd_new.measure.str.startswith('Unnamed: ')]
+    def remove_outofboundages(s, trait):
+       try:
+           min, max = pd.Series(list(map(int , re.findall('\d{2}', trait)))).agg(['min', 'max'])
+           #print(min, max)
+           aa =  "|".join( [str(x).zfill(2) for x in range(min, max+1)])
+       except: aa = '-9999999'
+       #print(aa)
+       return ','.join([x for x in s.split(',') if re.findall(f'({aa}).*(age)', x) or ('age' not in x)])
+    dd_new.loc[dd_new.trait_covariate == 'trait', 'covariates'] = dd_new.loc[dd_new.trait_covariate == 'trait']\
+          .apply(lambda row: remove_outofboundages(row.covariates,row.measure), axis = 1)
     if save:
         dd_new.to_csv(f'data_dict_{project_name}.csv')
     return dd_new
@@ -292,6 +302,8 @@ def _make_umap_plot(subset_geno, founderfile, fname, c, verbose = False, nautoso
     plt.savefig(fname)
     if verbose: plt.show()
     plt.close()
+
+
 
 class vcf_manipulation:
     def corrfunc(x, y, ax=None, **kws):
@@ -1569,7 +1581,7 @@ class gwas_pipe:
         plt.savefig(f'{self.path}images/genetic_correlation_matrix_sorted.png', dpi = 400)
         return outmixed
     
-    def genetic_correlation_matrix_old(self,traitlist: list = [], print_call = False) -> pd.DataFrame():
+    def genetic_correlation_matrix_old(self,traitlist: list = [], print_call = False, save_fmt = ['png']) -> pd.DataFrame():
         '''
         Create a blup model to get SNP effects and breeding values.
         
@@ -1620,7 +1632,6 @@ class gwas_pipe:
             #out.loc[trait2, trait1] = out.loc[trait1, trait2] 
         outg = outg.fillna('1+-0').rename(lambda x: x.replace('regressedlr_', '')).rename(lambda x: x.replace('regressedlr_', ''), axis = 1)
         outp = outp.fillna('1+-0').rename(lambda x: x.replace('regressedlr_', '')).rename(lambda x: x.replace('regressedlr_', ''), axis = 1)
-
         hieg = linkage(distance.pdist(outg.applymap(lambda x: float(x.split('+-')[0])).T)) #method='average'
         lk = leaves_list(hieg)
         outg = outg.loc[[x.replace('regressedlr_', '') for x in traitlist], [x.replace('regressedlr_', '') for x in traitlist]].iloc[lk, lk]
@@ -1628,31 +1639,39 @@ class gwas_pipe:
         hie = linkage(distance.pdist(outg.applymap(lambda x: float(x.split('+-')[0])).T)) #, method='euclidean'
         genetic_table.to_csv(f'{self.path}results/heritability/genetic_correlation_melted_table.csv')
         outg.to_csv(f'{self.path}results/heritability/genetic_correlation_matrix_justgenetic.csv')
-        outmixed = outg.mask(np.triu(np.ones_like(outg, dtype=bool))).fillna('')  +  outp.mask(np.tril(np.ones_like(outg, dtype=bool), -1)).fillna('')
         if not os.path.isfile(self.heritability_path): self.snpHeritability()
-        H2 = pd.read_csv(self.heritability_path, sep = '\t', index_col= 0).applymap(lambda x: 0 if x =='Fail' else x).astype(float)
+        H2 = pd.read_csv(self.heritability_path, sep = '\t', index_col=0).applymap(lambda x: 0 if x =='Fail' else x).astype(float)
         H2['her_str'] = H2['V(G)/Vp'].round(3).astype(str) + ' +- ' + H2.heritability_SE.round(3).astype(str)
-        for i in outmixed.columns: outmixed.loc[i,i] =  H2.loc['regressedlr_'+i, 'her_str']
-        outmixed.to_csv(f'{self.path}results/heritability/genetic_correlation_matrix.csv')
-        a = sns.clustermap(outmixed.applymap(lambda x: float(x.split('+-')[0])).copy().T,  cmap="RdBu_r", col_cluster= False, row_cluster=False,
-                annot=outmixed.applymap(lambda x: '' if '*' not in x else '*').copy().T, vmin =-1, vmax =1, center = 0 , fmt = '', square = True, linewidth = .3, figsize=(15, 15) )
-        dendrogram(hie, ax = a.ax_col_dendrogram)
-        a.ax_cbar.set_position([.2, .2, .03, 0.5])
-        a.ax_heatmap.plot([0,outmixed.shape[0]], [0, outmixed.shape[0]], color = 'black')
-        plt.savefig(f'{self.path}images/genetic_correlation_matrix.png', dpi = 400)
-        plt.savefig(f'{self.path}images/genetic_correlation_matrix.eps')
-        plt.close()
 
-        outmixed2 = outmixed.T.sort_index().T.sort_index()
-        a = sns.clustermap(outmixed2.applymap(lambda x: float(x.split('+-')[0])).copy().T,  cmap="RdBu_r", col_cluster= False, row_cluster=False,
-                        annot=outmixed2.applymap(lambda x: '' if '*' not in x else '*').copy().T, vmin =-1, vmax =1, center = 0 , fmt = '', square = True, linewidth = .3, figsize=(15, 15) )
-        a.ax_heatmap.plot([0,outmixed2.shape[0]], [0, outmixed2.shape[0]], color = 'black')
-        a.ax_cbar.set_position([.2, .2, .03, 0.5])
-        plt.savefig(f'{self.path}images/genetic_correlation_matrix_sorted.png', dpi = 400)
-        plt.savefig(f'{self.path}images/genetic_correlation_matrix_sorted.eps')
+        for version in ['clustering', 'sorted', 'original']:
+            if version == 'clustering':
+                outmixed = outg.mask(np.triu(np.ones_like(outg, dtype=bool))).fillna('')  +  outp.mask(np.tril(np.ones_like(outg, dtype=bool), -1)).fillna('')
+                hie = linkage(distance.pdist(outg.applymap(lambda x: float(x.split('+-')[0])).T))
+            elif version == 'sorted':
+                sct = sorted(outmixed.columns)
+                outmixed = outg.loc[sct,sct].mask(np.triu(np.ones_like(outg, dtype=bool))).fillna('')  +  outp.loc[sct,sct].mask(np.tril(np.ones_like(outg, dtype=bool), -1)).fillna('')
+                hie = linkage(distance.pdist(outg.loc[sct,sct].applymap(lambda x: float(x.split('+-')[0])).T))
+            elif version == 'original':
+                sct = [x.replace('regressedlr_', '') for x in traitlist]
+                outmixed = outg.loc[sct,sct].mask(np.triu(np.ones_like(outg, dtype=bool))).fillna('')  +  outp.loc[sct,sct].mask(np.tril(np.ones_like(outg, dtype=bool), -1)).fillna('')
+                hie = linkage(distance.pdist(outg.loc[sct,sct].applymap(lambda x: float(x.split('+-')[0])).T))
+            for i in outmixed.columns: outmixed.loc[i,i] =  H2.loc['regressedlr_'+i, 'her_str']
+            if version == 'clustering': 
+                outmixed.to_csv(f'{self.path}results/heritability/genetic_correlation_matrix.csv')
+            a = sns.clustermap(outmixed.applymap(lambda x: float(x.split('+-')[0])).copy().T,  cmap="RdBu_r", col_cluster= False, row_cluster=False,
+                    annot=outmixed.applymap(lambda x: '' if '*' not in x else '*').copy().T, vmin =-1, vmax =1, center = 0 , fmt = '', square = True, linewidth = .3, figsize=(15, 15) )
+            if version == 'clustering': dendrogram(hie, ax = a.ax_col_dendrogram)
+            a.ax_cbar.set_position([0, .2, .03, 0.5])
+            a.ax_heatmap.plot([0,outmixed.shape[0]], [0, outmixed.shape[0]], color = 'black')
+            if 'png' in save_fmt: plt.savefig(f'{self.path}images/genetic_correlation_matrix{"_"+version if version != "clustering" else ""}.png', dpi = 400)
+            for sfm in (set(save_fmt) - {'png'}):
+                plt.savefig(f'{self.path}images/genetic_correlation_matrix{"_"+version if version != "clustering" else ""}.{sfm}')
+            plt.close()
+            
         return outmixed
+        
     
-    def make_heritability_figure(self, traitlist: list = [], save_fmt = ['png', 'html'], display = True):
+    def make_heritability_figure(self, traitlist: list = [], save_fmt = ['png', 'html', 'pdf', 'eps'], display = True, add_classes = True):
         '''
         Create a blup model to get SNP effects and breeding values.
         
@@ -1682,14 +1701,17 @@ class gwas_pipe:
         her = her.rename({'V(G)/Vp': 'heritability'}, axis = 1).sort_values('heritability').dropna(subset = 'heritability')
         traitlist = pd.Series(her.index if not len(traitlist) else traitlist).str.replace('regressedlr_', '')
         her = her.loc[her.index.isin(traitlist)]
-        if os.path.isfile(f'{self.path}results/heritability/genetic_correlation_matrix_justgenetic.csv'): pass
-        else: self.genetic_correlation_matrix()
-        gcor = pd.read_csv(f'{self.path}results/heritability/genetic_correlation_matrix_justgenetic.csv', 
-                           index_col=0).applymap(lambda x: float(x.split('+-')[0]))
-        classes = pd.DataFrame(HDBSCAN(metric = 'precomputed', min_cluster_size = 3).fit_predict(gcor.loc[her.index, her.index]), 
-                               index = her.index, columns = ['cluster']).astype(str)
-        her = pd.concat([classes, her], axis = 1).sort_index().sort_values('heritability')
-        fig = px.scatter(her.reset_index(names = 'trait'), x="trait", y="heritability", color="cluster", error_y="heritability_SE")
+        if add_classes:
+            if os.path.isfile(f'{self.path}results/heritability/genetic_correlation_matrix_justgenetic.csv'): pass
+            else: self.genetic_correlation_matrix()
+            gcor = pd.read_csv(f'{self.path}results/heritability/genetic_correlation_matrix_justgenetic.csv', 
+                               index_col=0).applymap(lambda x: float(x.split('+-')[0]))
+            classes = pd.DataFrame(HDBSCAN(metric = 'precomputed', min_cluster_size = 3).fit_predict(gcor.loc[her.index, her.index]), 
+                                   index = her.index, columns = ['cluster']).astype(str)
+            her = pd.concat([classes, her], axis = 1).sort_index().sort_values('heritability')
+            fig = px.scatter(her.reset_index(names = 'trait'), x="trait", y="heritability", color="cluster", error_y="heritability_SE")
+        elif not add_classes:
+            fig = px.scatter(her.reset_index(names = 'trait').assign(color = 'steelblue'), x="trait", y="heritability", color="color", error_y="heritability_SE")
         fig.update_xaxes(categoryorder='array', categoryarray= her.index)
         fig.add_hline(y=0., line = {'color':'black', 'width': 3}, opacity= .7)
         for i in [0.1,0.2, 0.3]:
@@ -2086,7 +2108,7 @@ class gwas_pipe:
         return oo   
         
         
-    def callQTLs(self, window: int = 0.5e6, subterm: int = 4,  add_founder_genotypes: bool = True, save = True, displayqtl = True,
+    def callQTLs(self, window: int = 0.5e6, subterm: int = 4,  add_founder_genotypes: bool = True, save = True, displayqtl = True, annotate = True,
                  ldwin = int(12e6), ldkb = 12000, ldr2 = .8, qtl_dist = 12*1e6, NonStrictSearchDir = True, conditional_analysis = True, **kwards): # annotate_genome: str = 'rn7',
         
         '''
@@ -2206,6 +2228,9 @@ class gwas_pipe:
             out = out.merge(dffounders, on = 'SNP', how = 'left')
         out['significance_level'] = out.p.apply(lambda x: '5%' if x >= self.threshold05 else '10%')
         if save: out.to_csv(self.allqtlspath, index = False)
+        if annotate: 
+            out = self.annotate(out, save = True)
+            if save: out.reset_index().to_csv(f'{self.path}results/qtls/finalqtl.csv', index= False)
         return out.set_index('SNP') 
     
     def conditional_analysis(self, trait: str, snpdf: pd.DataFrame() = pd.DataFrame()):
@@ -2261,7 +2286,7 @@ class gwas_pipe:
         subset_snp_path = f'{self.path}temp/cojo/accepted_snps_{c}_{trait}'
         genotypesCA = f'{self.path}temp/cojo/genotypesCA_{c}_{trait}'
         # snps_of_int = pd.concat([bim.query(f'chrom == "{c}"').query(f'{pos}-4e6<pos<{pos}+4e6') for pos in snpdf2.bp]).reset_index().drop_duplicates(subset = ['snp'])
-        # snps_of_int[['snp']].to_csv(subset_snp_path,index = False, header = None)
+        # snps_of_int[['snp']].to_csv(subset_snp_path,index = False, header = None)l
 
         mlmares = pd.read_csv(f'{self.path}results/gwas/regressedlr_{trait}_chrgwas{self.replacenumstoXYMT(c)}.mlma', sep = '\t')
         snps_of_int = pd.concat([mlmares.query('p<1e-4').query(f'{pos}-8e6<bp<{pos}+8e6') for pos in snpdf2.bp]).drop_duplicates(subset = ['SNP'])
@@ -2287,12 +2312,15 @@ class gwas_pipe:
             chromp2 = self.replacenumstoXYMT(c)
             subgrmflag = f'--mlma-subtract-grm {self.path}grm/{chromp2}chrGRM' if chromp2 not in ['x','y', 'mt'] else ''
             self.bashLog(f'{self.gcta} {threadedflag} --pheno {self.path}data/pheno/regressedlr_{trait}.txt --bfile {genotypesCA} \
-                                       --grm {self.path}grm/AllchrGRM --autosome-num {self.n_autosome} \
+                                       --grm {self.path}grm/AllchrGRM --autosome-num {self.n_autosome} --reml-maxit 1000 \
                                        --chr {c} {subgrmflag} --mlma --covar {covarname}\
                                        --out {self.path}temp/cojo/cojo_temp_gwas{chromp2}{trait}', 
                         f'GWAS_cojo_{c}_{trait}', print_call = print_call) #self.genotypes_subset
 
             ##### append top snp from run
+            if not os.path.isfile(f'{self.path}temp/cojo/cojo_temp_gwas{chromp2}{trait}.mlma'):
+                printwithlog(F'Conditional analysis error, early stopping the conditional analysis for {self.path}temp/cojo/cojo_temp_gwas{chromp2}{trait}.mlma returning at this stop')
+                return covarlist
             mlmares = pd.read_csv(f'{self.path}temp/cojo/cojo_temp_gwas{chromp2}{trait}.mlma', sep = '\t')
             os.system(f'rm {self.path}temp/cojo/cojo_temp_gwas{chromp2}{trait}.mlma')
             add2ingsnp =  mlmares[~mlmares.SNP.isin(covar_snps)].nsmallest(1, 'p')
@@ -2308,7 +2336,7 @@ class gwas_pipe:
                 intervalsize = r2lis['BP_B'].astype(int).agg(lambda x: (x.max()-x.min())/1e6)
                 add2ingsnp = add2ingsnp.assign(interval_size =  '{:.2f} Mb'.format(intervalsize), 
                                                emergent_qtl = True, trait = trait, QTL = True,
-                                               trait_description = snpdf['trait_description'].mode()[0])
+                                               trait_description = snpdf['trait_description'].fillna('UNK').mode()[0])
                 covarlist = pd.concat([covarlist,add2ingsnp ])
         return covarlist
 
@@ -2392,8 +2420,8 @@ class gwas_pipe:
         # gtf =pd.concat([gtf.drop('ID', axis = 1), pd.json_normalize(gtf['ID'].to_list())], axis = 1).query('biotype == "transcript"')
         # gtf = gtf[~gtf.Chr.str.lower().str.contains('un|na')]
         # gtf['Chr'] = gtf['Chr'].apply(lambda x: self.replaceXYMTtonums(x.split('_')[0]))
-        gtf = self.get_ncbi_gtf().query('biotype == "transcript"')#.rename({'gene': 'gene_id'}, axis = 1)
-
+        #gtf = self.get_ncbi_gtf().query('biotype != "transcript"')#.rename({'gene': 'gene_id'}, axis = 1) ### I think the 'error' is here!!! errorerror
+        gtf = self.get_ncbi_gtf().query("biotype == 'transcript' and gene != ''")
         if not skip_ld_calculation:
             for name, row in tqdm(list(out.iterrows())):
                 ldfilename = f'{self.path}results/lz/temp_qtl_n_@{row.trait}@{row.SNP}'
@@ -2439,8 +2467,8 @@ class gwas_pipe:
                          .dropna(how = 'any', subset = ['Freq','b','se','p','R2','DP'])
             except: raise Exception(f"couldn't open this file {self.path}results/lz/lzplottable@{qtl_row.trait}@{qtl_row.SNP}.tsv") 
             test['-log10(P)'] = -np.log10(test.p)
-            range_interest = test.query('R2> .6')['bp'].agg(['min', 'max'])
-            ff_lis += [gtf.query(f'(end> {range_interest["min"] - padding}) and (start< {range_interest["max"] + padding}) and (Chr == {int(topsnpchr)})').sort_values('gene_id').assign(SNP_origin = qtl_row.SNP)]
+            range_interest = test.query(f'R2> {qtl_r2_thresh}')['bp'].agg(['min', 'max'])
+            ff_lis += [gtf.query(f'(end> {range_interest["min"] - padding}) and (start< {range_interest["max"] + padding}) and (Chr == {int(topsnpchr)})').sort_values('gene').assign(SNP_origin = qtl_row.SNP).drop_duplicates(subset='gene')]#
             if make_classic:
                 #test = test.query(f'{range_interest["min"] - padding}<bp<{range_interest["max"] + padding}')
                 test.SNP = 'chr'+test.SNP
@@ -2485,23 +2513,23 @@ class gwas_pipe:
             impathout = re.sub('6Mb_\d+_', '6Mb__', impath).replace('.pdf', '.png')
             convert_from_path(impath)[0].save(impathout, 'png')
         ff_lis = pd.concat(ff_lis)
-        ff_lis['webpage'] = 'https://www.genecards.org/cgi-bin/carddisp.pl?gene=' + ff_lis['gene_id']
-        ff_lis['markdown'] = ff_lis.apply(lambda x: f'[{x.gene_id}]({x.webpage})', axis = 1)
+        ff_lis['webpage'] = 'https://www.genecards.org/cgi-bin/carddisp.pl?gene=' + ff_lis['gene']
+        ff_lis['markdown'] = ff_lis.apply(lambda x: f'[{x.gene}]({x.webpage})', axis = 1)
         ff_lis.to_csv(f'{self.path}results/qtls/genes_in_range.csv', index = False)
     
     def get_ncbi_gtf(self, extractall = False):
         printwithlog('reading gene list from NCBI RefSeq from NCBI GTF...')
-        linkdict = {'rn7':f'https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/015/227/675/GCF_015227675.2_mRatBN7.2/GCF_015227675.2_mRatBN7.2_genomic.gtf.gz' , 
+        linkdict = {'rn7':'https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/015/227/675/GCF_015227675.2_mRatBN7.2/GCF_015227675.2_mRatBN7.2_genomic.gtf.gz' , 
                         'rn6':'https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/895/GCF_000001895.5_Rnor_6.0/GCF_000001895.5_Rnor_6.0_genomic.gtf.gz',
                        'm38': 'https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/635/GCF_000001635.26_GRCm38.p6/GCF_000001635.26_GRCm38.p6_genomic.gtf.gz',
                       'rn8': 'https://ftp.ncbi.nlm.nih.gov/genomes/all/annotation_releases/10116/GCF_036323735.1-RS_2024_02/GCF_036323735.1_GRCr8_genomic.gtf.gz'}
         gtf = pd.read_csv(linkdict[self.genome], sep = '\t', header = None, comment='#')\
                    .set_axis(['Chr', 'source', 'biotype', 'start', 'end', 'score', 'strand', 'phase', 'ID'], axis = 1)
-        gtf = gtf[gtf.biotype != 'transcript']
+        gtf = gtf[gtf.biotype != 'transcript'].reset_index(drop = True)
         #gtf['gene'] = gtf.ID.str.extract('gene_id "([^"]+)"')
         gtf['biotype'] = gtf['biotype'].str.replace('gene','transcript')
-        gtf['ID'] = gtf['ID'].apply(lambda x: {y.split(' "')[0].strip(' '): y.split(' "')[-1][:-1] for y in x.strip(';').split(';')})
-        gtf =pd.concat([gtf.drop('ID', axis = 1), pd.json_normalize(gtf['ID'].to_list())], axis = 1)
+        gtfjson = pd.json_normalize(gtf['ID'].map(lambda x: {y.split(' "')[0].strip(' '): y.split(' "')[-1][:-1] for y in x.strip(';').split(';')}).to_list())
+        gtf =pd.concat([gtf.drop('ID', axis = 1),gtfjson], axis = 1)
         gtf[['gene', 'gene_id']] = gtf[['gene', 'gene_id']].fillna('').astype(str)
         gtf = gtf[~gtf.gene.str.contains('-ps')]
         if self.genome == 'm38': gtf['Chr'] = gtf['Chr'].map(lambda x: translatechrmice[x]) 
@@ -2512,7 +2540,7 @@ class gwas_pipe:
         gtf = gtf.dropna(subset = 'gene')
         gtf = gtf[~gtf.gene.str.startswith('LOC')&~gtf.gene.str.startswith('NEW')]
         gtf['Chr'] = gtf['Chr'].map(lambda x: self.replaceXYMTtonums(x.split('_')[0]))
-        gtf = gtf.loc[:, ~gtf.columns.str.contains(' ')]
+        gtf = gtf.loc[gtf.gene.fillna('') != '', ~gtf.columns.str.contains(' ')]
         return gtf
 
     def get_ucsc_gtf(self, extractall = False):
@@ -2730,16 +2758,16 @@ class gwas_pipe:
             table_window_match = self.annotate(table_window_match.rename({'A1_phewasdb':'A1', 'A2_phewasdb': 'A2',
                                             'Chr_phewasdb':'Chr', 'bp_phewasdb':'bp'}, axis = 1), \
                                  'NearbySNP', save = False).rename({'gene': 'gene_phewasdb', 'annotation':'annotation_phewasdb'}, axis = 1)
-            table_exact_match = self.annotate(table_exact_match.rename({'A1_QTL':'A1', 'A2_QTL': 'A2','Chr_QTL':'Chr', 'bp_QTL':'bp'}, axis = 1))\
+            table_exact_match = self.annotate(table_exact_match.rename({'A1_QTL':'A1', 'A2_QTL': 'A2','Chr_QTL':'Chr', 'bp_QTL':'bp'}, axis = 1), save = False)\
                                     .rename({'A1': 'A1_QTL', 'A2':'A2_QTL','Chr':'Chr_QTL', 'bp':'bp_QTL'}, axis = 1)
             table_exact_match= table_exact_match.assign(**{i:'' for i in set(['gene', 'annotation'])-set(table_window_match.columns)})\
                                                 .rename({'gene': 'gene_phewasdb', 'annotation':'annotation_phewasdb'}, axis = 1)
             
-        out = table_window_match.groupby([ 'SNP_QTL','project', 'trait_phewasdb', 'gene_phewasdb', 'annotation_phewasdb'])\
+        out = table_window_match.groupby([ 'SNP_QTL','project', 'trait_phewasdb'])\
                                 .apply(lambda df : df[df.uploadeddate == df.uploadeddate.max()]\
                                                    .nsmallest(n = nreturn, columns = 'p_phewasdb'))\
                                 .reset_index(drop = True)\
-                                .assign(phewas_r2_thresh = r2_threshold, phewas_p_threshold = pval_threshold )
+                                .assign(phewas_r2_thresh = r2_threshold, phewas_p_threshold = pval_threshold ) #, 'annotation_phewasdb'  'gene_phewasdb'
         
         if save: out.to_csv(self.phewas_window_r2, index = False)
         
@@ -3285,7 +3313,7 @@ class gwas_pipe:
         abvt = dfm[dfm['-log10p'].abs() > self.threshold]
         abvt['p'] = 10**(-dfm['-log10p'].abs())
         abvt = abvt.rename({'-log10p':'realp'}, axis = 1).reset_index(drop= True)
-        oo = self.callQTLs( NonStrictSearchDir=abvt,  add_founder_genotypes = True,conditional_analysis=False, displayqtl= False)
+        oo = self.callQTLs( NonStrictSearchDir=abvt, add_founder_genotypes = True,conditional_analysis=False, displayqtl= False, save = False, annotate= False)
         if len(oo):
             oo = self.annotate(oo, save= False)
             send2d = oo.drop(['p', 'color', 'x', 'trait_description', 'Chr', 'bp'], axis = 1).rename({'realp': '-log10p'}, axis = 1)
@@ -3324,7 +3352,7 @@ class gwas_pipe:
         return deliverablef, deliverable
 
     def annotate(self, qtltable: pd.DataFrame(),
-                 snpcol: str = 'SNP', save: bool = True, **kwards) -> pd.DataFrame():
+                 snpcol: str = 'SNP', save: bool = False, **kwards) -> pd.DataFrame():
         
         '''
         This function annotates a QTL table with the snpEff tool, 
@@ -3385,7 +3413,7 @@ class gwas_pipe:
             print('Chr not in columns, returning with possible errors')
             return out
         if save:
-            self.annotatedtablepath = f'{self.path}results/qtls/finalqtl.csv'
+            self.annotatedtablepath = f'{self.path}results/qtls/finalqtlannotated.csv'
             out.reset_index().to_csv(self.annotatedtablepath, index= False) 
             #out.reset_index().to_csv(f'{self.path}results/qtls/finalqtl.tsv', index= False, sep = '\t')
         
@@ -4098,6 +4126,9 @@ Are there sex differences?
         
         qtls =  pd.read_pickle(f'{self.path}results/geneEnrichment/gene_enrichmentqtls.pkl') 
         merged_qtls =  pd.read_pickle(f'{self.path}results/geneEnrichment/gene_enrichment_mergedqtls.pkl') 
+        for tdf in [phewas_exact, ann, phewas, eqtl, sqtl, qtls, merged_qtls]:
+            tdf.loc[:, tdf.columns.str.contains('SNP')] = tdf.loc[:, tdf.columns.str.contains('SNP')].applymap(lambda x: x.replace('chr', '') if type(x)== str else x)
+        
         MG = nx.MultiGraph()
         for _, r in qtls.iterrows():
             if not MG.has_node(r['gene'][0]):

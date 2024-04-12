@@ -73,33 +73,34 @@ class interactive_QC:
         describer.loc[trait, [f'z{x}%' for x in 100*np.array([0.00001, 0.0001, 0.001, .01, .05][::-1])]] = [' – '.join(x) for x in ppfr.round(2).astype(str)]
         display(describer)
         covariates = set(self.dd.set_index('measure').loc[trait, 'covariates'].split(',')) 
-        fig = px.histogram(df, x = trait, color = 'sex')
-        fig.update_layout(template='simple_white',width = 800, height = 500, coloraxis_colorbar_x=1.05,
-                                      coloraxis_colorbar_y = .3,coloraxis_colorbar_len = .8,hovermode='x unified')
-        fig.add_vline(x=ranger, line_width=3, line_dash="dash", line_color="red")
-        for rangeri in ranger: fig.add_vline(x=rangeri, line_width=3, line_dash="dash", line_color="red")
-        display(fig)
-        for cv in covariates:
-            cvtype = self.dd.set_index('measure').loc[cv, 'trait_covariate']
-            if cvtype !='covariate_continuous':
-                dffigs = df.sort_values(cv)
-                fig  = px.strip(dffigs,y=trait, x=cv, hover_data=['rfid']+ list(covariates))
-                fig.data[0]['marker']['color'] = 'black'
-                fig.add_violin(x=dffigs[cv], y=dffigs[trait], hoverinfo=[],box_visible=True, line_color='black', hoveron='points',
-                                               meanline_visible=True, fillcolor='gray', opacity=0.4,hovertext=[] )
-                fig.update_layout(legend_visible = False,hovermode='y unified')
-            else: 
-                fig = px.density_contour(df, y=trait, x=cv, trendline='ols')
-                for i in fig.data: i['line']['color'] = 'gray'
-                fig.add_scatter(x = df[cv], y = df[trait], mode='markers', marker= dict(line_width=1, size=7, color = 'black', line_color = 'white'),
-                                text=df[['rfid']+ list(covariates)].apply(lambda x: '<br>'.join(map(lambda m: ":".join(m), zip(x.index, x.astype(str).values))), axis = 1), ) 
-            for rangeri in ranger: fig.add_hline(y=rangeri, line_width=3, line_dash="dash", line_color="red")
-            fig.update_layout(template='simple_white',width = 800, height = 600, coloraxis_colorbar_x=1.05, legend_visible = False, 
-                                      coloraxis_colorbar_y = .3,coloraxis_colorbar_len = .8)
+        if covariates[0] != 'passthrough':
+            fig = px.histogram(df, x = trait, color = 'sex')
+            fig.update_layout(template='simple_white',width = 800, height = 500, coloraxis_colorbar_x=1.05,
+                                          coloraxis_colorbar_y = .3,coloraxis_colorbar_len = .8,hovermode='x unified')
+            fig.add_vline(x=ranger, line_width=3, line_dash="dash", line_color="red")
+            for rangeri in ranger: fig.add_vline(x=rangeri, line_width=3, line_dash="dash", line_color="red")
             display(fig)
-            #print('ye')
-        self.dffinal.loc[:, trait] = df.loc[:, trait].values
-        display(self.dffinal.drop(self.covs, axis = 1).set_index('rfid'))
+            for cv in covariates:
+                cvtype = self.dd.set_index('measure').loc[cv, 'trait_covariate']
+                if cvtype !='covariate_continuous':
+                    dffigs = df.sort_values(cv)
+                    fig  = px.strip(dffigs,y=trait, x=cv, hover_data=['rfid']+ list(covariates))
+                    fig.data[0]['marker']['color'] = 'black'
+                    fig.add_violin(x=dffigs[cv], y=dffigs[trait], hoverinfo=[],box_visible=True, line_color='black', hoveron='points',
+                                                   meanline_visible=True, fillcolor='gray', opacity=0.4,hovertext=[] )
+                    fig.update_layout(legend_visible = False,hovermode='y unified')
+                else: 
+                    fig = px.density_contour(df, y=trait, x=cv, trendline='ols')
+                    for i in fig.data: i['line']['color'] = 'gray'
+                    fig.add_scatter(x = df[cv], y = df[trait], mode='markers', marker= dict(line_width=1, size=7, color = 'black', line_color = 'white'),
+                                    text=df[['rfid']+ list(covariates)].apply(lambda x: '<br>'.join(map(lambda m: ":".join(m), zip(x.index, x.astype(str).values))), axis = 1), ) 
+                for rangeri in ranger: fig.add_hline(y=rangeri, line_width=3, line_dash="dash", line_color="red")
+                fig.update_layout(template='simple_white',width = 800, height = 600, coloraxis_colorbar_x=1.05, legend_visible = False, 
+                                          coloraxis_colorbar_y = .3,coloraxis_colorbar_len = .8)
+                display(fig)
+                #print('ye')
+            self.dffinal.loc[:, trait] = df.loc[:, trait].values
+            display(self.dffinal.drop(self.covs, axis = 1).set_index('rfid'))
         if not todo: 
             print('saving boundaries to "QC_set_boundaries.csv"')
             print(f'saving data to "{self.outdfname}"')
