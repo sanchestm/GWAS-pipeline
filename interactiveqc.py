@@ -73,7 +73,7 @@ class interactive_QC:
         describer.loc[trait, [f'z{x}%' for x in 100*np.array([0.00001, 0.0001, 0.001, .01, .05][::-1])]] = [' – '.join(x) for x in ppfr.round(2).astype(str)]
         display(describer)
         covariates = set(self.dd.set_index('measure').loc[trait, 'covariates'].split(',')) 
-        if covariates[0] != 'passthrough':
+        if covariates != {'passthrough'}:
             fig = px.histogram(df, x = trait, color = 'sex')
             fig.update_layout(template='simple_white',width = 800, height = 500, coloraxis_colorbar_x=1.05,
                                           coloraxis_colorbar_y = .3,coloraxis_colorbar_len = .8,hovermode='x unified')
