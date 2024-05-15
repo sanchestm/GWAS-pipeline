@@ -49,6 +49,7 @@ dependencies:
   - datashader
   - firefox
   - geckodriver
+  - tabulate
   - pip
   - pip:
     - goatools
