@@ -39,6 +39,7 @@ dependencies:
   - nltk
   - pygraphviz
   - sqlalchemy
+  - ncbi-datasets-cli
   - panel
   - hvplot
   - holoviews
@@ -50,6 +51,7 @@ dependencies:
   - firefox
   - geckodriver
   - tabulate
+  - ensembl-vep
   - pip
   - pip:
     - goatools

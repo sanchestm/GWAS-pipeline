@@ -1,6 +1,49 @@
 import pandas as pd
 import mygene
 
+def annotate_vep(snpdf, species, snpcol = 'SNP', refcol = 'A2', altcol = 'A1', refseq = 1, expand_columns = True, intergenic = False):
+    import requests, sys
+    server = "https://rest.ensembl.org"
+    ext = f"/vep/{species}/hgvs"
+    res =  '"' + snpdf[snpcol].str.replace(':', ':g.').str.replace('chr', '') + snpdf[refcol] + '>'+snpdf[altcol] + '"' 
+    res = f"[{','.join(res)}]"
+    headers={ "Content-Type" : "application/json", "Accept" : "application/json"}
+    call = '{ "hgvs_notations" : ' + res + f', "refseq":{refseq}, "OpenTargets":1, "AlphaMissense":1,"Phenotypes":1, "Enformer":1,"LoF":1'+' }'
+    print(call) # , 
+    r = requests.post(server+ext, headers=headers, data=call) #
+    if not r.ok:
+      print('VEP annotation failed')#r.raise_for_status()
+      return snpdf
+    decoded = pd.json_normalize( r.json())
+    #print(repr( r.json()))
+    decoded['SNP'] = decoded.input.map(lambda x: x.replace(':g.', ':')[:-3])
+    if (not intergenic) and ('intergenic_consequences' in decoded.columns):
+        decoded = decoded.drop('intergenic_consequences', axis = 1)
+    if 'colocated_variants' in decoded.columns: 
+        decoded['colocated_variants'] = decoded['colocated_variants'].map(lambda x: pd.json_normalize(x) if isinstance(x, list) else pd.DataFrame())
+        decoded.colocated_variants =  decoded.colocated_variants.map(lambda x: '|'.join(x['id']) if 'id' in x.columns else x)
+    jsoncols = list(set(['transcript_consequences','intergenic_consequences']) & set(decoded.columns))
+    if len(jsoncols):
+        decoded[jsoncols] = decoded[jsoncols].applymap(lambda x: pd.json_normalize(x) if isinstance(x, list) else pd.DataFrame())
+        if expand_columns:
+            for i in jsoncols:
+                tempdf = pd.concat(decoded.apply(lambda x: x[i].rename(lambda y: f'{i}_{y}', axis = 1).assign(SNP = x.SNP), axis = 1).to_list())
+                tempdf = tempdf.applymap(lambda x: x[0] if isinstance(x, list) else x)
+                tempdf.loc[:, tempdf.columns.str.contains('phenotypes')] = \
+                     tempdf.loc[:, tempdf.columns.str.contains('phenotypes')].applymap(lambda x: x['phenotype'].replace(' ', '_') if isinstance(x, dict) else x)
+                tempdf = tempdf.drop_duplicates(subset = tempdf.loc[:, ~tempdf.columns.str.contains('phenotypes')].filter(regex =f'{i}_') \
+                                              .drop(['transcript_consequences_transcript_id', 'transcript_consequences_cdna_start', 'transcript_consequences_cdna_end'
+                                                     'transcript_consequences_consequence_terms', 'transcript_consequences_strand',
+                                                    'transcript_consequences_distance', 'transcript_consequences_variant_allele'], errors='ignore', axis =1).columns.to_list())
+                decoded = decoded.merge(tempdf, how = 'left', on = 'SNP')
+            decoded = decoded.drop(jsoncols, axis = 1)
+            decoded = decoded.rename({'transcript_consequences_gene_symbol':'gene', 'transcript_consequences_gene_id': 'geneid',
+                                     'transcript_consequences_biotype': 'transcriptbiotype', 'transcript_consequences_impact':'putative_impact'}, axis = 1)
+            if 'putative_impact' in decoded.columns: decoded.putative_impact = decoded.putative_impact.fillna('MODIFIER')
+            decoded = decoded.rename(lambda x: x.replace('consequences_',''), axis = 1)
+
+    return snpdf.merge(decoded.drop(['id', 'seq_region_name', 'end', 'strand', 'allele_string', 'start'], axis = 1).rename({'input': ''}), on = 'SNP', how = 'left')
+
 def query_gene(genelis, species):
     mg = mygene.MyGeneInfo()
     species = translate_dict(species, {'rn7': 'rat', 'rn8':'rat', 'm38':'mice', 'rn6': 'rat'})

@@ -93,7 +93,8 @@ if dictionary['subset']:  ###essential
     kws = kw(dictionary, 'subset_')
     if dictionary['subset_make_figures'] : gwas.SubsetAndFilter(makefigures = True, **kws)
     else: gwas.SubsetAndFilter(makefigures = False, **kws)
-if dictionary['grm']: gwas.generateGRM() ###essential
+if dictionary['grm']: 
+    gwas.generateGRM(**kw(dictionary, 'grm_')) ###essential
 if dictionary['h2']:  gwas.snpHeritability() ###essential
 if dictionary['BLUP']: gwas.BLUP()
 if dictionary['BLUP_predict']: gwas.BLUP_predict(dictionary['BLUP_predict']);
@@ -116,7 +117,7 @@ if dictionary['phewas']:gwas.phewas(annotate=True, pval_threshold = 1e-4, nretur
 if dictionary['eqtl']:gwas.eQTL(annotate= True) ###essential
 if dictionary['sqtl']:gwas.sQTL() ###essential
 if dictionary['goea']:gwas.GeneEnrichment() ###essential
-if dictionary['locuszoom']: gwas.locuszoom(skip_ld_calculation = dictionary['skip_ld_calculation_locuszoom'])  ###essential
+if dictionary['locuszoom']: gwas.locuszoom(**kw(dictionary, 'locuszoom_'))  ###essential
 if dictionary['h2fig']: gwas.make_heritability_figure(display = False) 
 if dictionary['report']:
     kws = kw(dictionary, 'report_')

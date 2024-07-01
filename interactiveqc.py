@@ -16,14 +16,18 @@ class interactive_QC:
         self.uncurated_data.to_csv(f'uncurated_data_N{self.uncurated_data.shape[0]}_{datetime.today().strftime("%Y%m%d")}.csv')
         self.dfog = raw_data.copy()
         self.dd = data_dictionary.copy()
-
-        self.traits = self.dd.query('trait_covariate == "trait"').measure.to_list()
-        self.covs = self.dd[self.dd['trait_covariate'].str.contains('covariate')].measure.to_list()
-        self.covs_cat = self.dd[self.dd['trait_covariate'].str.contains('covariate_categorical')].measure.to_list()
-        self.covs_cont = self.dd[self.dd['trait_covariate'].str.contains('covariate_continuous')].measure.to_list()
+        self.align_w_cols = lambda l: list(set(l) & set(self.dfog.columns))
+        self.traits = self.align_w_cols(self.dd.query('trait_covariate == "trait"').measure.to_list())
+        self.covs = self.align_w_cols(self.dd[self.dd['trait_covariate'].fillna('').str.contains('covariate')].measure.to_list())
+        self.covs_cat = self.align_w_cols(self.dd[self.dd['trait_covariate'].fillna('').str.contains('covariate_categorical')].measure.to_list())
+        self.covs_cont = self.align_w_cols(self.dd[self.dd['trait_covariate'].fillna('').str.contains('covariate_continuous')].measure.to_list())
+        self.cols_metadata = self.align_w_cols(self.dd[self.dd['trait_covariate'].fillna('').str.contains('metadata')].measure.to_list())
 
         self.dfog[self.traits] = self.dfog[self.traits].applymap(lambda x: (str(x).replace(' ', '').replace('#DIV/0!', 'nan').replace('#VALUE!', 'nan')  
                                                 .replace('n/a','nan' ).replace('#REF!','nan' ).replace('True','1' ).replace('False','0' ))).astype(float)
+        self.dfog[self.covs_cat].fillna('UNK', inplace = True)
+        self.dfog[self.covs_cont].fillna(-9999, inplace = True)
+        self.dfog[self.cols_metadata] = self.dfog[self.cols_metadata].astype(str)
 
         self.dffinal = ''
     
@@ -39,8 +43,10 @@ class interactive_QC:
                                                                                                    description = 'extra code',  
                                                                                            layout = widgets.Layout(width='1000px'))]
         self.value_dict_rat = pd.DataFrame(index = self.dfog.reset_index().rfid.to_list())
+        print('pass')
         self.value_dict_rat['wid_text'] =  [widgets.Text(value = '', description = f'extra code rat {i}',  layout = widgets.Layout(width='1000px')) \
                                              for i in self.dfog.reset_index().rfid]
+        print('pass2')
         self.outdfname = f'raw_data_curated_n{self.dfog.shape[0]}_{datetime.today().strftime("%Y%m%d")}.csv'
 
     def quick_view(self):
@@ -72,7 +78,7 @@ class interactive_QC:
         ppfr =  abs(norm.ppf(np.array([0.00001, 0.0001, 0.001, .01, .05][::-1])/2))[:, None]*np.array([-1, 1])*describer['std'][0] + describer['mean'][0]
         describer.loc[trait, [f'z{x}%' for x in 100*np.array([0.00001, 0.0001, 0.001, .01, .05][::-1])]] = [' – '.join(x) for x in ppfr.round(2).astype(str)]
         display(describer)
-        covariates = set(self.dd.set_index('measure').loc[trait, 'covariates'].split(',')) 
+        covariates = set(self.align_w_cols(self.dd.set_index('measure').loc[trait, 'covariates'].split(','))) 
         if covariates != {'passthrough'}:
             fig = px.histogram(df, x = trait, color = 'sex')
             fig.update_layout(template='simple_white',width = 800, height = 500, coloraxis_colorbar_x=1.05,
