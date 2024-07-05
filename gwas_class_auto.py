@@ -31,7 +31,7 @@ from sklearn.decomposition import PCA
 from sklearn.feature_extraction.text import TfidfTransformer
 from sklearn.impute import KNNImputer,SimpleImputer, IterativeImputer, MissingIndicator
 from sklearn.linear_model import LinearRegression#, RobustRegression
-from sklearn.metrics.pairwise import nan_euclidean_distances
+from sklearn.metrics.pairwise import nan_euclidean_distances, pairwise_distances
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import QuantileTransformer, MinMaxScaler, OneHotEncoder, LabelEncoder, StandardScaler
@@ -105,11 +105,6 @@ def time_eval(f):
     return wrap
     
 #warnings.filterwarnings('ignore')
-#conda create --name gpipe -c conda-forge openjdk=17 ipykernel pandas seaborn scikit-learn umap-learn psycopg2 dask
-#conda activate gpipe
-#conda install -c bioconda gcta plink snpeff mygene
-#pip install goatools
-#wget https://snpeff.blob.core.windows.net/versions/snpEff_latest_core.zip
 
 pd.set_option('display.max_rows', 500)
 pd.set_option('display.max_columns', 500)
@@ -239,7 +234,6 @@ def generate_datadic(rawdata, trait_prefix = ['pr', 'sha', 'lga', 'shock'], main
            #print(min, max)
            aa =  "|".join( [str(x).zfill(2) for x in range(min, max+1)])
        except: aa = '-9999999'
-       #print(aa)
        return ','.join([x for x in s.split(',') if re.findall(f'({aa}).*(age)', x) or ('age' not in x)])
     dd_new.loc[dd_new.trait_covariate == 'trait', 'covariates'] = dd_new.loc[dd_new.trait_covariate == 'trait']\
           .apply(lambda row: remove_outofboundages(row.covariates,row.measure), axis = 1)
@@ -439,7 +433,6 @@ def impute_single_trait(dataframe: pd.DataFrame(), imputing_col: str , covariate
     if type(groupby) == str: groupby = [groupby]
     covariate_cols = list(set(covariate_cols) - set(imputing_col) - set(groupby))
     groupby = list(set(groupby) - set(imputing_col) )
-    #print(imputing_col, covariate_cols, groupby)
     
     dfs = dataframe.copy().reset_index().set_index('rfid')[imputing_col + covariate_cols + groupby]
     dfs = dfs.loc[:, ~dfs.columns.duplicated()]
@@ -697,6 +690,7 @@ def plotly_read_from_html(file):
     
 def fancy_display(df, download_name = 'default.csv'):
     pn.extension('tabulator')
+    df = df.drop(['index'] + [f'level_{x}' for x in range(100)], errors = 'ignore', axis = 1)
     numeric_cols = df.select_dtypes(include=np.number).columns.to_list()
     df[numeric_cols] = df[numeric_cols].applymap(round, ndigits=3)
     d = {x : {'type': 'number', 'func': '>=', 'placeholder': 'Enter minimum'} for x in numeric_cols} | \
@@ -726,6 +720,20 @@ def sql2pandas(file):
 def translate_dict(s, d):
     if not d: return s
     return re.sub(f"({')|('.join(d.keys())})",lambda y: d[str(y.group(0))] ,s )
+
+def bayes_ppi(pvals, islog10 = False):
+    from scipy.special import ndtri
+    if islog10: z = ndtri(np.power(10, -pvals)/2)
+    else: z = ndtri(pvals/2)
+    bfi = np.exp(np.power(z,2)/2)
+    return bfi/(bfi.sum())
+
+def credible_set_idx(ppi, cs_threshold = .99, return_series= False):
+    if isinstance(ppi, pd.Series): ppi = ppi.values
+    sorted_index = np.argsort(ppi)[::-1]
+    sarray = ppi[sorted_index].cumsum() < cs_threshold
+    if return_series: return pd.Series(data = sarray, index = sorted_index )
+    return sorted_index[sarray]
     
 class gwas_pipe:
     '''
@@ -847,28 +855,27 @@ class gwas_pipe:
                  traits: list = [],
                  trait_descriptions: list = [],
                  chrList: list = [], 
-                 n_autosome: int = 20,
+                 #n_autosome: int = 20,
                  all_genotypes: str = '/tscc/projects/ps-palmer/gwas/databases/rounds/round10_1',
                  founderfile: str = '/tscc/projects/ps-palmer/gwas/databases/founder_genotypes/founders7.2',
-                 gtca_path: str = '',
-                 snpeff_path: str =  'snpEff/',
-                 locuszoom_path: str = 'locuszoom/',
+                 #gtca_path: str = '',
+                 #snpeff_path: str =  'snpEff/',
+                 #locuszoom_path: str = 'locuszoom/',
                  phewas_db: str = 'phewasdb.parquet.gz',
-                 use_tscc_modules: list = [],
                  threshold: float = 'auto',
                  threshold05: float = 5.643286,
                  genome: str = 'rn7',
+                 genome_accession: str = 'GCF_015227675.2',
                  threads: int = os.cpu_count()): 
 
-        if use_tscc_modules: bash(f'module load {" ".join(use_tscc_modules)}')
-        self.gcta = 'gcta64' if not gtca_path else gtca_path
+        self.gcta = 'gcta64' #if not gtca_path else gtca_path
         self.path = path
         self.all_genotypes = all_genotypes
         #self.founder_genotypes = founder_genotypes
-        self.snpeff_path = snpeff_path
-        self.locuszoom_path = locuszoom_path
-        self.n_autosome = n_autosome
-        self.genome = genome
+        #self.snpeff_path = snpeff_path
+        #self.locuszoom_path = locuszoom_path
+        #self.n_autosome = n_autosome
+        #self.genome = genome
         self.threshold = threshold
         self.threshold05 = threshold05
 
@@ -877,6 +884,10 @@ class gwas_pipe:
 
            
         if os.path.exists(f'{self.path}temp'): bash(f'rm -r {self.path}temp')
+        try: self.pull_NCBI_genome_info(genome_accession,redownload = False)
+        except: self.ask_user_genome_accession()
+        if not chrList:
+            self.chrList = lambda: [self.replacenumstoXYMT(i) for i in range(1,self.n_autosome+5) if i != self.n_autosome+3]
         
         if type(data) == str: 
             df = pd.read_csv(data, dtype={'rfid': str}).replace([np.inf, -np.inf], np.nan)
@@ -955,17 +966,6 @@ class gwas_pipe:
         self.threadnum = int(threads)
         self.print_call = True
         
-        self.replacenumstoXYMT = lambda x: str(int(float(x))).replace(str(self.n_autosome+1), 'x')\
-                                                 .replace(str(self.n_autosome+2), 'y')\
-                                                 .replace(str(self.n_autosome+4), 'mt')
-        
-        self.replaceXYMTtonums = lambda x: int(float(str(x).lower().replace('chr', '').replace('x', str(self.n_autosome+1))\
-                                                 .replace('y', str(self.n_autosome+2))\
-                                                 .replace('mt', str(self.n_autosome+4))\
-                                                 .replace('m', str(self.n_autosome+4))))
-        
-        if not chrList:
-            self.chrList = lambda: [self.replacenumstoXYMT(i) for i in range(1,self.n_autosome+5) if i != self.n_autosome+3]
         self.failed_full_grm = False
         
         self.sample_path = f'{self.path}genotypes/sample_rfids.txt'
@@ -1768,7 +1768,7 @@ class gwas_pipe:
             
             if order == 'cluster': 
                 gp = gcorr.pivot(index ='trait1', columns='trait2', values='genetic_correlation') 
-                gp.loc[:,:] = 1- np.abs(gp.fillna(0).values + np.eye(len(gp)))**2
+                gp.loc[:,:] = 1- np.abs(gp.fillna(0).values + np.eye(len(gp)))
                 from scipy.spatial.distance import squareform
                 tt =  HDBSCAN(metric = 'precomputed', allow_single_cluster= True)
                 cc = tt.fit(gp)
@@ -2359,8 +2359,9 @@ class gwas_pipe:
         out['significance_level'] = out.p.apply(lambda x: '5%' if x >= self.threshold05 else '10%')
         if save: out.to_csv(self.allqtlspath, index = False)
         if annotate: 
-            out = self.annotate(out, save = True)
-            if save: out.reset_index().to_csv(f'{self.path}results/qtls/finalqtl.csv', index= False)
+            out = self.annotatevep(out, save = True)
+            out = out.reset_index().drop(['index' ] + [f'level_{x}' for x in range(100)], errors = 'ignore', axis = 1)
+            if save: out.to_csv(f'{self.path}results/qtls/finalqtl.csv', index= False)
         return out.set_index('SNP') 
     
     def conditional_analysis(self, trait: str, snpdf: pd.DataFrame() = pd.DataFrame()):
@@ -2491,10 +2492,11 @@ class gwas_pipe:
         del future
         return out
 
-    def effectsize(self, qtltable: pd.DataFrame() = '', display_plots: bool = True):
+    def effectsize(self, qtltable: pd.DataFrame() = None, display_plots: bool = True):
         printwithlog(f'starting effect size plot... {self.project_name}') 
-        if len(qtltable) == 0: qtltable = pd.read_csv(f'{self.path}results/qtls/finalqtl.csv')
-        out = qtltable.reset_index()
+        if not (isinstance(qtltable, pd.DataFrame) and len(qtltable)):
+            qtltable = pd.read_csv(f'{self.path}results/qtls/finalqtl.csv')
+        out = qtltable.reset_index().drop(['index' ] + [f'level_{x}' for x in range(100)], errors = 'ignore', axis = 1)
         usnps = out.SNP.unique()
         aa = ','.join(usnps)
         self.bashLog(f'plink --bfile {self.genotypes_subset} --snps {aa} --recode --alleleACGT --out {self.path}temp/stripplot', 'stripplot', print_call=False)
@@ -2528,7 +2530,7 @@ class gwas_pipe:
     def get_r2_around_topsnp(self, qtltable:pd.DataFrame() = '', save = False, qtl_r2_thresh: float = .65):
         printwithlog(f'locuszoom: calculating r2 for nearby snps {self.project_name}')
         if isinstance(qtltable, str) and (qtltable == ''): 
-            qtltable = pd.read_csv(f'{self.path}results/qtls/finalqtl.csv').reset_index()
+            qtltable = pd.read_csv(f'{self.path}results/qtls/finalqtl.csv').reset_index().drop(['index' ] + [f'level_{x}' for x in range(100)], errors = 'ignore', axis = 1)
         causal_snps = []
         for name, row in tqdm(list(qtltable.iterrows())):
             ldfilename = f'{self.path}results/lz/temp_qtl_n_@{row.trait}@{row.SNP}'
@@ -2537,7 +2539,7 @@ class gwas_pipe:
             gwas = pd.concat([pd.read_csv(x, sep = '\t') for x in glob(f'{self.path}results/gwas/regressedlr_{row.trait}.loco.mlma') \
                                 + glob(f'{self.path}results/gwas/regressedlr_{row.trait}_chrgwas*.mlma')]).drop_duplicates(subset = 'SNP')
             tempdf = pd.concat([gwas.set_index('SNP'), r2.rename({'SNP_B': 'SNP'}, axis = 1).drop_duplicates(subset = 'SNP').set_index('SNP')], join = 'inner', axis = 1)
-            tempdf = self.annotate(tempdf.reset_index(), 'SNP', save = False).set_index('SNP').fillna('UNK')
+            tempdf = self.annotatevep(tempdf.reset_index(), 'SNP', save = False).set_index('SNP').fillna('UNK')
             tempdf.to_csv( f'{self.path}results/lz/lzplottable@{row.trait}@{row.SNP}.tsv', sep = '\t')
             subcausal = tempdf.query("putative_impact not in ['UNK', 'MODIFIER']").assign(trait = row.trait, SNP_qtl = row.SNP)
             subcausal.columns = subcausal.columns.astype(str)
@@ -2549,27 +2551,29 @@ class gwas_pipe:
         if len(causal_snps) and save: 
             causal_snps = pd.concat(causal_snps).to_csv(f'{self.path}results/qtls/possible_causal_snps.tsv', sep = '\t')
     
-    def locuszoom2(self, qtltable:pd.DataFrame() = '', qtl_r2_thresh: float = .65,  padding: float = 2e5, save = True, skip_ld_calculation=False, save_causal_table=True):
+    def locuszoom2(self, qtltable:pd.DataFrame() = None, qtl_r2_thresh: float = .65,  padding: float = 2e5, save = True, 
+                   skip_ld_calculation=False, save_causal_table=True, credible_set_threshold = .99, topaxaxis = True):
         printwithlog(f'starting locuszoom... {self.project_name}') 
         from bokeh.models import NumeralTickFormatter
-        if isinstance(qtltable, str) and (qtltable == ''): 
-            qtltable = pd.read_csv(f'{self.path}results/qtls/finalqtl.csv').reset_index()
+        if not (isinstance(qtltable, pd.DataFrame) and len(qtltable)): 
+            qtltable = pd.read_csv(f'{self.path}results/qtls/finalqtl.csv')\
+                         .reset_index().drop(['index' ] + [f'level_{x}' for x in range(100)], errors = 'ignore', axis = 1)
         if not skip_ld_calculation:
-            get_r2_around_topsnp(self, save = save_causal_table, qtl_r2_thresh= qtl_r2_thresh)
+            self.get_r2_around_topsnp(save = save_causal_table, qtl_r2_thresh= qtl_r2_thresh)
         ff_lis = []
         res = {'r2thresh': [], 'minmax': []}
-        if not hasattr(self, 'gtf'): self.gtf = self.get_ncbi_gtf()
-        gtf = self.gtf.query("biotype == 'transcript' and gene != ''")
+        gtf = self.get_gtf() if not hasattr(self, 'gtf') else self.gtf
+        #gtf = self.gtf.query("biotype == 'transcript' and gene != ''")
         printwithlog(f'locuszoom: starting plots {self.project_name}')
         for ((idx, topsnp),boundary) in tqdm(list(itertools.product(qtltable.iterrows(), ['r2thresh','minmax']))):
             if not os.path.isfile(f'{self.path}results/lz/lzplottable@{topsnp.trait}@{topsnp.SNP}.tsv'):
-                get_r2_around_topsnp(self, save = save_causal_table, qtl_r2_thresh= qtl_r2_thresh)
+                self.get_r2_around_topsnp(save = save_causal_table, qtl_r2_thresh= qtl_r2_thresh)
             data = pd.read_csv(f'{self.path}results/lz/lzplottable@{topsnp.trait}@{topsnp.SNP}.tsv', sep = '\t').query('p != "UNK"')
             data['-log10(P)'] = -np.log10(pd.to_numeric(data.p, errors = 'coerce')) 
             if boundary =="r2thresh":
                 minval, maxval = data.query(f'R2 > {qtl_r2_thresh}').agg({'bp': [min, max]}).values.flatten() + np.array([-padding, padding])
             else:  minval, maxval = (np.array([-3e6, 3e6]) + topsnp.bp).astype(int)
-            genes_in_section = self.gtf.query(f'Chr == {topsnp.Chr} and  end > {minval} and start < {maxval}')\
+            genes_in_section = self.gtf.query(f'Chr == {topsnp.Chr} and end > {minval} and start < {maxval}')\
                                        .reset_index(drop = True)\
                                        .query("source not in ['cmsearch','tRNAscan-SE']")
             if boundary =="r2thresh":
@@ -2658,9 +2662,23 @@ class gwas_pipe:
                                           angle=45 if (nrows_genes > 6 or len(ttgenes)> 15) else 0 ,width = 1200, height = hgenelabels) )
             fontsizes =  {'title': 40,  'labels': 25,   'xticks': 15,  'yticks': 15 }
             rect = rect*labels
-            finalfig = (fig.opts(xformatter= NumeralTickFormatter(format='0,0.[0000]a'),ylim = (-.1, max(6, topsnp.p*1.1)), xticks=5, xrotation = 0, width = 1200, height = 400, 
-                                 fontsize = fontsizes) +( rect.opts(  fontsize = fontsizes, yticks =yticks3l ,xlabel = f'Chr {topsnp.SNP.split(":")[0]}')) )\
-                           .cols(1).opts(title = f'locuszoom Chr{topsnp.Chr} {topsnp.trait} {topsnp.SNP}')
+            fig = fig.opts(xformatter= NumeralTickFormatter(format='0,0.[0000]a'),ylim = (-.1, max(6, topsnp.p*1.1)), 
+                           xticks=5, xrotation = 0, width = 1200, height = 400, fontsize = fontsizes)
+            if topaxaxis:
+                fig = fig.opts(opts.Points( xaxis='top', xticks='top'))
+            rect = rect.opts(  fontsize = fontsizes, yticks =yticks3l ,xlabel = f'Chr {topsnp.SNP.split(":")[0]}')
+            if credible_set_threshold:
+                datacs = data.query(f'({minval}<bp<{maxval})').sort_values('-log10(P)').reset_index(drop=True)
+                datacs['ppi'] = bayes_ppi(datacs.p)
+                datacs['ppi_s'] = MinMaxScaler(feature_range=(2, 10)).fit_transform(datacs.ppi.values.reshape(-1,1))
+                cs = credible_set_idx(datacs.ppi.values,cs_threshold=credible_set_threshold)
+                datacs = datacs.assign(credible_set = 0)
+                datacs.loc[cs, 'credible_set'] = 1
+                ff1 = hv.Points(datacs, kdims = ['bp', 'credible_set'] , vdims =['R2', 'ppi_s'] )\
+                       .opts(size = 'ppi_s',marker = 'circle', color = 'R2', cmap = 'Spectral_r', width=1200, 
+                             height=80,alpha = .7, clim= (0,1),yticks =[(0,'not included'), (1, 'included')], ylim = (-.5, 1.5),  xaxis=None)
+                fig = fig+ff1
+            finalfig = (fig + rect ).cols(1).opts(title = f'locuszoom Chr{topsnp.Chr} {topsnp.trait} {topsnp.SNP}')
             if save: 
                 os.makedirs(f'{self.path}images/lz/{boundary}', exist_ok = True)
                 hv.save(finalfig, f"{self.path}images/lz/{boundary}/lzi__{topsnp.trait}__{topsnp.SNP}.png".replace(':', '_'))
@@ -2675,15 +2693,15 @@ class gwas_pipe:
             genes_in_range2.to_csv(f'{self.path}results/qtls/genes_in_rangemk.csv')
         return res
     
-    def locuszoom(self, qtltable: pd.DataFrame() = '',  qtl_r2_thresh: float = .65, save = True,
+    def locuszoom(self, qtltable: pd.DataFrame() = None,  qtl_r2_thresh: float = .65, save = True,
                   padding: float = 1e5, skip_ld_calculation = False, make_interactive = True, make_classic = True, print_call = False):
         '''
         Only works on TSCC
         '''
         printwithlog(f'generating locuszoom info for project {self.project_name}')
-        if not len(qtltable) or type(qtltable) == str:
+        if not (isinstance(qtltable, pd.DataFrame) and len(qtltable)):
             qtltable = pd.read_csv(f'{self.path}results/qtls/finalqtl.csv')
-        out = qtltable.reset_index()
+        out = qtltable.reset_index().drop(['index' ] + [f'level_{x}' for x in range(100)], errors = 'ignore', axis = 1)
         causal_snps = []
         
         os.makedirs(f'{self.path}results/lz/p/', exist_ok = True)
@@ -2694,8 +2712,8 @@ class gwas_pipe:
         #     'rn6':'https://hgdownload.soe.ucsc.edu/goldenPath/rn6/bigZips/genes/rn6.ncbiRefSeq.gtf.gz',
         #    'm38': 'https://hgdownload.soe.ucsc.edu/goldenPath/mm10/bigZips/genes/mm10.ncbiRefSeq.gtf.gz'}
         
-        if not hasattr(self, 'gtf'): self.gtf = self.get_ncbi_gtf()
-        gtf = self.gtf.query("biotype == 'transcript' and gene != ''")
+        gtf = self.get_gtf() if not hasattr(self, 'gtf') else self.gtf
+        gtf = gtf.query("biotype == 'transcript' and gene != ''")
         if not skip_ld_calculation:
             printwithlog(f'locuszoom: calculating r2 for nearby snps {self.project_name}')
             for name, row in tqdm(list(out.iterrows())):
@@ -2707,7 +2725,7 @@ class gwas_pipe:
                 #+ glob(f'{self.path}results/gwas/regressedlr_{row.trait}_chrgwas\d+.mlma')
                 tempdf = pd.concat([gwas.set_index('SNP'), r2.rename({'SNP_B': 'SNP'}, axis = 1).drop_duplicates(subset = 'SNP').set_index('SNP')], join = 'inner', axis = 1)
                 #display(tempdf)
-                tempdf = self.annotate(tempdf.reset_index(), 'SNP', save = False).set_index('SNP').fillna('UNK')
+                tempdf = self.annotatevep(tempdf.reset_index(), 'SNP', save = False).set_index('SNP').fillna('UNK')
                 tempdf.to_csv( f'{self.path}results/lz/lzplottable@{row.trait}@{row.SNP}.tsv', sep = '\t')
 
                 ## potential causal mutations
@@ -2840,14 +2858,43 @@ class gwas_pipe:
             gtf = pd.concat([gtf, o], axis = 1)
         return gtf
 
+    def get_species_accession(self, species = "rattus norvegicus", return_latest = True, display_options = True):
+        srtgi = pd.json_normalize(json.loads(bash(f'''datasets summary genome taxon "{species.lower().replace('_', ' ')}"''', shell = True, silent = True, print_call=False)[0])['reports'])\
+              .rename({'paired_accession': 'annotated_accession', 'annotation_info.provider': 'provider', 
+                       'annotation_info.release_date': 'release_date', 'annotation_info.report_url': 'report_url',
+                       'assembly_info.assembly_name': 'assembly_name', 'assembly_info.biosample.description.organism.organism_name':'organism_name'}, axis = 1)\
+              .sort_values('release_date', ascending = False).reset_index(drop = True)
+        firstcols = ['assembly_name', 'accession','annotated_accession', 'provider', 'release_date', 'report_url', 'organism_name']
+        disp = srtgi[firstcols + list(set(srtgi.columns)-set(firstcols))]
+        disp['annotated_accession'] = disp.annotated_accession.str.replace('GCA_', 'GCF_')
+        disp['accession'] = disp.annotated_accession.str.replace('GCF_', 'GCA_')
+        if display_options: display(fancy_display(disp.dropna(subset = 'annotated_accession')))
+        if not return_latest:return disp
+        return disp.loc[0, 'annotated_accession']
+    
+    def ask_user_genome_accession(self): 
+        genome_accession = ''
+        while genome_accession == '':
+            queryspecies = input('please write the scientific name of the species used:')
+            queryspecies = ' '.join(re.findall('[A-Za-z]+', queryspecies))
+            try: 
+                latest =  self.get_species_accession(species = queryspecies,return_latest= False )
+                while genome_accession not in latest['annotated_accession'].str.replace('GCA_', 'GCF_').to_list():
+                    genome_accession = input('please write the GCF annotated assession id or leave it black to use the latest:').replace('GCA_', 'GCF_')
+                    if genome_accession == '': 
+                        print(f'''{latest.loc[0, 'annotated_accession']}''' )
+                        genome_accession = latest.loc[0, 'annotated_accession'].replace('GCA_', 'GCF_')
+            except:
+                print('not a valid species')
+        self.pull_NCBI_genome_info(GCF_assession_id = genome_accession, redownload = False)
+    
     def pull_NCBI_genome_info(self, GCF_assession_id = 'GCF_036323735.1', redownload = False):
         self.genome_accession = GCF_assession_id
         self.gtf_path = f'{self.path}genome_info/ncbi_dataset/data/{self.genome_accession}/genomic.gtf'
         self.chrsyn = f'{self.path}genome_info/ncbi_dataset/data/{self.genome_accession}/chrsynon'
-        self.genomefasta_path = f'{self.path}genome_info/ncbi_dataset/data/{self.genome_accession}/{self.genome_accession}_{self.genome_version}_genomic.fna'
         needs_dowload = redownload or not os.path.isfile(f'{self.path}genome_info/ncbi_dataset/data/{self.genome_accession}/sequence_report.jsonl')
         if needs_dowload:
-            bash(f'datasets download genome accession {self.genome_accession} --include genome,gtf,seq-report,gff3,rna,protein,cds', silent=True, shell = True,  print_call=False)
+            bash(f'datasets download genome accession {self.genome_accession} --include genome,gtf,seq-report,gff3,rna,protein,cds', silent=True, shell = True,  print_call=True)
             bash(f'rm -r {self.path}genome_info/', silent = True, print_call=False)
             bash(f'unzip -d {self.path}genome_info/ ncbi_dataset.zip', silent = True, print_call=False)
             bash(f'rm {self.path}ncbi_dataset.zip', silent = True, print_call=False)
@@ -2856,18 +2903,27 @@ class gwas_pipe:
                 bash(f'''grep -v "#" {i2} | sort -k1,1 -k4,4n -k5,5n -t$'\t' | bgzip -c > {i2}.gz''', shell = True, silent = True, print_call=False)
                 bash(f"tabix -p gff {i2}.gz", silent = True, print_call=False)
         self.chr_conv_table = pd.read_json(f'{self.path}genome_info/ncbi_dataset/data/{self.genome_accession}/sequence_report.jsonl',  lines=True).rename({'chrName': 'Chr'}, axis = 1)
+        self.n_autosome = self.chr_conv_table.Chr.str.extract('(\d+)')[0].fillna(-1).astype(int).max()
+        self.replacenumstoXYMT = lambda x: str(int(float(x))).replace(str(self.n_autosome+1), 'x')\
+                                                 .replace(str(self.n_autosome+2), 'y')\
+                                                 .replace(str(self.n_autosome+4), 'mt')
+        self.replaceXYMTtonums = lambda x: int(float(str(x).lower().replace('chr', '').replace('x', str(self.n_autosome+1))\
+                                                 .replace('y', str(self.n_autosome+2))\
+                                                 .replace('mt', str(self.n_autosome+4))\
+                                                 .replace('m', str(self.n_autosome+4))))
         syntable = self.chr_conv_table[['Chr', 'refseqAccession']].query('Chr != "Un"')
         syntable['Chrnum'] = syntable.Chr.map(self.replaceXYMTtonums)
         syntable = syntable.melt(id_vars = 'refseqAccession').drop('variable', axis = 1).astype(str).drop_duplicates().sort_values('value')
         syntable = pd.concat([syntable, syntable.assign(value = 'chr'+syntable.value)])
         pd.concat([syntable, syntable.set_axis(syntable.columns[::-1], axis = 1)]).to_csv(self.chrsyn,  sep = '\t', header = None, index = False)
-        self.n_autosome = self.chr_conv_table.Chr.str.extract('(\d+)')[0].fillna(-1).astype(int).max()
+        
         self.genome_assession_info = pd.read_json(f'{self.path}genome_info/ncbi_dataset/data/assembly_data_report.jsonl', lines = True)
         self.genome_version= self.genome_assession_info.loc[0,'assemblyInfo']['assemblyName']
+        self.genomefasta_path = f'{self.path}genome_info/ncbi_dataset/data/{self.genome_accession}/{self.genome_accession}_{self.genome_version}_genomic.fna'
         self.species = self.genome_assession_info.loc[0, 'organism']['organismName'].replace(' ', '_').lower()
-        self.taxid = self.genome_assession_info.loc[0, 'organism']['taxId']        
-
-    def read_local_gtf(self):
+        self.taxid = str(self.genome_assession_info.loc[0, 'organism']['taxId']  )      
+    
+    def get_gtf(self):
         if not hasattr(self, 'gtf_path'): self.pull_NCBI_genome_info(self.genome_accession, redownload = False)
         if not hasattr(self, 'chr_conv_table'): self.pull_NCBI_genome_info(self.genome_accession, redownload = False)    
         gtf = pd.read_csv(self.gtf_path, sep = '\t', header = None, comment='#')\
@@ -2895,9 +2951,9 @@ class gwas_pipe:
 
         printwithlog('starting interactive locuszoom generator...') 
         if type(qtltable) != pd.core.frame.DataFrame:
-            qtltable = pd.read_csv(f'results/qtls/finalqtl.csv')
-        if not hasattr(self, 'gtf'): self.gtf = self.get_ncbi_gtf()
-        gtf = self.gtf.query('biotype != "transcript"')
+            qtltable = pd.read_csv(f'results/qtls/finalqtl.csv').reset_index().drop(['index' ] + [f'level_{x}' for x in range(100)], errors = 'ignore', axis = 1)
+        gtf = self.get_gtf() if not hasattr(self, 'gtf') else self.gtf
+        gtf = gtf.query('biotype != "transcript"')
         def glk(gene):
             return f'<a href="https://www.genecards.org/cgi-bin/carddisp.pl?gene={gene}">{gene}</a>'
         def rn(x,n = 3):
@@ -2905,7 +2961,7 @@ class gwas_pipe:
             except: o = x
             return o
 
-        for _, topsnp in tqdm(list(qtltable.reset_index().iterrows())):
+        for _, topsnp in tqdm(list(qtltable.iterrows())):
             #printwithlog(f'starting interactive locuszoom for SNP {topsnp.SNP}...')
             data = pd.read_csv(f'{self.path}results/lz/lzplottable@{topsnp.trait}@{topsnp.SNP}.tsv', sep = '\t').query('p != "UNK"')
             data['-log10(P)'] = -np.log10(pd.to_numeric(data.p, errors = 'coerce')) 
@@ -3007,8 +3063,8 @@ class gwas_pipe:
             #plotio.write_json(fig, f'{self.path}images/lz/lz__{topsnp.trait}__{topsnp.SNP}.json'.replace(':', '_'))
 
     def get_closest_snp(self, s, include_snps_in_gene = False, include_snps_in_ld  = False):
-        if not hasattr(self, 'gtf'): self.gtf = self.get_ncbi_gtf()
-        gtff = self.gtf.query("biotype == 'transcript' and gene != ''")
+        gtf = self.get_gtf() if not hasattr(self, 'gtf') else self.gtf
+        gtff = gtf.query("biotype == 'transcript' and gene != ''")
         if s in gtff.gene.unique():
             l = gtff.set_index('gene').loc[s]
             chr, pos = l.Chr, l.loc[['start', 'end']].mean()
@@ -3029,8 +3085,8 @@ class gwas_pipe:
     
     def locuszoom_widget(self):
         from ipywidgets import interact, interact_manual, widgets
-        if not hasattr(self, 'gtf'): self.gtf = self.get_ncbi_gtf()
-        cloc = widgets.Combobox(placeholder='Choose Gene or position "chr:pos" ',options=tuple(self.gtf.gene.unique()),description='gene or pos:',ensure_option=False,layout = widgets.Layout(width='500px'))
+        gtf = self.get_gtf() if not hasattr(self, 'gtf') else self.gtf
+        cloc = widgets.Combobox(placeholder='Choose Gene or position "chr:pos" ',options=tuple(gtf.gene.unique()),description='gene or pos:',ensure_option=False,layout = widgets.Layout(width='500px'))
         ctrait = widgets.Dropdown(description ='trait:',options=[x.replace('regressedlr_', '') for x in self.traits],placeholder='choose a trait',layout = widgets.Layout(width='500px'))
         cqtl_r2_thresh = widgets.BoundedFloatText(description = 'R2 boudary', value = .65, max = 1, min = 0, step = 0.01,layout = widgets.Layout(width='150px')) 
         cpadding = widgets.BoundedIntText(description = 'Padding', value = int(.1e6), max = int(10e6), min = 0,format='0,0')
@@ -3049,7 +3105,7 @@ class gwas_pipe:
         interact_manual(locuszoom_manual_query,loc = cloc, trait = ctrait, qtl_r2_thresh= cqtl_r2_thresh, padding = cpadding)
         return 
     
-    def phewas(self, qtltable: pd.DataFrame() = '', phewas_file = '',
+    def phewas(self, qtltable: pd.DataFrame() = None, phewas_file = '',
                ld_window: int = int(3e6), save:bool = True, pval_threshold: float = 1e-4, nreturn: int = 1 ,r2_threshold: float = .8,\
               annotate: bool = True, **kwards) -> pd.DataFrame():
         '''
@@ -3097,11 +3153,12 @@ class gwas_pipe:
         else:
             phewas_file, bsname = self.phewas_db, ''
         
-        if not len(qtltable): 
+        if not (isinstance(qtltable, pd.DataFrame) and len(qtltable)): 
             printwithlog(f'reading file from {self.path}results/qtls/finalqtl.csv...') 
-            qtltable = pd.read_csv(f'{self.path}results/qtls/finalqtl.csv').set_index('SNP').loc[:, : 'significance_level']
-        #if not len(qtltable): qtltable = pd.read_csv(self.annotatedtablepath).set_index('SNP').loc[:, : 'significance_level']
-        #db_vals = pd.read_parquet(phewas_file).query(f'p < {pval_threshold}')  #, compression='gzip'   and project != "{self.project_name}  
+            qtltable = pd.read_csv(f'{self.path}results/qtls/finalqtl.csv')\
+                         .reset_index().drop(['index' ] + [f'level_{x}' for x in range(100)], errors = 'ignore', axis = 1)\
+                         .set_index('SNP').loc[:, : 'significance_level']
+
         db_vals = pd.concat(pd.read_parquet(x).query(f'p < {pval_threshold}').assign(phewas_file = x) for x in phewas_file.split(',')).reset_index(drop= True)
         db_vals.SNP = db_vals.SNP.str.replace('chr', '')
         db_vals.trait_description = db_vals.trait_description.astype(str).apply(lambda x: re.sub(r'[^\d\w ]+',' ', x))
@@ -3135,10 +3192,10 @@ class gwas_pipe:
             return -1
             
         if annotate:
-            table_window_match = self.annotate(table_window_match.rename({'A1_phewasdb':'A1', 'A2_phewasdb': 'A2',
+            table_window_match = self.annotatevep(table_window_match.rename({'A1_phewasdb':'A1', 'A2_phewasdb': 'A2',
                                             'Chr_phewasdb':'Chr', 'bp_phewasdb':'bp'}, axis = 1), \
                                  'NearbySNP', save = False).rename({'gene': 'gene_phewasdb', 'annotation':'annotation_phewasdb'}, axis = 1)
-            table_exact_match = self.annotate(table_exact_match.rename({'A1_QTL':'A1', 'A2_QTL': 'A2','Chr_QTL':'Chr', 'bp_QTL':'bp'}, axis = 1), save = False)\
+            table_exact_match = self.annotatevep(table_exact_match.rename({'A1_QTL':'A1', 'A2_QTL': 'A2','Chr_QTL':'Chr', 'bp_QTL':'bp'}, axis = 1), save = False)\
                                     .rename({'A1': 'A1_QTL', 'A2':'A2_QTL','Chr':'Chr_QTL', 'bp':'bp_QTL'}, axis = 1)
             # table_exact_match= table_exact_match.assign(**{i:'' for i in set(['gene', 'annotation'])-set(table_window_match.columns)})\
             #                                     .rename({'gene': 'gene_phewasdb', 'annotation':'annotation_phewasdb'}, axis = 1)
@@ -3187,9 +3244,9 @@ class gwas_pipe:
         
     def phewas_widget(self):
         from ipywidgets import interact, interact_manual, widgets
-        if not hasattr(self, 'gtf'): self.gtf = self.get_ncbi_gtf()
+        gtf = self.get_gtf() if not hasattr(self, 'gtf') else self.gtf
         self.phewas_widget_result = None
-        cloc = widgets.Combobox(placeholder='Choose Gene or position "chr:pos" ',options=tuple(self.gtf.gene.unique()), \
+        cloc = widgets.Combobox(placeholder='Choose Gene or position "chr:pos" ',options=tuple(gtf.gene.unique()), \
                                 description='gene or pos:',ensure_option=False,layout = widgets.Layout(width='500px'))
         phewas_file = widgets.Combobox(placeholder='Choose parquet phewas file" ',
                                        options=[], value = self.phewas_db,
@@ -3210,7 +3267,7 @@ class gwas_pipe:
         interact_manual(phewas_manual_query,loc = cloc, qtl_r2_thresh= cqtl_r2_thresh, phewas_file=phewas_file)
         return 
         
-    def eQTL(self, qtltable: pd.DataFrame()= '',
+    def eQTL(self, qtltable: pd.DataFrame()= None,
              pval_thresh: float = 1e-4, r2_thresh: float = .6, nreturn: int =1, ld_window: int = 3e6,\
             tissue_list: list = ['BLA','Brain','Eye','IL','LHb','NAcc','NAcc2','OFC','PL','PL2'],\
             annotate = True, **kwards) -> pd.DataFrame():
@@ -3255,20 +3312,25 @@ class gwas_pipe:
             8.save the final eQTL table to a file and return the final eQTL table.
         '''
         printwithlog(f'starting eqtl ... {self.project_name}') 
-        if self.genome not in ['rn6', 'rn7']: 
+        if self.genome_accession not in ['GCF_000001895.4', 'GCF_015227675.2']: 
             pd.DataFrame(columns = ['trait', 'SNP', '-log10(P-value)', 'R2', 'SNP_eqtldb', 'tissue', \
                                     '-log10(pval_nominal)', 'DP', 'Ensembl_gene', 'gene_id', 'slope', 'tss_distance', 'af', 'presence_samples']) \
                         .to_csv(f'{self.path}results/eqtl/pretty_eqtl_table.csv', index = False)
             return -1
         #d =  {'rn6': '', 'rn7': '.rn7.2'}[genome]
-        mygene_species = {'rn6': 'rat', 'rn7': 'rat', 'm38': 'mouse', 'cfw': 'mouse'}[self.genome]
-        if not len(qtltable): 
+        #mygene_species = {'rn6': 'rat', 'rn7': 'rat', 'm38': 'mouse', 'cfw': 'mouse'}[self.genome]
+        if not (isinstance(qtltable, pd.DataFrame) and len(qtltable)): 
             printwithlog(f'reading file from {self.path}results/qtls/finalqtl.csv...') 
-            qtltable = pd.read_csv(f'{self.path}results/qtls/finalqtl.csv').set_index('SNP').loc[:, : 'significance_level']
+            qtltable = pd.read_csv(f'{self.path}results/qtls/finalqtl.csv')\
+                        .reset_index().drop(['index' ] + [f'level_{x}' for x in range(100)], errors = 'ignore', axis = 1)\
+                        .set_index('SNP').loc[:, : 'significance_level']
+                         
         out = []
+        genomeacc2rnv = {'GCF_000001895.4': 'rn6', 'GCF_015227675.2': 'rn7' }
+        #genomeacc2rnv[self.genome_accession]
         for tissue in tqdm(tissue_list,  position=0, desc="tissue", leave=True):
 
-            tempdf = pd.read_csv(f'https://ratgtex.org/data/eqtl/{tissue}.{self.genome}.cis_qtl_signif.txt.gz', sep = '\t').assign(tissue = tissue)\
+            tempdf = pd.read_csv(f'https://ratgtex.org/data/eqtl/{tissue}.{genomeacc2rnv[self.genome_accession]}.cis_qtl_signif.txt.gz', sep = '\t').assign(tissue = tissue)\
                                                                                                              .rename({'variant_id': 'SNP'}, axis = 1)
             tempdf['SNP'] =tempdf.SNP.str.replace('chr', '')
             out += [pd.concat([ 
@@ -3282,9 +3344,9 @@ class gwas_pipe:
                   .nsmallest(nreturn, 'pval_nominal')
                   for  _, row in qtltable.iterrows() ])]
 
-        out = pd.concat(out).reset_index(drop=True)
+        out = pd.concat(out).reset_index(drop=True).drop(['index' ] + [f'level_{x}' for x in range(100)], errors = 'ignore', axis = 1)
         if annotate:
-            out = self.annotate(out, 'NearbySNP', save = False)
+            out = self.annotatevep(out, 'NearbySNP', save = False)
         self.eqtl_path = f'{self.path}results/eqtl/eqtl.csv'
         out['presence_samples'] = out.ma_samples.astype(str) + '/'+ out.ma_count.astype(str)
         out.to_csv(self.eqtl_path, index= False)
@@ -3293,20 +3355,21 @@ class gwas_pipe:
         eqtl_info = pd.read_csv(self.eqtl_path).rename({'p':'-log10(P-value)'}, axis = 1)
         eqtl_info['-log10(pval_nominal)'] = -np.log10(eqtl_info['pval_nominal'])
         gene_conv_table = pd.DataFrame([(x['query'], defaultdict(lambda: '', x)['symbol']) for x \
-                                in  mg.querymany(eqtl_info.gene_id , scopes='ensembl.gene', fields='symbol', species=mygene_species, verbose = False, silent = True)],
+                                in  mg.querymany(eqtl_info.gene_id , scopes='ensembl.gene', fields='symbol', species=self.taxid, verbose = False, silent = True)],
                               columns = ['gene_id','Ensembl_gene'])
         gene_conv_table= gene_conv_table.groupby('gene_id').agg(lambda df: ' | '.join(df.drop_duplicates())).reset_index()
         eqtl_info = eqtl_info.merge(gene_conv_table, how = 'left', on = 'gene_id')
         eqtl_info.Ensembl_gene = eqtl_info.Ensembl_gene.fillna('')
-        #eqtl_info['Ensembl_gene'] = [defaultdict(lambda: '', x)['symbol'] for x in  mg.querymany(eqtl_info.gene_id , scopes='ensembl.gene', fields='symbol', species='rat')];
+        #eqtl_info['Ensembl_gene'] = [defaultdict(lambda: '', x)['symbol'] for x in  mg.querymany(eqtl_info.gene_id , scopes='ensembl.gene', fields='symbol', species=self.taxid)];
         eqtl_info = eqtl_info.loc[:,  ['trait','SNP_QTL','-log10(P-value)','R2','SNP_eqtldb','tissue', '-log10(pval_nominal)','DP' ,
                                        'Ensembl_gene','gene_id', 'slope' ,'tss_distance', 'af', 'presence_samples']].rename(lambda x: x.replace('_QTL', ''), axis = 1)
         eqtl_info.SNP = 'chr' + eqtl_info.SNP
+        eqtl_info = eqtl_info.drop(['index' ] + [f'level_{x}' for x in range(100)], errors = 'ignore', axis = 1)
         eqtl_info.to_csv(f'{self.path}results/eqtl/pretty_eqtl_table.csv', index = False)
         return eqtl_info
     
     
-    def sQTL(self, qtltable: pd.DataFrame() = '',
+    def sQTL(self, qtltable: pd.DataFrame() = None,
              pval_thresh: float = 1e-4, r2_thresh: float = .6, nreturn: int =1, ld_window: int = 3e6, just_cis = True,
              tissue_list: list = ['BLA','Brain','Eye','IL','LHb','NAcc','NAcc2','OFC','PL','PL2'], annotate = True, **kwards) -> pd.DataFrame():
         
@@ -3350,21 +3413,25 @@ class gwas_pipe:
             8.save the final eQTL table to a file and return the final eQTL table.
         '''
         printwithlog(f'starting spliceqtl ... {self.project_name}') 
-        mygene_species = {'rn6': 'rat', 'rn7': 'rat', 'm38': 'mouse', 'cfw': 'mouse'}[self.genome]
+        #mygene_species = {'rn6': 'rat', 'rn7': 'rat', 'm38': 'mouse', 'cfw': 'mouse'}[self.genome]
         #d =  {'rn6': '', 'rn7': '.rn7.2'}[genome]
-        if self.genome not in ['rn6', 'rn7']: 
+        if self.genome_accession not in ['GCF_015227675.2', 'GCF_000001895.4']: 
             pd.DataFrame(columns = ['trait', 'SNP', '-log10(P-value)', 'R2', 'SNP_sqtldb', 'tissue',
                                     '-log10(pval_nominal)', 'DP', 'Ensembl_gene', 'gene_id', 'slope', 'tss_distance', 'af', 'presence_samples']).to_csv(f'{self.path}results/sqtl/pretty_sqtl_table.csv', index = False)
             return -1
-        if not len(qtltable): 
+        if not (isinstance(qtltable, pd.DataFrame) and len(qtltable)): 
             printwithlog(f'reading file from {self.path}results/qtls/finalqtl.csv...') 
-            qtltable = pd.read_csv(f'{self.path}results/qtls/finalqtl.csv').set_index('SNP').loc[:, : 'significance_level']
+            qtltable = pd.read_csv(f'{self.path}results/qtls/finalqtl.csv')\
+                         .reset_index().drop(['index' ] + [f'level_{x}' for x in range(100)], errors = 'ignore', axis = 1)\
+                         .set_index('SNP').loc[:, : 'significance_level']
+                         
         out = []
         loop_str = [('cis','cis_qtl_signif')] if just_cis else [('cis','cis_qtl_signif'), ('trans','trans_qtl_pairs')]
+        genomeacc2rnv = {'GCF_000001895.4': 'rn6', 'GCF_015227675.2': 'rn7' }
         
         for tissue, (typ, prefix) in tqdm(list(itertools.product(tissue_list, loop_str)),  position=0, desc="tissue+CisTrans", leave=True):
 
-            tempdf = pd.read_csv(f'https://ratgtex.org/data/splice/{tissue}.{self.genome}.splice.{prefix}.txt.gz', sep = '\t').assign(tissue = tissue)\
+            tempdf = pd.read_csv(f'https://ratgtex.org/data/splice/{tissue}.{genomeacc2rnv[self.genome_accession]}.splice.{prefix}.txt.gz', sep = '\t').assign(tissue = tissue)\
                                                                                                              .rename({'variant_id': 'SNP', 'pval': 'pval_nominal'}, axis = 1)  
             tempdf['SNP'] =tempdf.SNP.str.replace('chr', '')
             out += [pd.concat([ 
@@ -3380,16 +3447,16 @@ class gwas_pipe:
 
         out = pd.concat(out).reset_index(drop=True)
         out['gene_id'] = out.phenotype_id.str.extract('(ENSRNOG\d+)')
-        if annotate: out = self.annotate(out, 'NearbySNP', save = False)
+        if annotate: out = self.annotatevep(out, 'NearbySNP', save = False)
         out['presence_samples'] = out.ma_samples.astype(str) + '/'+ out.ma_count.astype(str)
         self.sqtl_path = f'{self.path}results/sqtl/sqtl_table.csv'
-        out.to_csv(self.sqtl_path, index= False)
+        out.drop(['index' ] + [f'level_{x}' for x in range(100)], errors = 'ignore', axis = 1).to_csv(self.sqtl_path, index= False)
         
         #### make pretty tables
         sqtl_info = pd.read_csv(self.sqtl_path).rename({'p':'-log10(P-value)'}, axis = 1)
         sqtl_info['-log10(pval_nominal)'] = -np.log10(sqtl_info['pval_nominal'])
         gene_conv_table = pd.DataFrame([(x['query'], defaultdict(lambda: '', x)['symbol']) for x \
-                                in  mg.querymany(sqtl_info.gene_id , scopes='ensembl.gene', fields='symbol', species=mygene_species, verbose = False, silent = True)],
+                                in  mg.querymany(sqtl_info.gene_id , scopes='ensembl.gene', fields='symbol', species=self.taxid, verbose = False, silent = True)],
                               columns = ['gene_id','Ensembl_gene'])
         gene_conv_table= gene_conv_table.groupby('gene_id').agg(lambda df: ' | '.join(df.drop_duplicates())).reset_index()
         sqtl_info = sqtl_info.merge(gene_conv_table, how = 'left', on = 'gene_id')
@@ -3397,6 +3464,7 @@ class gwas_pipe:
         sqtl_info = sqtl_info.loc[:,  ['trait','SNP_QTL','-log10(P-value)','R2','SNP_sqtldb','tissue', '-log10(pval_nominal)','DP' ,
                                        'Ensembl_gene','gene_id', 'slope' , 'af', 'sQTLtype', 'presence_samples']].rename(lambda x: x.replace('_QTL', ''), axis = 1)
         sqtl_info.SNP = 'chr' + sqtl_info.SNP
+        sqtl_info = sqtl_info.drop(['index' ] + [f'level_{x}' for x in range(100)], errors = 'ignore', axis = 1)
         sqtl_info.to_csv(f'{self.path}results/sqtl/pretty_sqtl_table.csv', index = False)
         return sqtl_info
     
@@ -3414,12 +3482,8 @@ class gwas_pipe:
                        [f'regressedlr_{t.replace("regressedlr_", "")}_chrgwas{chromp2}.mlma' for chromp2 in self.chrList()]:
                 if glob(f'{self.path}results/gwas/{opt}'):
                     df_gwas += [pd.read_csv(f'{self.path}results/gwas/{opt}', sep = '\t')]
-                    # logopt = opt.replace('.loco.mlma', '.log').replace('.mlma', '.log')
-                    # df_date += [pd.read_csv(f'{self.path}results/gwas/{logopt}',
-                    #                         sep = '!', header = None ).iloc[6, 0][:-1].replace('Analysis started at', '')]
                 else: 
                     pass
-                    #printwithlog(f'could not open file {self.path}results/gwas/{opt}')
             if len(df_gwas) == 0 :
                 printwithlog(f'could not open mlma files for {t}')
             df_gwas = pd.concat(df_gwas)
@@ -3547,7 +3611,10 @@ class gwas_pipe:
         printwithlog('starting porcupine plot v2')
         hv.opts.defaults(hv.opts.Points(width=1200, height=600), hv.opts.RGB(width=1200, height=600) )
         if type(qtltable) == str:
-            if not len(qtltable): qtltable = pd.read_csv(f'{self.path}results/qtls/finalqtl.csv').reset_index().query('QTL == True')
+            if not len(qtltable): qtltable = pd.read_csv(f'{self.path}results/qtls/finalqtl.csv')\
+                                               .reset_index()\
+                                               .drop(['index' ] + [f'level_{x}' for x in range(100)], errors = 'ignore', axis = 1)\
+                                               .query('QTL == True')
         if not len(traitlist): traitlist = list(map(lambda x:x.replace('regressedlr_', ''),self.traits))        
         cmap = sns.color_palette("tab20", len(traitlist))
         d = {t: cmap[v] for v,t in enumerate(sorted(traitlist))}
@@ -3703,7 +3770,7 @@ class gwas_pipe:
         abvt = abvt.rename({'-log10p':'realp'}, axis = 1).reset_index(drop= True)
         oo = self.callQTLs( NonStrictSearchDir=abvt, add_founder_genotypes = True,conditional_analysis=False, displayqtl= False, save = False, annotate= False)
         if len(oo):
-            oo = self.annotate(oo, save= False)
+            oo = self.annotatevep(oo, save= False)
             send2d = oo.drop(['p', 'color', 'x', 'trait_description', 'Chr', 'bp'], axis = 1).rename({'realp': '-log10p'}, axis = 1)
             if 'gene' in send2d: send2d= send2d.loc[:,:'gene']
             deliverable['qtls'] = fancy_display(send2d)
@@ -3767,7 +3834,7 @@ class gwas_pipe:
         and the results are parsed into a new DataFrame.  If save is True, the final annotated table is saved to a file. 
         The function returns the final annotated table.
         '''
-        if len(qtltable) == 0: 
+        if not (isinstance(qtltable, pd.DataFrame) and len(qtltable)): 
             printwithlog('dataframe is empty, returning same dataframe')
             return qtltable #qtltable = pd.read_csv(self.allqtlspath).set_index('SNP')
         d = {'rn6': 'Rnor_6.0.99', 'rn7':'mRatBN7.2.105', 'cfw': 'GRCm38.99','m38': 'GRCm38.99'}[self.genome]
@@ -3798,7 +3865,7 @@ class gwas_pipe:
         if 'geneid' in out.columns:
             species = translate_dict(self.genome, {'rn7': 'rat', 'rn8':'rat', 'm38':'mouse', 'rn6': 'rat'})
             gene_translation = {x['query']: x['symbol'] for x in mg.querymany(('-'.join(out.geneid)).split('-') ,\
-                           scopes='ensembl.gene,symbol,RGD', fields='symbol', species=species, verbose = False, silent = True)  if 'symbol' in x.keys()}
+                           scopes='ensembl.gene,symbol,RGD', fields='symbol', species=self.taxid, verbose = False, silent = True)  if 'symbol' in x.keys()}
             if gene_translation: out['gene'] = out.geneid.map(lambda x: translate_dict(x, gene_translation))
         
         if 'errors' in out.columns:  out = out.loc[:, :'errors']
@@ -3849,12 +3916,13 @@ class gwas_pipe:
                .drop(['Location','Allele','Gene', 'UPLOADED_ALLELE'], axis = 1)\
                .replace('-', np.nan).replace('genomic.gff.gz', f'{self.genome_accession}:refseq:gff')\
                .rename(lambda x: x.replace('_', '').lower() if x not in translate_names_dict else translate_dict(x,translate_names_dict ), axis = 1)
-        if oo.columns.str.contains('position$').any():
+        if oo.columns.str.contains('position$').any() and len(oo):
             poscols = list(oo.columns[oo.columns.str.contains('position$')])
-            oo['position_'+ '|'.join(map(lambda x:x.replace('position', ''), poscols))] = oo[poscols].astype('str').apply(lambda c: c.str.cat(sep='|').replace('nan', 'NA'), axis = 1)
+            oo['position_'+ '|'.join(map(lambda x:x.replace('position', ''), poscols))] = oo[poscols].astype(str).apply(lambda c: c.str.cat(sep='|').replace('nan', 'NA'), axis = 1)
             oo = oo.drop(poscols, axis = 1)
         oo = oo.T.dropna(how = 'all').T
-        oo = qtltable.merge(oo, on = 'SNP', how = 'left')
+        oo = qtltable.merge(oo.rename({'SNP': snpcol}, axis = 1), on = snpcol, how = 'left')\
+                     .drop(['index'] + [f'level_{x}' for x in range(100)], errors = 'ignore', axis = 1)
         if save:
             self.annotatedtablepath = f'{self.path}results/qtls/finalqtlannotated.csv'
             oo.reset_index().to_csv(self.annotatedtablepath, index= False) 
@@ -3876,15 +3944,17 @@ class gwas_pipe:
         # del future
         gwas_res = pd.concat([ pd.read_csv(x, sep = '\t')\
                          .assign(trait = x.split('regressedlr_')[-1].split('_chrgwas')[0])\
-                   for x in tqdm(glob(f'{self.path}results/gwas/*.mlma'))]).reset_index()
+                   for x in tqdm(glob(f'{self.path}results/gwas/*.mlma'))]).reset_index(drop=True)
         gwas_res['p'] = -np.log10(gwas_res.p)
         gb =  gwas_res.groupby('trait')
         if col2use == 'prefix':
             gwas_res['prefix'] = gwas_res['trait'].map(lambda x: x.split('_')[0])
         else:  gwas_res['prefix'] = 'passthrough'
         gwas_res['rank'] = -np.log10(gb['p'].rank(ascending = False, pct = True))
-        qtltable = pd.read_csv(f'{self.path}results/qtls/finalqtlannotated.csv').query('QTL == True').reset_index().drop(['rank', 'p'], axis = 1)\
-                      .merge(gwas_res[['SNP', 'trait', 'rank', 'p', 'prefix']], on = ['SNP', 'trait'], how = 'left', suffixes=['', '2drop'])
+        qtltable = pd.read_csv(f'{self.path}results/qtls/finalqtlannotated.csv').query('QTL == True').reset_index(drop=True)\
+                     .drop(['index' ] + [f'level_{x}' for x in range(100)], errors = 'ignore', axis = 1)\
+                     .drop(['rank', 'p'], errors = 'ignore', axis = 1)\
+                     .merge(gwas_res[['SNP', 'trait', 'rank', 'p', 'prefix']], on = ['SNP', 'trait'], how = 'left', suffixes=['', '2drop'])
         def readsample(tempt, minp = 0):
             temp = pd.concat(pd.read_csv(x, sep = '\t',usecols=['SNP', 'p', 'b'], dtype={'SNP':str, 'p':float, 'b':float}).assign(trait = tempt.split('/')[-1]) for x in glob(tempt+'/*.mlma'))
             temp['p'] = -np.log10(temp.p)
@@ -3936,11 +4006,11 @@ class gwas_pipe:
                                 .opts(levels=15)*hv.HLine(self.threshold).opts(color='red')
             else:
                 fig = fig*datashade(hv.Points(subsample, kdims = ['rnk','p']), pixel_ratio= .5, aggregator=ds.count(), min_alpha=1, \
-                                                width = 600,height = 600, y_range= yrange,x_range= xrange,  
+                                                width = 500,height = 500, y_range= yrange,x_range= xrange,  
                                     cmap = sns.dark_palette(mplrgb2hex([.9,.9,.9]), reverse=True, as_cmap=True), 
                                     dynamic = False )*hv.HLine(self.threshold).opts(color='red')
                 fig_v = fig_v*datashade(hv.Points(randmlma.sample(int(1e7)), kdims = ['b','p']), pixel_ratio= .5, aggregator=ds.count(), min_alpha=1, \
-                                                width = 800,height = 800, y_range= yrange,x_range= xrange_v,  
+                                                width = 500,height = 500, y_range= yrange,x_range= xrange_v,  
                                         cmap = sns.dark_palette(mplrgb2hex([.9,.9,.9]), reverse=True, as_cmap=True), 
                                     dynamic = False )*hv.HLine(self.threshold).opts(color='red')
         else: fig = fig*hv.HLine(self.threshold).opts(color='red')
@@ -3949,10 +4019,10 @@ class gwas_pipe:
         crit = gwas_res.trait.isin(qtltable.trait)
         for idx, (trait, df) in tqdm(enumerate(gwas_res.loc[crit].groupby(col2use))):
             fig = fig*dynspread(datashade( hv.Points(df, kdims = ['rank','p']).opts(color=d[trait], size=0), pixel_ratio= 1, aggregator=ds.count(),
-                                          width=600, height=600, y_range= yrange,x_range= xrange, \
+                                          width=500, height=500, y_range= yrange,x_range= xrange, \
                                           min_alpha=.7, cmap = [d[trait]], dynamic = False),  max_px=3,threshold= 1 )
             fig_v = fig_v*dynspread(datashade( hv.Points(df, kdims = ['b','p']).opts(color=d[trait], size=0), pixel_ratio= 1, aggregator=ds.count(),
-                                          width=600, height=600, y_range= yrange,x_range= xrange_v, \
+                                          width=500, height=500, y_range= yrange,x_range= xrange_v, \
                                           min_alpha=.5, cmap = d[trait], dynamic = False),  max_px=1,threshold= 1 )
         fig = fig*hv.Slope(1,0).opts(color='black')
         fig_v = fig_v*(hv.VLine(0).opts(color='black', line_width = 1))
@@ -3971,8 +4041,8 @@ class gwas_pipe:
             xr = np.linspace(2.5, 8, 1000)
             fig = fig*hv.Area((xr, conf.loc['rnk', 'lower']*np.log(xr) ,conf.loc['rnk', 'upper']*np.log(xr)), vdims=['y', 'y2'])
             
-        fig.opts( shared_axes=False, frame_width=600, frame_height=600, title = f'Q-Q plot',show_legend=False, legend_position='right', xlabel = 'expected', ylabel = 'observed')
-        fig_v.opts( shared_axes=False, frame_width=600, frame_height=600, title = f'volcano plot',show_legend=True, 
+        fig.opts( shared_axes=False, frame_width=500, frame_height=500, title = f'Q-Q plot',show_legend=False, legend_position='right', xlabel = 'expected', ylabel = 'observed')
+        fig_v.opts( shared_axes=False, frame_width=500, frame_height=500, title = f'volcano plot',show_legend=True, 
                    legend_position='right', xlabel = 'beta', ylabel = '-log10pvalue')
         
         fig = (fig.opts(ylim = yrange, xlim = xrange) + fig_v.opts(ylim = yrange))
@@ -4042,11 +4112,15 @@ class gwas_pipe:
         return andrews_curves(aa, class_column='hdbscan').opts(width = 1000, height = 800)
 
     def make_genes_in_range_mk_table(self, path = ''):
-        if not len(path): genes_in_range = pd.read_csv(f"{self.path}results/qtls/genes_in_range.csv")
+        path = ''
+        if not len(path): 
+            if not os.path.isfile(f"{self.path}results/qtls/genes_in_range.csv"): self.locuszoom2()
+            genes_in_range = pd.read_csv(f"{self.path}results/qtls/genes_in_range.csv")
         else: genes_in_range = pd.read_csv(path)
+        gtf = self.get_gtf() if not hasattr(self, 'gtf') else self.gtf
         _genecardmk = lambda gene:f'[genecard](https://www.genecards.org/cgi-bin/carddisp.pl?gene={gene})' if not pd.isna(gene) else ''
         _gwashubmk = lambda gene : f'[gwashub](https://www.ebi.ac.uk/gwas/genes/{gene})' if not pd.isna(gene) else ''
-        _twashubmk = lambda gene : f'[twashub](http://twas-hub.org/genes/{gene})' if not pd.isna(gene) else ''
+        _twashubmk = lambda gene : f'[twashub](http://twas-hub.org/genes/{gene.upper()})' if not pd.isna(gene) else ''
         _genecupmk = lambda gene : f'[genecup](https://genecup.org/progress?type=brain&type=addiction&type=drug&type=function&type=psychiatric&type=cell&type=stress&type=GWAS&query={gene})'\
                                    if not pd.isna(gene) else ''
         _genebassmk = lambda ensid: f'[genebass](https://app.genebass.org/gene/{ensid}?burdenSet=pLoF&phewasOpts=1&resultLayout=full)' if not pd.isna(ensid) else ''
@@ -4064,14 +4138,9 @@ class gwas_pipe:
                                              'transcript_id','gene_id', 'exon_id', 'exon_number', 'webpage', 'markdown'} \
                                             & set(genes_in_range.columns), axis = 1).drop_duplicates(subset=['gene', 'SNP_origin'])
         
-        gene_annt = query_gene(genes_in_range.gene, self.genome)[[ 'name', 'symbol', 'AllianceGenome', 'ensembl', 'entrezgene', 'genomic_pos']]
-        gene_annt['genomic_pos'] = gene_annt['genomic_pos'].map(lambda x: x[0] if isinstance(x, list) else x).map(lambda x: f"{x['chr']}:{x['start']}-{x['end']}" if isinstance(x, dict) else 'remove')
-        #### this is the fix for the future any genome option
-        # gp = self.gtf.set_index('gene').loc[genes_in_range.gene].groupby(by = 'gene', group_keys = False)\
-        #          .apply(lambda df: df.query('biotype == "transcript"').iloc[[0]])#
-        # gene_annt = gene_annt.drop('genomic_pos', axis = 1).combine_first(gp[['genomic_pos']])
+        gene_annt = query_gene(genes_in_range.gene, self.taxid)[[ 'name', 'symbol', 'AllianceGenome', 'ensembl', 'entrezgene']]
         gene_annt['ensembl'] = gene_annt['ensembl'].map(lambda x: x[0] if isinstance(x, list) else x).map(lambda x: x['gene'] if isinstance(x, dict) else x)
-        gene_annt = gene_annt.query('genomic_pos != "remove"')
+        gene_annt = gene_annt
         
         genes_in_range = genes_in_range.rename({'gene': 'symbol'}, axis =1).merge(gene_annt.drop('symbol', axis = 1), 
                                                                                   left_on = ['symbol','description'], right_on =['query', 'name'], how = 'left')
@@ -4082,15 +4151,16 @@ class gwas_pipe:
         genes_in_range['links'] = genes_in_range.apply(lambda r: ','.join([_genecardmk(r.symbol),_gwashubmk(r.symbol), _genecupmk(r.symbol),  _twashubmk(r.symbol)]) , axis = 1 )
         genes_in_range['links'] = (genes_in_range.links + ',' + genes_in_range.ensemblh.fillna('')).str.replace(',,', '').str.strip(',').str.replace('nan', '')
         genes_in_range = genes_in_range.drop('ensemblh', axis = 1)
-        if self.genome in ['rn6', 'rn7', 'rn8']:
+        if self.species == 'rattus_norvegicus':
             genes_in_range['links'] = genes_in_range.apply(lambda r:f'{r.links},{_rgdhtmk(r.AllianceGenome)}'.replace('nan', '').replace(',,', '').strip(',') , axis = 1)
         genes_in_range = genes_in_range.loc[~genes_in_range.name.fillna('').str.contains('uncharacterized LOC|^Trna')]
         genes_in_range = genes_in_range.loc[~(genes_in_range.symbol.fillna('').str.contains('uncharacterized LOC|^Trna') & genes_in_range.name.isna())]
         genes_in_range = genes_in_range.loc[:, ~genes_in_range.columns.str.contains('Unnamed:')]#.drop_duplicates()
+        genes_in_range.head()
         genes_in_range['distance'] = genes_in_range.apply(lambda x: distance2snp(x.SNP_origin, x.genomic_pos), axis = 1)
         return genes_in_range.set_index('SNP_origin').dropna(subset = ['name'])[['genomic_pos','distance','symbol', 'name','AllianceGenome','ensembl','entrezgene','links']]
 
-    def report(self, round_version: str = '10.2', covariate_explained_var_threshold: float = 0.02, gwas_version='current', 
+    def report(self, round_version: str = '10.3.2', covariate_explained_var_threshold: float = 0.02, gwas_version='current', 
                sorted_gcorr = True, add_gwas_latent_space= 'nmf', add_experimental = True):
         printwithlog('generating report...')
         with open(f'{self.path}genotypes/parameter_thresholds.txt', 'r') as f: 
@@ -4105,10 +4175,10 @@ class gwas_pipe:
                    .sum().astype(str)
 
         if round(self.threshold, 2) == round(self.threshold05, 2):
-            threshtext = f'''* {self.genome}:{round_version} 5%: {round(self.threshold, 2)}'''
+            threshtext = f'''* {self.genome_version}:{round_version} 5%: {round(self.threshold, 2)}'''
         else:
-            threshtext = f'''* {self.genome}:{round_version} 10%: {round(self.threshold, 2)}
-* {self.genome}:{round_version} 5% : {round(self.threshold05, 2)}'''
+            threshtext = f'''* {self.genome_version}:{round_version} 10%: {round(self.threshold, 2)}
+* {self.genome_version}:{round_version} 5% : {round(self.threshold05, 2)}'''
                     
         text_sidepanel = f"""# General Information
 <hr>
@@ -4126,7 +4196,7 @@ Phenotype Info
 
 Genotype Info
 
-* genotypes version: \n*{self.genome}:{round_version}*
+* genotypes version: \n*{self.genome_version}:{round_version}*
 
 * gwas pipeline version: \n*{gwas_version}*
 
@@ -4221,6 +4291,7 @@ Column definitions:
         her = fancy_display(her, 'heritablitity.csv')
         template.main.append( pn.Card(heritext, herfig, her, title = 'Heritability', collapsed=True))
         qtls = pd.read_csv(f'{self.path}results/qtls/finalqtl.csv').query('QTL').rename({'p':'-Log10(p)', 'b':'beta', 'se': 'betase', 'af': 'Freq', 'SNP': 'TopSNP'}, axis = 1).round(3)
+        founder_ids = set(self.foundersbimfambed[1].fid.sort_values().to_list()) if len(self.foundersbimfambed) else set()
         qtlstext = f'''
 # **Summary of QTLs** 
 
@@ -4228,7 +4299,7 @@ The genome-wide significance threshold (-log10p):
 
 {threshtext}
 
-The values shown in the table below pass the {self.genome}:{round_version} subjective threshold. 
+The values shown in the table below pass the {self.genome_version}:{round_version} subjective threshold. 
 
   Quantitative trait loci (QTLs) are regions in the genome that contain single nucleotide polymorphisms (SNPs) that correlate with a complex trait.
 If there are multiple QTLs in a given chromosome, then the top SNP from the most significant QTL is used as a covariate for another GWAS analysis within the chromosome.  If the analysis results in another SNP with a p-value that exceeds the permutation-derived threshold then it is considered an independent locus. This continues until no more QTLs are devoted within a given chromosome. This method is described in details in (Chitre et al., 2020)
@@ -4243,11 +4314,11 @@ Column definitions:
 * betase: standard error of effect size of topSNP
 * -Log10(p): statistical significance of the association between the trait variability and the top SNP, displayed as -log10(p-value). The log-transformed p-value used in all figures and tables in this report
 * trait: trait in which the snp was indentified
-{'* ACI, BN, BUF, F344, M520, MR, WKY, WN: genotypes of founders at the topSNP' if 'ACI' in qtls.columns else ''}'''
+{f"* {', '.join(list(founder_ids)[:100])}: genotypes of founders at the topSNP" if len(founder_ids) else ''}'''
         
         
         qtls = qtls[['TopSNP','Freq','beta','betase','-Log10(p)','significance_level','trait'] + \
-                    (['ACI', 'BN', 'BUF', 'F344', 'M520', 'MR', 'WKY', 'WN'] if 'ACI' in qtls.columns else []) ]
+                    list(founder_ids & set(qtls.columns)) ]
         template.main.append( pn.Card(qtlstext, fancy_display(qtls, 'qtls.csv'), title = 'QTL', collapsed=True))
         
         
@@ -4289,7 +4360,7 @@ To control type I error, we estimated the significance threshold by a permutatio
                                       title = 'Manhattan Plots', collapsed=True))
         db_vals_t = pd.concat(pd.read_parquet(x).assign(phewas_file = x) for x in self.phewas_db.split(',')).reset_index(drop= True)
         PROJECTLIST = '\n'.join(list(map(lambda x: '*  ' + x, db_vals_t['project'].unique())))
-        eqtlstext = '' if self.genome not in ['rn6', 'rn7'] else f'''## Gene Expression changes:
+        eqtlstext = '' if self.species not in ['rattus_norvegicus'] else f'''## Gene Expression changes:
 
 ### expression QTL (eQTLs) 
 We examine if the identified SNP does significant alter the gene expression of genes in cis, possibly describing a pathway in which the SNP impact the phenotype. We also examine SNPs within 3 Mb window and a correlation above 0.6 of the topSNP from the current study, in case the selected SNP is in high LD with another SNP that can alter the gene expression in cis.
@@ -4350,30 +4421,14 @@ Defining columns:
 * DP: Dprime measure of linkage disequilibrium (correlation between the SNPs adjusted by the maximum possible correlation between those SNPs)
 
 {eqtlstext}'''
-
-        #         The first PheWAS table shows information about any other phenotypes that are associated with this topSNP, from all studies conducted in HS rats by the center.
-        
-        # Defining columns: 
-        
-        # * -Log10(p)PheDb: -log10(p-value) for another trait present in the PheWAS database
-        # * trait_PheDb: trait from the associated study with the same topSNP
-        # * project: project from which the trait was studied
-        # * trait_description_PheDb: trait definition
         
         ann = pd.read_csv(f'{self.path}results/qtls/possible_causal_snps.tsv', sep = '\t').drop(['A1','A2', 'featureid', 'rank', 
                                                                                'cDNA_position|cDNA_len','CDS_position|CDS_len',
-                                                                               'Protein_position|Protein_len','distancetofeature'], axis = 1)\
+                                                                               'Protein_position|Protein_len','distancetofeature'], errors = 'ignore' ,axis = 1)\
                  .query("putative_impact in ['MODERATE', 'HIGH']").sort_values('putative_impact')
         ann['p'] = -np.log10(ann.p)
         ann.rename({'p':'-Log10(p)'},axis=1,  inplace=True)
         
-        # phewas_exact = pd.read_csv(f'{self.path}results/phewas/pretty_table_exact_match.tsv', sep = '\t').rename({ 'p_PheDb':'-Log10(p)PheDb'}, axis =1)\
-        #                  .sort_values('uploadeddate', ascending = False).drop(['round_version', 'uploadeddate'], axis =1).drop_duplicates(['SNP','trait_QTL','trait_PheDb','project'])
-        
-        # phewas = pd.read_csv(f'{self.path}results/phewas/pretty_table_window_match.tsv', sep = '\t').rename({'p_PheDb': '-Log10(p)PheDb'}, axis =1)\
-        #                  .sort_values('uploadeddate', ascending = False).drop(['round_version', 'uploadeddate'], axis =1)\
-        #                  .drop_duplicates(['SNP_QTL', 'SNP_PheDb','trait_QTL','trait_PheDb','project'])
-
         phewas = pd.read_csv(f'{self.path}results/phewas/pretty_table_both_match.tsv', sep = '\t')
         phewas = phewas.loc[phewas.R2.replace('Exact match SNP', 1.1).astype(float).sort_values(ascending = False).index]\
                        .rename({'p_PheDb': '-Log10(p)PheDb'}, axis =1).drop(['round_version', 'uploadeddate'], axis =1)\
@@ -4392,16 +4447,19 @@ Defining columns:
         out = [regional_assoc_text]
         for index, row in tqdm(list(qtls.iterrows())):
             texttitle = f"Trait: {row.trait} SNP: {row.TopSNP}\n"
-            row_desc = fancy_display(row.to_frame().T)
+            #row_desc = fancy_display(row.to_frame().T)
+            row_desc = pn.pane.Markdown(row.to_frame().T.fillna('').to_markdown())
             snp_doc = row.TopSNP.replace(":", '_')
             if row.TopSNP in genes_in_range2.index:
                 giran = pn.Card(pn.pane.Markdown(genes_in_range2.loc[[row.TopSNP]].fillna('').to_markdown()), title = 'Gene Links', collapsed = False, min_width=500)
             else: 
                 giran = pn.Card(f'no Genes in section for SNP {row.TopSNP}', title = 'Gene Links', collapsed = False, min_width=500)
             #lzplot = pn.pane.Plotly(plotio.read_json(f'{self.path}images/lz/lz__{row.trait}__{snp_doc}.json'))
-            lzplot = pn.pane.PNG(f'{self.path}images/lz/lz__{row.trait}__{snp_doc}.png',  max_width=1000, max_height=600, width = 1000, height = 600)
-            lzplot2 = pn.pane.PNG(f'{self.path}images/lz/6Mb/lz__{row.trait}_6Mb__{snp_doc}.png',  max_width=1000, max_height=600, width = 1000, height = 600)
-            lztext = pn.pane.Markdown(f'[interactive version](https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/{self.project_name}/images/lz/lz__{row.trait}__{snp_doc}.html)')
+            # lzplot = pn.pane.PNG(f'{self.path}images/lz/lz__{row.trait}__{snp_doc}.png',  max_width=1000, max_height=600, width = 1000, height = 600)
+            # lzplot2 = pn.pane.PNG(f'{self.path}images/lz/6Mb/lz__{row.trait}_6Mb__{snp_doc}.png',  max_width=1000, max_height=600, width = 1000, height = 600)
+            lzplot = pn.pane.PNG(f'{self.path}images/lz/r2thresh/lzi__{row.trait}__{snp_doc}.png',  max_width=1200, max_height=1200, width = 1200, height = 800)
+            lzplot2 = pn.pane.PNG(f'{self.path}images/lz/minmax/lzi__{row.trait}__{snp_doc}.png',  max_width=1200, max_height=1200, width = 1200, height = 800)
+            lztext = pn.pane.Markdown(f'[interactive version](https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/{self.project_name}/images/lz/minmax/lzi__{row.trait}__{snp_doc}.html)')
             boxplot = pn.pane.PNG(f'{self.path}images/boxplot/boxplot{snp_doc}__{row.trait}.png', max_width=800, max_height=400, width = 800, height = 400)
         
             cau_title = pn.pane.Markdown(f"### Coding variants: {row.trait} {row.TopSNP}\n")
@@ -4415,46 +4473,47 @@ Defining columns:
             for idx, tdf in phewas.groupby('phewas_file'):
                 pboth_title = pn.pane.Markdown(f"### PheWAS: Lowest P-values for other phenotypes in a 3Mb window of {row.trait} {row.TopSNP} for {basename(tdf.phewas_file.iloc[0])}\n")
                 pbothtemp = tdf.query('SNP_QTL == @row.TopSNP and trait_QTL == @row.trait')[['SNP_PheDb','-Log10(p)PheDb','R2', 'DP' ,'trait_PheDb', 'project', 'trait_description_PheDb']].drop_duplicates()
-                if pbothtemp.shape[0]: pbothtemp = fancy_display(pbothtemp, f'phewas_{row.trait}{row.TopSNP}.csv'.replace(':', '_'))
+                if pbothtemp.shape[0]: pbothtemp = fancy_display(pbothtemp.fillna(''), f'phewas_{row.trait}{row.TopSNP}.csv'.replace(':', '_'))
                 else: pbothtemp = pn.pane.Markdown(f' \n SNPS were not detected for other phenotypes in 3Mb window of topSNP  \n   \n')
                 phewas_section += [pboth_title,pbothtemp]
         
             eqtl_title = pn.pane.Markdown(f"### eQTL: Lowest P-values for eqtls in a 3Mb window of {row.trait} {row.TopSNP}\n")
             eqtltemp = eqtl.query(f'SNP == "{"chr"+row.TopSNP}" and trait == "{row.trait}"').rename({'Ensembl_gene': 'gene'}, axis = 1)\
                            [['SNP_eqtldb', '-Log10(p)_eqtldb', 'tissue', 'R2', 'DP', 'gene', 'gene_id', 'slope', 'af']].drop_duplicates()
-            if eqtltemp.shape[0]: eqtltemp = fancy_display(eqtltemp,f'eqtl_{row.trait}{row.TopSNP}.csv'.replace(':', '_'))
+            if eqtltemp.shape[0]: eqtltemp = fancy_display(eqtltemp.fillna(''),f'eqtl_{row.trait}{row.TopSNP}.csv'.replace(':', '_'))
             else: eqtltemp = pn.pane.Markdown(' \n SNPS were not detected for eQTLs in 3Mb window of trait topSNP  \n   \n')
         
             sqtl_title = pn.pane.Markdown(f"### sQTL: Lowest P-values for splice qtls in a 3Mb window of {row.trait} {row.TopSNP}\n")
             sqtltemp = sqtl.query(f'SNP=="{"chr"+row.TopSNP}" and trait == "{row.trait}"').rename({'Ensembl_gene': 'gene'}, axis = 1)\
                            [['SNP_sqtldb', '-Log10(p)_sqtldb', 'tissue','R2', 'DP', 'gene','gene_id' , 'slope', 'af']].drop_duplicates()
-            if sqtltemp.shape[0]: sqtltemp = fancy_display(sqtltemp, f'sqtl_{row.trait}{row.TopSNP}.csv'.replace(':', '_'))
+            if sqtltemp.shape[0]: sqtltemp = fancy_display(sqtltemp.fillna(''), f'sqtl_{row.trait}{row.TopSNP}.csv'.replace(':', '_'))
             else: sqtltemp = pn.pane.Markdown(' \n  SNPS were not detected for sQTLs in 3Mb window of trait topSNP  \n   \n')
 
             dt2append = [giran, cau_title, cau] + phewas_section #+[phe_title,  phetemp, phew_title, phewtemp]
-            if self.genome in ['rn6', 'rn7']:
+            if self.genome_accession in ['GCF_015227675.2', 'GCF_000001895.4']:
                 dt2append += [eqtl_title, eqtltemp,sqtl_title, sqtltemp]
         
             out += [pn.Card(*[row_desc,lzplot,lzplot2,lztext,boxplot,pn.Card(*dt2append, title = 'tables', collapsed = False)]   ,title = texttitle, collapsed = True)]
             #
             
         template.main.append(pn.Card(*out, title = 'Regional Association Plots', collapsed = True))
-        #geneenrichmenttext = f'''# **GeneEnrichment Plot**
-        
-        # This network plot shows the connectivity between traits through: 
-        # * 1) the significant snps of each trait 
-        # * 2) the closest gene associated with each SNP on (1)
-        # * 3) for each trait we perform gene enrichment of the genes for associated with all the top SNPS linked to the trait
-        # * 4) for each trait we perform gene enrichment of all the genes within all the qtls ideintified for this trait '''
-        # goeafig = pn.pane.HoloViews(self.GeneEnrichment_figure(),width=1000,height=1000, min_height=1000, min_width=1000)
-        # goeacard =  pn.Card(geneenrichmenttext, goeafig, title = 'Gene Enrichment', collapsed=True)
         if add_experimental:
+            geneenrichmenttext = f'''# **GeneEnrichment Plot**
+
+This network plot shows the connectivity between traits through: 
+* 1) the significant snps of each trait 
+* 2) the closest gene associated with each SNP on (1)
+* 3) for each trait we perform gene enrichment of the genes for associated with all the top SNPS linked to the trait
+* 4) for each trait we perform gene enrichment of all the genes within all the qtls ideintified for this trait '''
+            goeafig = pn.pane.HoloViews(self.GeneEnrichment_figure(),width=1000,height=1000, min_height=1000, min_width=1000)
+            goeacard =  pn.Card(geneenrichmenttext, goeafig, title = 'Gene Enrichment', collapsed=True)
+        
             graphviewtext = f'''# **Graph View Plot**
         
 This network plot shows the connectivity between traits, topSNPS, eQTLS, sQTLS, annotated variants '''
             pjgraph = pn.pane.HoloViews(self.project_graph_view(),width=1000,height=1000, min_height=1000, min_width=1000)
             projviewcard = pn.Card(graphviewtext, pjgraph, title = 'Project Graph View', collapsed=True)
-            add2card = [panel_genetic_pca,projviewcard] #goeacard
+            add2card = [panel_genetic_pca,projviewcard,goeacard] #goeacard
             if add_gwas_latent_space != 'none':
                 if add_gwas_latent_space in [True, 1, '1', 'True']: add_gwas_latent_space = 'nmf'
                 add2card += [self.GWAS_latent_space(method = add_gwas_latent_space)[0]]
@@ -4481,12 +4540,6 @@ Are there sex differences?
         
         reftext = '''* Chitre AS, Polesskaya O, Holl K, Gao J, Cheng R, Bimschleger H, Garcia Martinez A, George T, Gileta AF, Han W, Horvath A, Hughson A, Ishiwari K, King CP, Lamparelli A, Versaggi CL, Martin C, St Pierre CL, Tripi JA, Wang T, Chen H, Flagel SB, Meyer P, Richards J, Robinson TE, Palmer AA, Solberg Woods LC. Genome-Wide Association Study in 3,173 Outbred Rats Identifies Multiple Loci for Body Weight, Adiposity, and Fasting Glucose. Obesity (Silver Spring). 2020 Oct;28(10):1964-1973. doi: 10.1002/oby.22927. Epub 2020 Aug 29. PMID: 32860487; PMCID: PMC7511439.'''
         template.main.append(pn.Card(reftext, title = 'References', collapsed = True))
-        
-        #template.main.append( pn.Card(pn.pane.Plotly(dashbio.Ideogram( id = 'test',  orientation='horizontal', organism = 'rat')), title = 'Chromosomes', collapsed=True))
-        #template.main.append(
-        #    [pn.Card(dfi_sine.hvplot(min_height=400).output(), title='Sine'),
-        #    pn.Card(fancy_display(df))]
-        #)
         template.header.append(f'## {self.project_name}')
         template.save(f'{self.path}results/gwas_report.html', resources=INLINE)
         bash(f'''cp {self.path}results/gwas_report.html {self.path}results/gwas_report_{self.project_name}_round{round_version}_threshold{round(self.threshold,2)}_n{self.df.shape[0]}_date{datetime.today().strftime('%Y-%m-%d')}_gwasversion_{gwas_version}.html''')
@@ -4519,14 +4572,11 @@ Are there sex differences?
         print('waiting 1 min for copying files...')
         sleep(60*1)
         if make_public:
-            if tscc == 2:
-                bash('/tscc/projects/ps-palmer/tsanches/mc anonymous set public /tscc/projects/ps-palmer/s3/data/tsanches_dash_genotypes --recursive')
-                printwithlog(f'{destination.replace("/tscc/projects/ps-palmer/s3/data", "https://palmerlab.s3.sdsc.edu")}/{self.project_name}/results/gwas_report.html')
-            else:
-                bash('/projects/ps-palmer/tsanches/mc anonymous set public myminio/tsanches_dash_genotypes --recursive')
-                printwithlog(f'{destination.replace("/projects/ps-palmer/s3/data", "https://palmerlab.s3.sdsc.edu")}/{self.project_name}/results/gwas_report.html')
+            bash('/tscc/projects/ps-palmer/tsanches/mc anonymous set public /tscc/projects/ps-palmer/s3/data/tsanches_dash_genotypes --recursive')
+            printwithlog(f'{destination.replace("/tscc/projects/ps-palmer/s3/data", "https://palmerlab.s3.sdsc.edu")}/{self.project_name}/results/gwas_report.html')
 
-    def GeneEnrichment(self, qtls: pd.DataFrame = None, genome: str = 'rn7', padding: int = 2e6, r2thresh: float = .9,
+
+    def GeneEnrichment(self, qtls: pd.DataFrame = None, genome: str = 'rn7', padding: int = 2e6, r2thresh: float = .8,
                    append_nearby_genes:bool = False, select_nearby_genes_by:str = 'r2'):
         from goatools.base import download_go_basic_obo
         from goatools.obo_parser import GODag
@@ -4535,41 +4585,32 @@ Are there sex differences?
         
         gene2go = download_ncbi_associations()
         obo_fname = download_go_basic_obo()
-        geneid2gos_rat= Gene2GoReader(gene2go, taxids=[10116])
+        geneid2gos_rat= Gene2GoReader(gene2go, taxids=[int(self.taxid)])
         
         obodag = GODag('go-basic.obo')
         ratassc = geneid2gos_rat.get_ns2assc()
-        
-        linkdict = {'rn7':f'http://hgdownload.soe.ucsc.edu/goldenPath/rn7/bigZips/genes/ncbiRefSeq.gtf.gz' , 
-                    'rn6':'https://hgdownload.soe.ucsc.edu/goldenPath/rn6/bigZips/genes/rn6.ncbiRefSeq.gtf.gz',
-                   'm38': 'https://hgdownload.soe.ucsc.edu/goldenPath/mm10/bigZips/genes/mm10.ncbiRefSeq.gtf.gz'}
-        #
-        gtf = pd.read_csv(linkdict[genome], sep = '\t', header = None)\
-           .set_axis(['Chr', 'source', 'biotype', 'start', 'end', 'score', 'strand', 'phase', 'ID'], axis = 1)
-        gtf['ID'] = gtf['ID'].apply(lambda x: {y.split(' "')[0].strip(' '): y.split(' "')[-1][:-1] for y in x.strip(';').split(';')})
-        gtf =pd.concat([gtf.drop('ID', axis = 1), pd.json_normalize(gtf['ID'].to_list())], axis = 1).query('biotype == "transcript"')
-        gtf = gtf[~gtf.Chr.str.lower().str.contains('un|na')]
-        gtf['Chr'] = gtf['Chr'].apply(lambda x: self.replaceXYMTtonums(x.split('_')[0])).apply(lambda x: self.replacenumstoXYMT(x)).str.upper()
-        
-        #if type(qlts) == str: qtls = pd.read_csv(qtls)
-        if type(qtls) != type(pd.DataFrame()): qtls = pd.read_csv(f'{self.path}results/qtls/finalqtl.csv')
-        species = translate_dict(self.genome, {'rn7': 'rat', 'rn8':'rat', 'm38':'mouse', 'rn6': 'rat'})
+
+        if isinstance(qtls, str): qtls = pd.read_csv(qtls)
+        if not (isinstance(qtls, pd.DataFrame) and len(qtls)) : qtls = pd.read_csv(f'{self.path}results/qtls/finalqtl.csv')
+        #species = translate_dict(self.genome, {'rn7': 'rat', 'rn8':'rat', 'm38':'mouse', 'rn6': 'rat'})
         def get_entrez_ids(genes):
             if type(genes) == str: genes = genes.split('-') + [genes]
             o = []
             for i in genes: 
-                o += list(np.unique(i.split('-') + [i]))
+                if not pd.isna(i): o += list(np.unique(i.split('-') + [i]))
                 
-            return list(np.unique([int(y.replace('ENSRNOG', '')) for x  in mg.querymany(o, scopes='ensemblgene,symbol,RGD', fields='all', species=species, verbose = False, silent = True, entrezonly=True)\
+            return list(np.unique([int(y.replace('ENSRNOG', '')) for x  in mg.querymany(o, scopes='ensemblgene,symbol,RGD', fields='all',
+                                                                                        species=self.taxid, verbose = False, silent = True, entrezonly=True)\
                                                                           if (len(y := defaultdict(lambda:'', x)['entrezgene']) > 0) * ('ENSRN' not in y)])) #
         print('getting entrezid per snp...')
-        
-        allgenes = gtf.query('biotype == "transcript"')[['gene_id', 'Chr', 'start', 'end']].drop_duplicates().melt(id_vars=['Chr','gene_id']) 
+        gtf = self.get_gtf() if not hasattr(self, 'gtf') else self.gtf
+        allgenes = gtf.query('gbkey == "Gene"')[['gene_id', 'Chr', 'start', 'end']].drop_duplicates()
         if select_nearby_genes_by == 'distance':
+            if not os.path.isfile(f"{self.path}results/qtls/genes_in_range.csv"): self.locuszoom2()
             genes = pd.read_csv(f'{self.path}results/qtls/genes_in_range.csv')
             snpgroups = genes.groupby('SNP_origin')[['gene_id']].agg(lambda x: list(np.unique(x)))
             snpgroups = qtls[['SNP']].rename(lambda x: x+ '_origin', axis = 1)
-            snpgroups['gene_id'] = snpgroups.SNP_origin.apply(lambda x: list(allgenes.query(f'''Chr == "{x.split(':')[0]}" and ({x.split(':')[1]}-{padding}<value<{x.split(':')[1]}+{padding})''').gene_id.unique()))
+            snpgroups['gene_id'] = snpgroups.SNP_origin.apply(lambda x: list(allgenes.query(f'''Chr == {int(x.split(':')[0])} and ({x.split(':')[1]}-{padding}<value<{x.split(':')[1]}+{padding})''').gene_id.unique()))
             snpgroups = snpgroups.set_index('SNP_origin')
             snpgroups['entrezid'] = snpgroups['gene_id'].progress_apply(get_entrez_ids)
             qtls = qtls.merge(snpgroups.rename(lambda x: x+ '_nearby', axis = 1).reset_index(), left_on = 'SNP', right_on = 'SNP_origin')
@@ -4580,16 +4621,16 @@ Are there sex differences?
                 temp = self.plink(bfile = self.genotypes_subset, chr = rowdata.Chr, ld_snp = rowdata.SNP, ld_window_r2 = 0.01, r2 = '',\
                                                     ld_window = 100000, thread_num = int(self.threadnum), ld_window_kb =  6000, nonfounders = '').loc[:, ['SNP_B', 'R2']] 
                 minbp,maxbp = pd.Series(temp.query('R2> @r2thresh')['SNP_B'].to_list() + [rowdata.SNP]).str.extract(':(\d+)').astype(int).agg([min, max]).T.values.flatten()
-                out = list(allgenes.query(f'Chr == "{self.replacenumstoXYMT(rowdata.Chr).upper()}" and ((variable == "start" and value < @maxbp) or (variable == "end" and value > @minbp))').gene_id.unique())
-                return [i for i in out if ('LOC' not in i)]
+                out = list(allgenes.query(f'Chr == {rowdata.Chr} and  end > {minbp} and start < {maxbp}').gene_id.unique())
+                return [i for i in out ] #if ('LOC' not in i)
             qtls['gene_id_nearby'] = qtls.progress_apply(get_nearby_genes_r2, r2thresh = r2thresh, axis = 1)
             qtls['entrezid_nearby'] = qtls['gene_id_nearby'].progress_apply(get_entrez_ids)
         
-        merged_qtls = qtls.groupby('trait')[['gene', 'gene_id_nearby','entrezid_nearby']].agg(sum)
+        merged_qtls = qtls.groupby('trait')[['gene', 'gene_id_nearby','entrezid_nearby']].agg(sum).applymap(lambda x: [] if x == 0 else x)
         print('getting entrezid per qtl...')
         merged_qtls['entrezid'] = merged_qtls['gene'].progress_apply(get_entrez_ids)
-        print(f'getting entrezid per for all {genome} genes...')
-        allentrez = get_entrez_ids(gtf.gene_name.unique())
+        print(f'getting entrezid per for all {self.species} {self.taxid} genes...')
+        allentrez = get_entrez_ids(gtf.gene.unique())
         
         print(f'initializing GO study...')
         goeaobj = GOEnrichmentStudyNS(pop=allentrez, ns2assoc=ratassc, godag=obodag,
@@ -4627,33 +4668,40 @@ Are there sex differences?
              else:  merged_qtls = pd.read_pickle(merged_qtls)                  
         MG = nx.MultiGraph()
         for _, r in qtls.iterrows():
-            if not MG.has_node(r['gene'][0]):
-                MG.add_node(r['gene'][0], what = 'gene', size = 10 + qtls['gene'].map(lambda x: x[0]).value_counts()[r.gene[0]], color = 'seagreen' )
+            if not pd.isna(r.gene):
+                if not MG.has_node(r['gene'][0]):
+                    MG.add_node(r['gene'][0], what = 'gene',  color = 'seagreen',
+                                size = 10 + qtls['gene'].dropna().map(lambda x: x[0]).value_counts()[r.gene[0]] )
             if not MG.has_node(r['SNP']):
-                MG.add_node(r['SNP'], what = 'topSNP', size = 5 +  qtls['SNP'].value_counts()[r.SNP], color = 'black' )
+                MG.add_node(r['SNP'], what = 'topSNP', color = 'black', 
+                            size = 5 +  qtls['SNP'].value_counts()[r.SNP] )
             if not MG.has_node(r['trait']):
-                MG.add_node(r['trait'], what = 'trait', size =15+ qtls['trait'].value_counts()[r.trait], color = 'steelblue' )
+                MG.add_node(r['trait'], what = 'trait', color = 'steelblue', 
+                            size =15+ qtls['trait'].value_counts()[r.trait])
             MG.add_edges_from([(r.SNP, r.trait)], weight=r.p, type = 'snp2gene')
-            MG.add_edges_from([(r.gene[0], r.trait)], weight=2, type = 'gene2trait')
+            if not pd.isna(r.gene): MG.add_edges_from([(r.gene[0], r.trait)], weight=2, type = 'gene2trait')
             if append_nearby_genes:
-                for gidnerby in r.gene_id_nearby:
-                    if not MG.has_node(gidnerby): 
-                        MG.add_node(gidnerby, what = 'nearby gene', size = 2, color = 'white' )
-                        MG.add_edges_from([(gidnerby, r.SNP)], weight=0.5, type = 'nearbyGene2SNP')
+                if not r.gene_id_nearby is np.nan: 
+                    for gidnerby in r.gene_id_nearby:
+                        if not MG.has_node(gidnerby): 
+                            MG.add_node(gidnerby, what = 'nearby gene', size = 2, color = 'white' )
+                            MG.add_edges_from([(gidnerby, r.SNP)], weight=0.5, type = 'nearbyGene2SNP')
         
         for trait, row in merged_qtls.iterrows():
             aa = row.goea.query(f'p_corr < {0.05}')
             aa[['p', 'p_corr']] = np.nan_to_num(-np.log10(aa[['p', 'p_corr']]), posinf=30, neginf=0)
             for _, rg in aa.iterrows():
                 if not MG.has_node(f'{rg.GO}\n{rg.term}'):
-                    MG.add_node(f'{rg.GO}\n{rg.term}' , what = f'Gene Ontology {trait}', size = 20*rg.p_corr, term = rg.term, cls = rg['class'], p = rg.p, color = 'firebrick')
+                    MG.add_node(f'{rg.GO}\n{rg.term}' , what = f'Gene Ontology {trait}', 
+                                size = 20*rg.p_corr, term = rg.term, cls = rg['class'], p = rg.p, color = 'firebrick')
                 MG.add_edges_from([(trait, f'{rg.GO}\n{rg.term}')], weight=1.5*rg.p_corr, type = 'snp2gene')
             bb = row.goea_nearby.query(f'p_corr < {1e-15}')
             bb[['p', 'p_corr']] = np.nan_to_num(-np.log10(bb[['p', 'p_corr']]), posinf=30, neginf=0)
         
             for _, rg in bb.iterrows():
                 if not MG.has_node(f'{rg.GO}\n{rg.term}'):
-                    MG.add_node(f'{rg.GO}\n{rg.term}', what = f'Gene Ontology {trait} with nearby genes', size = max(5,rg.p_corr/5), term = rg.term, cls = rg['class'], p = rg.p, color = 'orange')
+                    MG.add_node(f'{rg.GO}\n{rg.term}', what = f'Gene Ontology {trait} with nearby genes',
+                                size = max(5,rg.p_corr/5), term = rg.term, cls = rg['class'], p = rg.p, color = 'orange')
                 MG.add_edges_from([(trait, f'{rg.GO}\n{rg.term}')], weight=rg.p_corr, type = 'snp2gene')
         
         kwargs = dict(width=800, height=800, xaxis=None, yaxis=None)
@@ -4744,7 +4792,7 @@ Are there sex differences?
         
         ann = pd.read_csv(f'{self.path}results/qtls/possible_causal_snps.tsv', sep = '\t').drop(['A1','A2', 'featureid', 'rank', 
                                                                                'cDNA_position|cDNA_len','CDS_position|CDS_len',
-                                                                               'Protein_position|Protein_len','distancetofeature'], axis = 1)\
+                                                                               'Protein_position|Protein_len','distancetofeature'], errors = 'ignore', axis = 1)\
                  .query("putative_impact in ['MODERATE', 'HIGH']").sort_values('putative_impact')
         ann['p'] = -np.log10(ann.p)
         ann.rename({'p':'-Log10(p)'},axis=1,  inplace=True)
@@ -4769,20 +4817,21 @@ Are there sex differences?
         
         MG = nx.MultiGraph()
         for _, r in qtls.iterrows():
-            if not MG.has_node(r['gene'][0]):
-                MG.add_node(r['gene'][0], what = defaultdict(int, {'gene': 1}), size = 20 + qtls['gene'].map(lambda x: x[0]).value_counts()[r.gene[0]], color = 'seagreen' )
-            else:  
-                MG.nodes[r['gene'][0]]['what']['gene'] += 1
-                MG.nodes[r['gene'][0]]['size'] *= 2
+            if not pd.isna(r.gene):
+                if not MG.has_node(r['gene'][0]):
+                    MG.add_node(r['gene'][0], what = defaultdict(int, {'gene': 1}), size = 20 + qtls['gene'].dropna().map(lambda x: x[0]).value_counts()[r.gene[0]], color = 'seagreen' )
+                else:  
+                    MG.nodes[r['gene'][0]]['what']['gene'] += 1
+                    MG.nodes[r['gene'][0]]['size'] *= 2
             if not MG.has_node(r['SNP']):
                 MG.add_node(r['SNP'], what = defaultdict(int, {'topsnp': 1}), size = 14 +  qtls['SNP'].value_counts()[r.SNP], color = 'black' )
             else:  
-                MG.nodes[r['gene'][0]]['what']['topsnp'] += 1
-                MG.nodes[r['gene'][0]]['size'] *= 2    
+                MG.nodes[r.SNP]['what']['topsnp'] += 1
+                MG.nodes[r.SNP]['size'] *= 2    
             if not MG.has_node(r['trait']):
                 MG.add_node(r['trait'], what = defaultdict(int, {'trait': 1}), size =40 + qtls['trait'].value_counts()[r.trait], color = 'steelblue' )
             MG.add_edges_from([(r.SNP, r.trait)], weight=r.p, type = 'snp2gene')
-            MG.add_edges_from([(r.gene[0], r.trait)], weight=2, type = 'gene2trait')
+            if not pd.isna(r.gene): MG.add_edges_from([(r.gene[0], r.trait)], weight=2, type = 'gene2trait')
             if append_nearby_genes:
                 for gidnerby in r.gene_id_nearby:
                     if not MG.has_node(gidnerby): 

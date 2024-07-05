@@ -117,7 +117,7 @@ if dictionary['phewas']:gwas.phewas(annotate=True, pval_threshold = 1e-4, nretur
 if dictionary['eqtl']:gwas.eQTL(annotate= True) ###essential
 if dictionary['sqtl']:gwas.sQTL() ###essential
 if dictionary['goea']:gwas.GeneEnrichment() ###essential
-if dictionary['locuszoom']: gwas.locuszoom(**kw(dictionary, 'locuszoom_'))  ###essential
+if dictionary['locuszoom']: gwas.locuszoom2(**kw(dictionary, 'locuszoom_'))  ###essential
 if dictionary['h2fig']: gwas.make_heritability_figure(display = False) 
 if dictionary['report']:
     kws = kw(dictionary, 'report_')
