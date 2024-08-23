@@ -27,11 +27,6 @@ class stat_check:
         test_variables = list(set(self.numerical_columns) & set(targets if len(targets) > 0 else self.df.columns))
         out = []
         for cov in covariates:
-            #statsdf = pd.DataFrame(stats.f_oneway(*[y.loc[:, test_variables].fillna(y.loc[:, test_variables].mean()) for x,y in self.df.groupby(cov)]),\
-            #                       columns = test_variables, index = ['F stat', 'pval'] ).T  #.dropna() y.loc[:, test_variables].mean()
-            
-            #statsdf = pd.DataFrame([stats.f_oneway(*[z for x,y in self.df.groupby(cov)[i] if len(z:=y.dropna()) > 0 ]) for i in test_variables],\
-            #                        columns = ['F stat', 'pval'], index = test_variables)
             statsdf = pd.DataFrame([stats.f_oneway(*lis)\
                                    if len(lis:=[z for x,y in self.df.groupby(cov)[i] if len(z:=y.dropna()) > 0 ]) >1\
                                    else ['not enough groups', 1]\
@@ -48,13 +43,7 @@ class stat_check:
     
     def explained_variance(self, targets: list = [] , covariates: list = []) -> pd.DataFrame:
         return self.df[covariates+targets].corr().loc[covariates, targets]**2
-        #return pd.DataFrame(cdist(self.df[covariates].T, self.df[targets].T, \
-        #                    metric = self.rob_r2), index = covariates, columns = tblargets)
-    
-    #def rob_r2(self, x,y):
-    #    idx = 1 - np.isnan([x,y]).any(axis = 0)
-    #    idx = [num for num,i in enumerate(idx) if i ]
-    #    return np.corrcoef(np.array(x)[idx], np.array(y)[idx])[0, 1]**2
+        
     
     def plot_var_distribution(self, targets: list = [] , covariates: list = []) -> pd.DataFrame:
         numeric_columns = list(set(self.numerical_columns) & set(targets if len(targets) > 0 else self.df.columns))
@@ -128,7 +117,6 @@ class stat_check:
         self.plot_var_distribution(targets = targets, covariates = covariates)
         print(f'printing outliers > {outlier_thrs} std')
         display(self.get_outliers(subset = targets, threshold= outlier_thrs))
-        #self.make_report('report_html.html')
         
 
         
@@ -154,13 +142,6 @@ def regress_out_per_group(df: pd.DataFrame,groups: list, variates: list = [], **
         
     return  df.groupby(groups).apply(lambda x:regress_out_covariates(x, variates))
 
-#def regress_out_per_group(df: pd.DataFrame, covariates: list, variates: list = [], 
-#                          transformer = QuantileTransformer(n_quantiles=100).fit_transform):
-#    if not variates:
-#        variates = df.select_dtypes(include=np.number).columns
-#    
-#    return  df.groupby(covariates)[variates].apply(lambda x: pd.DataFrame(transformer(x),columns = variates )
-#                                                                     ).reset_index()#.drop('level_1', axis =1 ) #
 
 def regress_out(df, variable, covariates, model = LinearRegression()):
     covariates = list(set(covariates))
@@ -181,11 +162,4 @@ def regress_out_v2(df, variable, covariates, model = LinearRegression()):
 
 def quantileTrasformEdited(df, columns):
     return (df[columns].rank(axis = 0, method = 'first')/(df[columns].count()+1)).apply(norm.ppf)
-
-#def quantileTrasformEditedOld(df, columns):  
-#    #subdf = df.T.drop_duplicates().T
-#    subdf = df.T[~df.T.index.duplicated(keep='first')].T
-#    return np.clip(QuantileTransformer(n_quantiles = subdf.shape[0], output_distribution = 'normal' )\
-#                   .fit_transform(subdf[columns] + 1e-6*np.random.random(size = (subdf.shape[0], len(columns))) ), 
-#                   -4,4)
 

@@ -90,7 +90,7 @@ def pyblup(y, Z=None, K=None, X=None, method="REML", bounds=(1e-09, 1e+09), SE=F
     else:
         def f_REML(lambda_, n_p, theta, omega_sq):
             return n_p * np.log(np.sum(omega_sq / (theta + lambda_))) + np.sum(np.log(theta + lambda_))
-        soln = minimize(f_REML, x0=1, args=(n - X.shape[1], theta, omega_sq), bounds=[bounds])
+        soln = minimize(f_REML, x0=.5, args=(n - X.shape[1], theta, omega_sq), bounds=[bounds])
 
     lambda_opt = soln.x[0]
     df = n if method == "ML" else n - X.shape[1]
@@ -122,12 +122,18 @@ def pyblup(y, Z=None, K=None, X=None, method="REML", bounds=(1e-09, 1e+09), SE=F
             u_SE = np.sqrt(Vu_opt * (np.diag(K) - np.diag(WW) + np.diag(WWW)))
         
         if return_Hinv:
-            return {'Vu': Vu_opt, 'Ve': Ve_opt, 'beta': beta, 'beta_SE': beta_SE, 'u': u, 'u_SE': u_SE, 'LL': LL, 'Hinv': Hinv}
+            return {'Vu': np.float64(Vu_opt), 'Ve': np.float64(Ve_opt), 
+                    'beta': np.float64(beta), 'beta_SE': np.float64(beta_SE), 
+                    'u': np.float64(u), 'u_SE': np.float64(u_SE), 'LL': np.float64(LL), 'Hinv': np.float64(Hinv)}
         else:
-            return {'Vu': Vu_opt, 'Ve': Ve_opt, 'beta': beta, 'beta_SE': beta_SE, 'u': u, 'u_SE': u_SE, 'LL': LL}
+            return {'Vu': np.float64(Vu_opt), 'Ve': np.float64(Ve_opt), 
+                    'beta': np.float64(beta), 'beta_SE': np.float64(beta_SE), 
+                    'u': np.float64(u), 'u_SE': np.float64(u_SE), 'LL': np.float64(LL)}
     else:
         if return_Hinv:
-            return {'Vu': Vu_opt, 'Ve': Ve_opt, 'beta': beta, 'u': u, 'LL': LL, 'Hinv': Hinv}
+            return {'Vu': np.float64(Vu_opt), 'Ve': np.float64(Ve_opt), 
+                    'beta': np.float64(beta), 'u': np.float64(u), 'LL': np.float64(LL), 'Hinv': np.float64(Hinv)}
         else:
-            return {'Vu': Vu_opt, 'Ve': Ve_opt, 'beta': beta, 'u': u, 'LL': LL}
+            return {'Vu': np.float64(Vu_opt), 'Ve': np.float64(Ve_opt), 
+                    'beta': np.float64(beta), 'u': np.float64(u), 'LL': np.float64(LL)}
 

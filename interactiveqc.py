@@ -7,6 +7,9 @@ from datetime import datetime
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import panel as pn
+pn.extension('plotly')
+pn.extension()
 
 class interactive_QC:
     def __init__(self, raw_data: pd.DataFrame, data_dictionary: pd.DataFrame):
@@ -43,10 +46,8 @@ class interactive_QC:
                                                                                                    description = 'extra code',  
                                                                                            layout = widgets.Layout(width='1000px'))]
         self.value_dict_rat = pd.DataFrame(index = self.dfog.reset_index().rfid.to_list())
-        print('pass')
         self.value_dict_rat['wid_text'] =  [widgets.Text(value = '', description = f'extra code rat {i}',  layout = widgets.Layout(width='1000px')) \
                                              for i in self.dfog.reset_index().rfid]
-        print('pass2')
         self.outdfname = f'raw_data_curated_n{self.dfog.shape[0]}_{datetime.today().strftime("%Y%m%d")}.csv'
 
     def quick_view(self):
@@ -79,13 +80,15 @@ class interactive_QC:
         describer.loc[trait, [f'z{x}%' for x in 100*np.array([0.00001, 0.0001, 0.001, .01, .05][::-1])]] = [' – '.join(x) for x in ppfr.round(2).astype(str)]
         display(describer)
         covariates = set(self.align_w_cols(self.dd.set_index('measure').loc[trait, 'covariates'].split(','))) 
+        tabs = pn.Tabs(tabs_location='left')
         if covariates != {'passthrough'}:
             fig = px.histogram(df, x = trait, color = 'sex')
             fig.update_layout(template='simple_white',width = 800, height = 500, coloraxis_colorbar_x=1.05,
                                           coloraxis_colorbar_y = .3,coloraxis_colorbar_len = .8,hovermode='x unified')
             fig.add_vline(x=ranger, line_width=3, line_dash="dash", line_color="red")
             for rangeri in ranger: fig.add_vline(x=rangeri, line_width=3, line_dash="dash", line_color="red")
-            display(fig)
+            tabs.append(('histogram', pn.pane.Plotly(fig)))
+            #display(fig)
             for cv in covariates:
                 cvtype = self.dd.set_index('measure').loc[cv, 'trait_covariate']
                 if cvtype !='covariate_continuous':
@@ -95,7 +98,9 @@ class interactive_QC:
                     fig.add_violin(x=dffigs[cv], y=dffigs[trait], hoverinfo=[],box_visible=True, line_color='black', hoveron='points',
                                                    meanline_visible=True, fillcolor='gray', opacity=0.4,hovertext=[] )
                     fig.update_layout(legend_visible = False,hovermode='y unified')
+                    plotname = f'{cv}:violin'
                 else: 
+                    plotname = f'{cv}:scatter'
                     fig = px.density_contour(df, y=trait, x=cv, trendline='ols')
                     for i in fig.data: i['line']['color'] = 'gray'
                     fig.add_scatter(x = df[cv], y = df[trait], mode='markers', marker= dict(line_width=1, size=7, color = 'black', line_color = 'white'),
@@ -103,8 +108,9 @@ class interactive_QC:
                 for rangeri in ranger: fig.add_hline(y=rangeri, line_width=3, line_dash="dash", line_color="red")
                 fig.update_layout(template='simple_white',width = 800, height = 600, coloraxis_colorbar_x=1.05, legend_visible = False, 
                                           coloraxis_colorbar_y = .3,coloraxis_colorbar_len = .8)
-                display(fig)
-                #print('ye')
+                #display(fig)
+                tabs.append((plotname, pn.pane.Plotly(fig)))
+            display(tabs)
             self.dffinal.loc[:, trait] = df.loc[:, trait].values
             display(self.dffinal.drop(self.covs, axis = 1).set_index('rfid'))
         if not todo: 

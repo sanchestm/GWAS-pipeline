@@ -48,10 +48,12 @@ dependencies:
   - selenium
   - filterpy
   - datashader
+  - conda-forge::nbformat
   - firefox
   - geckodriver
   - tabulate
-  - ensembl-vep
+  - bioconda::ensembl-vep=112.0-0
+  - conda-forge::pymc
   - pip
   - pip:
     - goatools

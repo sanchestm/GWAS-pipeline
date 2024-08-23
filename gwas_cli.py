@@ -25,13 +25,13 @@ pj = dictionary['project'].rstrip('/')  if (dictionary['project'] ) else 'test'
 if not dictionary['genotypes']:
     dictionary['genotypes'] = '/tscc/projects/ps-palmer/gwas/databases/rounds/r10.2.1'
     
-if not dictionary['threshold']: dictionary['threshold'] = 5.58
+if not dictionary['threshold']: dictionary['threshold'] = 5.4
 if dictionary['threshold'] != 'auto':  dictionary['threshold']= float(dictionary['threshold'])
 
-if not dictionary['threshold05']: dictionary['threshold05'] = 5.58
+if not dictionary['threshold05']: dictionary['threshold05'] = 6.0
 dictionary['threshold05'] = float(dictionary['threshold05'])
     
-if not dictionary['genome']: dictionary['genome'] = 'rn7'
+if not dictionary['genome_accession']: dictionary['genome_accession'] = 'GCF_015227675.2'
     
 if not dictionary['researcher']: dictionary['researcher'] = 'tsanches'
 if not dictionary['n_autosome']: dictionary['n_autosome'] = 20
@@ -39,15 +39,13 @@ if not dictionary['round']: dictionary['round'] = '10.1.0'
 
 if not dictionary['gwas_version']: dictionary['gwas_version'] = '0.1.2'
     
-if not dictionary['snpeff_path']: dictionary['snpeff_path'] = 'snpEff/'
-    
 if not dictionary['phewas_path']: dictionary['phewas_path'] = 'phewasdb.parquet.gz'
     
 if not dictionary['regressout']:
     df = pd.read_csv(f'{path}{pj}/processed_data_ready.csv', 
                      dtype = {'rfid': str}).drop_duplicates(subset = 'rfid') 
     if not dictionary['traits']:
-        traits_ = df.columns[df.columns.str.startswith('regressedlr_')]#cluster_bysex
+        traits_ = df.columns[df.columns.str.startswith('regressedlr_')]
     elif 'prefix_' in dictionary['traits']: 
         pref = dictionary['traits'].replace('prefix_', '')
         traits_ = df.columns[df.columns.str.startswith(f'regressedlr_{pref}')]
@@ -63,11 +61,10 @@ gwas = gwas_pipe(path = f'{path}{pj}/',
              all_genotypes = dictionary['genotypes'], #'round9_1.vcf.gz',
              data = df,
              project_name = pj.split('/')[-1],
-             n_autosome = int(dictionary['n_autosome']),
+             #n_autosome = int(dictionary['n_autosome']),
              traits = traits_,
-             genome = dictionary['genome'],
+             genome_accession = dictionary['genome_accession'],
              founderfile = dictionary['founder_genotypes'],
-             snpeff_path= dictionary['snpeff_path'],
              phewas_db = dictionary['phewas_path'],
              trait_descriptions= traits_d,
              threshold = dictionary['threshold'],
@@ -104,20 +101,21 @@ if dictionary['db']: gwas.addGWASresultsToDb(researcher=dictionary['researcher']
                                              gwas_version=dictionary['gwas_version'])
 if dictionary['qtl']: ###essential
     qtl_add_founder = True if (dictionary['founder_genotypes'] not in [ 'none', 'None', 0]) else False
-    try: qtls = gwas.callQTLs( NonStrictSearchDir=False,   add_founder_genotypes = qtl_add_founder )
+    try: qtls = gwas.callQTLs( NonStrictSearchDir=False, add_founder_genotypes = qtl_add_founder)
     except: qtls = gwas.callQTLs( NonStrictSearchDir=True)
     #gwas.annotate(qtls)
     gwas.effectsize() 
 if dictionary['effect']: gwas.effectsize() 
 if dictionary['gcorr']: ###essential
-    gwas.genetic_correlation_matrix_old()
+    kws = kw(dictionary, 'gcorr_')
+    gwas.genetic_correlation_matrix(**kws)
     gwas.make_heritability_figure(display = False)
-if dictionary['manhattanplot'] or dictionary['porcupineplot']: gwas.porcupineplotv2() ###essential
+if dictionary['manhattanplot'] or dictionary['porcupineplot']: gwas.porcupineplot() ###essential
 if dictionary['phewas']:gwas.phewas(annotate=True, pval_threshold = 1e-4, nreturn = 1, r2_threshold = .4)  ###essential
 if dictionary['eqtl']:gwas.eQTL(annotate= True) ###essential
 if dictionary['sqtl']:gwas.sQTL() ###essential
 if dictionary['goea']:gwas.GeneEnrichment() ###essential
-if dictionary['locuszoom']: gwas.locuszoom2(**kw(dictionary, 'locuszoom_'))  ###essential
+if dictionary['locuszoom']: gwas.locuszoom(**kw(dictionary, 'locuszoom_'))  ###essential
 if dictionary['h2fig']: gwas.make_heritability_figure(display = False) 
 if dictionary['report']:
     kws = kw(dictionary, 'report_')
