@@ -1,70 +1,35 @@
-,measure,trait_covariate,description,general_category,trait_name,subtrait_name,graph_name,drug_abuse_tier,covariates,calculation
-0,box,covariate_categorical,testing chamber animal underwent heroin behavioral testing in. Differs between sites. Refer to protocols.,,,,,,,
-1,coatcolor,covariate_categorical,"albino, brown, black, brown hood, or black hood",,,,,,,
-2,cohort,covariate_categorical,will be a between 2-17. Cohort 1 data is excluded. US site ran 2 more cohorts than Italy,,,,,,,
-3,cued_age,covariate_continuous,age of animal at cued reinstatement session,,,,,,,
-4,epm1_age,covariate_continuous,age of animal at elevated plus maze session before self admin ,,,,,,,
-5,ext01_age,covariate_continuous,age of animal at first extinction session,,,,,,,
-6,lga01_age,covariate_continuous,age of animal at day one of long access self admin,,,,,,,
-7,oft1_age,covariate_continuous,age of animal at open field test session before self admin ,,,,,,,
-8,pr_age,covariate_continuous,age of animal at progressive ratio session,,,,,,,
-9,prime_age,covariate_continuous,age of animal at priming session,,,,,,,
-10,room,covariate_categorical,room animal underwent heroin behavioral testing in. Differs between sites. Refer to protocols.,,,,,,,
-11,room_box,covariate_categorical,room + _ + box,,,,,,,
-12,sex,covariate_categorical,male or female,,,,,,,
-13,site,covariate_categorical,site of testing (italy or us),,,,,,,
-14,surgery_weight,covariate_continuous,weight measured on day of surgery,,,,,,,
-15,tf1_age,covariate_continuous,age of animal at tail flick session before self admin,,,,,,,
-16,labanimalid,metadata,"internal ID used (i.e. us rats start with 'KAL', italy with 'IT')",,,,,,,
-17,rfid,metadata,microchip ID,,,,,,,
-18,cued_active,trait,number of active levers in cued-induced reinstatement session,,,,,,"sex,cohort,surgery_weight,room_box,cued_age,site",
-19,cued_active_bysex,trait,number of active levers in cued-induced reinstatement session,,,,,,"sex,cohort,surgery_weight,room_box,cued_age,site",
-20,epm_percent_closed_1,trait,time spent in the closed arm during the first time point of elevated plus maze before self admin,,,,,,"sex,cohort,surgery_weight,coatcolor,epm1_age,site",
-21,epm_percent_closed_2,trait,time spent in the closed arm during the second time point of elevated plus maze after self admin,,,,,,"sex,cohort,surgery_weight,coatcolor,site",
-22,epm_percent_open_1,trait,time spent in the open arm during the first time point of elevated plus maze before self admin,,,,,,"sex,cohort,surgery_weight,coatcolor,epm1_age,site",
-23,epm_percent_open_2,trait,time spent in the open arm during the first time point of elevated plus maze after self admin,,,,,,"sex,cohort,surgery_weight,coatcolor,site",
-24,ext_burst,trait,,,,,,,"sex,cohort,surgery_weight,room_box,site",
-25,ext_burst_bysex,trait,,,,,,,"sex,cohort,surgery_weight,room_box,site",
-26,ext_day_6_active,trait,number of active lever presses of Extinction session 6,,,,,,"sex,cohort,surgery_weight,room_box,site",
-27,ext_day_6_active_bysex,trait,number of active lever presses of Extinction session 6,,,,,,"sex,cohort,surgery_weight,room_box,site",
-28,ext_de_escalation,trait,,,,,,,"sex,cohort,surgery_weight,room_box,site",
-29,fst_climb,trait,fst measured in solberg-woods lab,,,,,,"sex,cohort,surgery_weight,site",
-30,fst_dive,trait,fst measured in solberg-woods lab,,,,,,"sex,cohort,surgery_weight,site",
-31,fst_float,trait,fst measured in solberg-woods lab,,,,,,"sex,cohort,surgery_weight,site",
-32,fst_swim,trait,fst measured in solberg-woods lab,,,,,,"sex,cohort,surgery_weight,site",
-33,lga_escalation_of_heroin_intake_12h,trait,difference between mean of infusions from LGA sessions 10 through 12 and mean of LGA sessions 1 through 3,,,,,,"sex,cohort,surgery_weight,room_box,site",
-34,lga_escalation_of_heroin_intake_12h_bysex,trait,difference between mean of infusions from LGA sessions 10 through 12 and mean of LGA sessions 1 through 3,,,,,,"sex,cohort,surgery_weight,room_box,site",
-35,lga_escalation_of_heroin_intake_1h,trait,,,,,,,"sex,cohort,surgery_weight,room_box,site",
-36,lga_total_heroin_consumption,trait,(sum of all infusions from LGA sessions 1-12) * 20,,,,,,"sex,cohort,surgery_weight,room_box,site",
-37,lga_total_heroin_consumption_bysex,trait,(sum of all infusions from LGA sessions 1-12) * 20,,,,,,"sex,cohort,surgery_weight,room_box,site",
-38,oft_distance_1,trait,distance traveled in cm at the first time point of open field before self admin,,,,,,"sex,cohort,surgery_weight,coatcolor,oft1_age,site",
-39,oft_distance_2,trait,distance traveled in cm at the second time point of open field after self admin,,,,,,"sex,cohort,surgery_weight,coatcolor,site",
-40,oft_time_1,trait,ambulatary time in seconds at the first time point of open field before self admin,,,,,,"sex,cohort,surgery_weight,coatcolor,oft1_age,site",
-41,oft_time_2,trait,ambulatary time in seconds at the second time point of open field after self admin,,,,,,"sex,cohort,surgery_weight,coatcolor,site",
-42,pr_break_points_bysex,trait,breakpoint value in the PR session after the first set of self admin sessions,,,,,,"sex,cohort,surgery_weight,room_box,pr_age,site",
-43,pr_breakpoints,trait,breakpoint value in the PR session after the first set of self admin sessions,,,,,,"sex,cohort,surgery_weight,room_box,pr_age,site",
-44,prime_active,trait,sum of active levers during the 5th and 6th hour of the priming session,,,,,,"sex,cohort,surgery_weight,pr_age,prime_age,site",
-45,prime_active_bysex,trait,sum of active levers during the 5th and 6th hour of the priming session,,,,,,"sex,cohort,surgery_weight,pr_age,prime_age,site",
-46,prime_extinction_before_priming_active,trait,sum of active levers on first 2 hours of within-session extinction-prime test,,,,,,"sex,cohort,surgery_weight,room_box,pr_age,prime_age,site",
-47,tf_bl_1,trait,time in sec to remove tail from noxious stimuli under vehicle conditions in the first tail flick before self admin,,,,,,"sex,cohort,surgery_weight,coatcolor,tf1_age,site",
-48,tf_bl_2,trait,time in sec to remove tail from noxious stimuli under vehicle conditions in the second tail flick after self admin,,,,,,"sex,cohort,surgery_weight,coatcolor,site",
-49,tf_test_1,trait,time in sec to remove tail from noxious stimuli under test conditions in the first tail flick before self admin,,,,,,"sex,cohort,surgery_weight,coatcolor,tf1_age,site",
-50,tf_test_2,trait,time in sec to remove tail from noxious stimuli under test conditions in the second tail flick after self admin,,,,,,"sex,cohort,surgery_weight,coatcolor,site",
-51,cluster_1,trait,"cluster_1, summary of all bysex straits, splitted using OHE",,,,,,"sex,cohort,surgery_weight,room_box,cued_age,ext01_age,lga01_age,pr_age,prime_age,site",
-52,cluster_2,trait,"cluster_2, summary of all bysex straits, splitted using OHE",,,,,,"sex,cohort,surgery_weight,room_box,cued_age,ext01_age,lga01_age,pr_age,prime_age,site",
-53,cluster_3,trait,"cluster_3, summary of all bysex straits, splitted using OHE",,,,,,"sex,cohort,surgery_weight,room_box,cued_age,ext01_age,lga01_age,pr_age,prime_age,site",
-54,cluster,trait,quantitative cluster analysis 1<2<3,,,,,,"sex,cohort,surgery_weight,room_box,cued_age,ext01_age,lga01_age,pr_age,prime_age,site",
-55,oft_distance_diff,trait,delta distance traveled in cm at the first time point of open field before self admin vs after self admin,,,,,,"sex,cohort,surgery_weight,coatcolor,oft1_age,site",
-56,oft_time_diff,trait,delta ambulatary time in seconds at the first time point of open field before self admin vs after self admin,,,,,,"sex,cohort,surgery_weight,coatcolor,oft1_age,site",
-57,epm_percent_closed_diff,trait,delta time spent in the closed arm during the first time point of elevated plus maze before self admin vs after self admin,,,,,,"sex,cohort,surgery_weight,coatcolor,epm1_age,site",
-58,epm_percent_open_diff,trait,delta time spent in the open arm during the first time point of elevated plus maze before self admin vs after self admin,,,,,,"sex,cohort,surgery_weight,coatcolor,epm1_age,site",
-59,tf_bl_diff,trait,delta time in sec to remove tail from noxious stimuli under vehicle conditions in the first tail flick before self admin vs after self admin,,,,,,"sex,cohort,surgery_weight,coatcolor,tf1_age,site",
-60,tf_test_diff,trait,delta time in sec to remove tail from noxious stimuli under test conditions in the first tail flick before self admin vs after self admin,,,,,,"sex,cohort,surgery_weight,coatcolor,tf1_age,site",
-61,cluster,trait,Cluster ordinal effects,,,,,,,
-62,1vAll_cluster_2,trait,Cluster 2 against (1 and 3),,,,,,,
-63,1vAll_cluster_3,trait,Cluster 3 against (2 and 1),,,,,,,
-64,1vAll_cluster_1,trait,Cluster 1 against (2 and 3),,,,,,,
-65,escalation_of_heroin_intake_12h,trait,escalation_of_heroin_intake_12h,,,,,,"sex,cohort,surgery_weight,room_box,site",
-66,total_heroin_consumption,trait,total_heroin_consumption,,,,,,"sex,cohort,surgery_weight,room_box,site",
-67,bp,trait,bp,,,,,,"sex,cohort,surgery_weight,room_box,site",
-68,tail_flick_bl2,trait,tail_flick_bl2,,,,,,"sex,cohort,surgery_weight,room_box,site",
+measure,count,unique,top,freq,mean,std,min,25%,50%,75%,max,trait_covariate,covariates,description
+rfid,3193,3193,0007929BF5,1,,,,,,,,metadata,,rfid
+sex,3193,2,M,1618,,,,,,,,covariate_categorical,,sex
+center,3193,4,MI,1038,,,,,,,,covariate_categorical,,center
+bmi_wo_tail,3164.0,,,,6.303489454197419,1.2298806821610215,2.77091906721536,5.425,6.06514539286533,7.008403575176647,11.1012345679012,covariate_continuous,,Example of adding better description to bmi_wo_tail trait
+bmi_wo_tail_age,3164.0,,,,123.25031605562579,55.79660159175223,51.0,83.0,92.0,187.0,278.0,covariate_continuous,,bmi_wo_tail_age
+bmi_wo_tail_technician,3164,15,TW,934,,,,,,,,covariate_categorical,,bmi_wo_tail_technician
+bmi_w_tail,3161.0,,,,1.7629437576610536,0.31082907466255205,0.988241511428194,1.52470905717659,1.70900928476686,1.94650222014094,4.10642300456866,covariate_continuous,,bmi_w_tail
+bmi_w_tail_age,3161.0,,,,123.2391648212591,55.798748884036584,51.0,83.0,92.0,187.0,278.0,covariate_continuous,,bmi_w_tail_age
+bmi_w_tail_technician,3161,15,TW,931,,,,,,,,covariate_categorical,,bmi_w_tail_technician
+body_weight_g,3164.0,,,,263.8113147914033,84.73946673511418,121.0,196.0,244.0,313.0,606.0,trait,"sex,center,body_weight_g_age,body_weight_g_technician",body_weight_g
+body_weight_g_age,3164.0,,,,123.25031605562579,55.79660159175223,51.0,83.0,92.0,187.0,278.0,covariate_continuous,,body_weight_g_age
+body_weight_g_technician,3164,15,TW,934,,,,,,,,covariate_categorical,"sex,center",body_weight_g_technician
+epididymis_fat_weight_g,1595.0,,,,3.370046394984326,1.7556093889527085,0.626,2.1715,2.951,4.1485,13.098,covariate_continuous,,epididymis_fat_weight_g
+epididymis_fat_weight_g_age,1595.0,,,,122.5423197492163,55.018269427309235,54.0,84.0,92.0,187.0,274.0,covariate_continuous,,epididymis_fat_weight_g_age
+epididymis_fat_weight_g_technician,1595,18,TW,396,,,,,,,,covariate_categorical,,epididymis_fat_weight_g_technician
+glucose_reading_mg_dl,2246.0,,,,89.1323839715049,10.839035354460474,52.0,82.0,89.0,96.0,130.0,trait,"sex,center,glucose_reading_mg_dl_age,glucose_reading_mg_dl_technician",glucose_reading_mg_dl
+glucose_reading_mg_dl_age,2246.0,,,,143.34016028495103,53.84766154341035,70.0,89.0,147.5,195.0,278.0,covariate_continuous,,glucose_reading_mg_dl_age
+glucose_reading_mg_dl_technician,2246,13,JAT,886,,,,,,,,covariate_categorical,"sex,center",glucose_reading_mg_dl_technician
+length_wo_tail_cm,3164.0,,,,20.24840391908976,1.9504727119659335,14.4,19.0,20.0,21.5,28.0,covariate_continuous,,length_wo_tail_cm
+length_wo_tail_cm_age,3164.0,,,,123.25031605562579,55.79660159175223,51.0,83.0,92.0,187.0,278.0,covariate_continuous,,length_wo_tail_cm_age
+length_wo_tail_cm_technician,3164,15,TW,934,,,,,,,,covariate_categorical,,length_wo_tail_cm_technician
+length_w_tail_cm,3161.0,,,,38.19118949699462,3.4260765714234616,25.5,35.5,38.0,40.5,47.0,covariate_continuous,,length_w_tail_cm
+length_w_tail_cm_age,3161.0,,,,123.2391648212591,55.798748884036584,51.0,83.0,92.0,187.0,278.0,covariate_continuous,,length_w_tail_cm_age
+length_w_tail_cm_technician,3161,15,TW,931,,,,,,,,covariate_categorical,,length_w_tail_cm_technician
+parametrial_fat_weight_g,1481.0,,,,1.556933153274814,0.9711364471107418,0.01,0.857,1.328,1.982,6.35,covariate_continuous,,parametrial_fat_weight_g
+parametrial_fat_weight_g_age,1481.0,,,,124.29101958136394,57.06098900820846,51.0,82.0,91.0,188.0,278.0,covariate_continuous,,parametrial_fat_weight_g_age
+parametrial_fat_weight_g_technician,1481,16,TW,378,,,,,,,,covariate_categorical,,parametrial_fat_weight_g_technician
+retroperitoneal_fat_weight_g_age,3176.0,,,,124.13300712738477,55.784625375413846,51.9083333333333,83.93680555555555,92.81111111111115,187.80295138888874,278.822222222222,covariate_continuous,,retroperitoneal_fat_weight_g_age
+retroperitoneal_fat_weight_g_technician,3176,17,TW,789,,,,,,,,covariate_categorical,,retroperitoneal_fat_weight_g_technician
+tail_length,3158.0,,,,17.94838505383154,2.075568453245946,8.5,16.5,17.7,19.5,24.5,covariate_continuous,,tail_length
+tail_length_age,3158.0,,,,123.2359088030399,55.80276947208293,51.0,83.0,92.0,187.0,278.0,covariate_continuous,,tail_length_age
+tail_length_technician,3158,15,TW,930,,,,,,,,covariate_categorical,,tail_length_technician
+idx,3193.0,,,,1802.3103664265582,956.9744020014916,83.0,989.0,1816.0,2626.0,3472.0,covariate_continuous,,idx
+retroperitoneal_fat_weight_g,3173.0,,,,2.720472887488182,2.6171184010835558,0.065,0.876,1.802,3.64,13.95,covariate_continuous,,retroperitoneal_fat_weight_g

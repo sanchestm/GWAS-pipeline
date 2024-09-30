@@ -1,0 +1,18 @@
+variable,group
+body_weight_g_MI,"['OHE_sex_F', 'OHE_sex_M']"
+body_weight_g_NY,"['OHE_sex_F', 'OHE_sex_M']"
+body_weight_g_TN_beh,"['OHE_sex_F', 'OHE_sex_M', 'body_weight_g_age']"
+body_weight_g_TN_br,"['OHE_sex_F', 'OHE_sex_M']"
+body_weight_g_females_MI,['body_weight_g_age']
+body_weight_g_females_TN_beh,"['OHE_body_weight_g_technician_PK', 'body_weight_g_age']"
+body_weight_g_females_TN_br,['body_weight_g_age']
+body_weight_g_males_MI,['body_weight_g_age']
+body_weight_g_males_TN_beh,['body_weight_g_age']
+body_weight_g_males_TN_br,"['OHE_body_weight_g_technician_JS', 'OHE_body_weight_g_technician_TW', 'body_weight_g_age', 'OHE_body_weight_g_technician_YL']"
+glucose_reading_mg_dl_NY,"['OHE_sex_F', 'OHE_sex_M']"
+glucose_reading_mg_dl_TN_beh,['glucose_reading_mg_dl_age']
+glucose_reading_mg_dl_TN_br,"['glucose_reading_mg_dl_age', 'OHE_glucose_reading_mg_dl_technician_TW', 'OHE_sex_F', 'OHE_sex_M']"
+glucose_reading_mg_dl_females_TN_br,['OHE_glucose_reading_mg_dl_technician_YL']
+glucose_reading_mg_dl_males_NY,['glucose_reading_mg_dl_age']
+glucose_reading_mg_dl_males_TN_beh,['glucose_reading_mg_dl_age']
+glucose_reading_mg_dl_males_TN_br,"['glucose_reading_mg_dl_age', 'OHE_glucose_reading_mg_dl_technician_JS']"

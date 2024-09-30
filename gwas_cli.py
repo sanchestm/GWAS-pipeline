@@ -3,7 +3,11 @@ from gwas_class_auto import *
 import sys
 import pandas as pd
 
-dictionary = defaultdict(lambda: 0, {k.replace('-', ''):v for k,v in [(x + '=1' if '=' not in x else x).split('=') for x in sys.argv[1:]] })
+runall = 'regressout subset grm h2 gwas db qtl gcorr phewas eqtl sqtl goea locuszoom h2fig report store publish'.replace(' ', '|||')
+run2phewas = 'regressout subset grm h2 gwas db qtl gcorr eqtl sqtl goea locuszoom h2fig'.replace(' ', '|||')
+
+allargs = '|||'.join(sys.argv[1:]).replace('runall', runall).replace('run2phewas', run2phewas).split('|||')
+dictionary = defaultdict(lambda: 0, {k.replace('-', ''):v for k,v in [(x + '=1' if '=' not in x else x).split('=') for x in allargs] })
 
 def typeconverter(s):
     s= str(s)
@@ -56,12 +60,10 @@ else:
     rawdata = dictionary['regressout'] if (len(dictionary['regressout']) > 1) else f'{path}{pj}/raw_data.csv'
     df = pd.read_csv(rawdata, dtype = {'rfid': str}).drop_duplicates(subset = 'rfid') 
     traits_, traits_d = [], []
-#sys.stdout = open(f'{path}{pj}/GWASpipelineCLIout.txt', 'w')
 gwas = gwas_pipe(path = f'{path}{pj}/',
              all_genotypes = dictionary['genotypes'], #'round9_1.vcf.gz',
              data = df,
              project_name = pj.split('/')[-1],
-             #n_autosome = int(dictionary['n_autosome']),
              traits = traits_,
              genome_accession = dictionary['genome_accession'],
              founderfile = dictionary['founder_genotypes'],
@@ -77,7 +79,9 @@ if dictionary['clear_directories'] and not dictionary['skip_already_present_gwas
 if dictionary['impute']: 
     gbcols =  [] if not dictionary['groupby'] else dictionary['groupby'].split(',')
     gwas.impute_traits(crosstrait_imputation = dictionary['crosstrait_imputation'],  groupby_columns=dictionary['groupby'].split(','))
-if dictionary['regressout']: 
+if dictionary['add_sex_specific_traits']: 
+    gwas.add_sex_specific_traits(save = True)
+if dictionary['regressout'] : 
     if not dictionary['timeseries']:  
         if not dictionary['groupby']: gwas.regressout(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'))
         else: gwas.regressout_groupby(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'), groupby_columns=dictionary['groupby'].split(','))
@@ -86,21 +90,21 @@ if dictionary['regressout']:
         else: gwas.regressout_timeseries(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'), groupby_columns=dictionary['groupby'].split(','))
 
 if dictionary['latent_space']: gwas.add_latent_spaces()
-if dictionary['subset']:  ###essential
+if dictionary['subset'] :  ###essential
     kws = kw(dictionary, 'subset_')
     if dictionary['subset_make_figures'] : gwas.SubsetAndFilter(makefigures = True, **kws)
     else: gwas.SubsetAndFilter(makefigures = False, **kws)
 if dictionary['grm']: 
     gwas.generateGRM(**kw(dictionary, 'grm_')) ###essential
-if dictionary['h2']:  gwas.snpHeritability() ###essential
-if dictionary['BLUP']: gwas.BLUP()
+if dictionary['h2'] :  gwas.snpHeritability() ###essential
+if dictionary['BLUP'] : gwas.BLUP()
 if dictionary['BLUP_predict']: gwas.BLUP_predict(dictionary['BLUP_predict']);
 if dictionary['gwas']: gwas.fastGWAS(skip_already_present=dictionary['skip_already_present_gwas']) ###essential
 if dictionary['db']: gwas.addGWASresultsToDb(researcher=dictionary['researcher'],
                                              round_version=dictionary['round'], 
                                              gwas_version=dictionary['gwas_version'])
 if dictionary['qtl']: ###essential
-    qtl_add_founder = True if (dictionary['founder_genotypes'] not in [ 'none', 'None', 0]) else False
+    qtl_add_founder = True if (dictionary['founder_genotypes'] not in ['none', 'None', 0]) else False
     try: qtls = gwas.callQTLs( NonStrictSearchDir=False, add_founder_genotypes = qtl_add_founder)
     except: qtls = gwas.callQTLs( NonStrictSearchDir=True)
     #gwas.annotate(qtls)
@@ -111,12 +115,13 @@ if dictionary['gcorr']: ###essential
     gwas.genetic_correlation_matrix(**kws)
     gwas.make_heritability_figure(display = False)
 if dictionary['manhattanplot'] or dictionary['porcupineplot']: gwas.porcupineplot() ###essential
-if dictionary['phewas']:gwas.phewas(annotate=True, pval_threshold = 1e-4, nreturn = 1, r2_threshold = .4)  ###essential
+if dictionary['phewas']:gwas.phewas(annotate=True, pval_threshold = 1e-4, nreturn = 1, r2_thresh = .65)  ###essential
 if dictionary['eqtl']:gwas.eQTL(annotate= True) ###essential
-if dictionary['sqtl']:gwas.sQTL() ###essential
+if dictionary['sqtl']:gwas.sQTL(annotate= True) ###essential
 if dictionary['goea']:gwas.GeneEnrichment() ###essential
 if dictionary['locuszoom']: gwas.locuszoom(**kw(dictionary, 'locuszoom_'))  ###essential
 if dictionary['h2fig']: gwas.make_heritability_figure(display = False) 
+if dictionary['phewas_fig']: gwas.make_phewas_figs()
 if dictionary['report']:
     kws = kw(dictionary, 'report_')
     gwas.report(round_version=dictionary['round'], gwas_version=dictionary['gwas_version'], **kws)

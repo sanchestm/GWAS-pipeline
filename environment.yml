@@ -4,12 +4,13 @@ channels:
   - defaults
   - bioconda
 dependencies:
+  - python=3.11
   - pandas
   - fastparquet
   - seaborn
   - umap-learn
   - ipywidgets
-  - dask
+  - dask<2024.8.1
   - psycopg2
   - scikit-learn
   - openjdk=11
@@ -21,16 +22,12 @@ dependencies:
   - gcta
   - plotly
   - biopython
-  - pdf2image
-  - poppler
   - mygene
   - pytables
   - h5py
-  - pandas-plink
   - hdbscan
   - ydata-profiling
   - arviz
-  - matplotlib-venn
   - prophet
   - lightgbm
   - shap
@@ -46,16 +43,18 @@ dependencies:
   - fancyimpute
   - scikit-image
   - selenium
-  - filterpy
   - datashader
-  - conda-forge::nbformat
+  - nbformat
   - firefox
+  - jinja2=3.1.2
   - geckodriver
   - tabulate
-  - bioconda::ensembl-vep=112.0-0
-  - conda-forge::pymc
+  - ensembl-vep=112.0
+  - pymc[version='>=5']
+  - bambi
   - pip
   - pip:
+    - pandas-plink>=2.3
     - goatools
     - dash-bio==1.0.1
     - kaleido
