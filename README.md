@@ -90,9 +90,9 @@ for the `CLI` version of the code we can use the `run` flag or we can list the o
 cd GWAS-pipeline
 python gwas_cli.py\
        path=path2projects/ \
-       genome_accession= \
+       genome_accession=GCF_015227675.2 \
        round=versionofgenotypes\
-       founder_genotypes= \
+       founder_genotypes=none \
        project=projectname\
        threads=8\
        threshold=5.4\
@@ -103,9 +103,9 @@ python gwas_cli.py\
 cd GWAS-pipeline
 python gwas_cli.py\
        path=path2projects/ \
-       genome_accession= \
+       genome_accession=GCF_015227675.2 \
        round=versionofgenotypes\
-       founder_genotypes= \
+       founder_genotypes=none \
        project=projectname\
        threads=8\
        phewas_path=phewasdb.parquet.gz\
