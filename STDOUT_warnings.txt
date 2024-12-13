@@ -1,3 +1,0 @@
-WARNING: Ignoring 'region' feature_type from /tscc/projects/ps-palmer/apurva/locomotor/individual_projects/genome_info/ncbi_dataset/data/GCF_015227675.2/genomic.gff.gz GFF/GTF file. This feature_type is not supported in VEP.
-WARNING: Ignoring 'cDNA_match' feature_type from /tscc/projects/ps-palmer/apurva/locomotor/individual_projects/genome_info/ncbi_dataset/data/GCF_015227675.2/genomic.gff.gz GFF/GTF file. This feature_type is not supported in VEP.
-WARNING: Ignoring 'match' feature_type from /tscc/projects/ps-palmer/apurva/locomotor/individual_projects/genome_info/ncbi_dataset/data/GCF_015227675.2/genomic.gff.gz GFF/GTF file. This feature_type is not supported in VEP.
