@@ -14,7 +14,13 @@ Rob Speer's changes are as follows:
     - added a __getstate__ and __setstate__ so it can be pickled
     - added __getitem__
 """
-import collections
+import collections 
+import sys
+if sys.version_info.major == 3 and sys.version_info.minor >= 10:
+    from collections.abc import MutableSet
+    collections.MutableSet = collections.abc.MutableSet
+else: 
+    from collections import MutableSet
 
 SLICE_ALL = slice(None)
 __version__ = '1.3'

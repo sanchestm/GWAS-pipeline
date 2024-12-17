@@ -20,7 +20,7 @@
 import os
 import sys
 import sqlite3
-import imp
+#import imp
 import logging
 import tempfile
 import csv
@@ -146,7 +146,7 @@ def get_settings():
 # If format is incorrect, returns (False,"explanation"), otherwise (True,None).
 def check_file(file,cols,delim="\t"):
     try:
-        f = open(file,"U");
+        f = open(file);
     except:
         get_log().error("Error: could not open file %s." % str(file));
         return False;
@@ -162,7 +162,7 @@ def check_file(file,cols,delim="\t"):
     
     # Check each header element to see if it matches the corresponding element
     # in cols. 
-    for i in xrange(len(cols)):
+    for i in range(len(cols)):
         h = header_s[i].lower();
         c = cols[i].lower();
         
@@ -239,7 +239,7 @@ def gencode_to_refflat(gencode_file,out_file,gencode_tag=None):
                 if ("tag" in values) and (gencode_tag not in values["tag"]):
                     continue
 
-            for i in xrange(len(cols)):
+            for i in range(len(cols)):
                 values[cols[i]] = e[i];
 
             gene_id_noversion = values['gene_id'].split(".")[0];
@@ -450,7 +450,7 @@ class SQLitePy(SQLiteI):
         get_log().info("Loading %s into table %s.." % (file,table_name));
         
         reader = csv.reader(open(file),delimiter="\t");
-        header = reader.next();
+        header = next(reader);
         for line in reader:
             self.db.execute("INSERT INTO %s VALUES (%s)" % (
                 table_name,

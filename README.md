@@ -53,7 +53,6 @@ for downloading the GWAS-pipeline use `git clone` and then create the necessary 
 git clone https://github.com/sanchestm/GWAS-pipeline.git
 cd GWAS-pipeline
 conda env create -f environment.yml
-conda env create -f environment_lz.yml
 ```
 
 ## directory management

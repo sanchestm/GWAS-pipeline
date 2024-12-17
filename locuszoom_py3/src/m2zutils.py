@@ -146,7 +146,7 @@ def chrom2chr(c):
     try:
       c = int(c)
     except:
-      raise Exception, "Bad chromosome: %s" % c
+      raise Exception("Bad chromosome: %s" % c)
 
     return c
 

@@ -42,7 +42,7 @@ class PlinkSettings:
         else:
           die("Error: path either does not exist or insufficient permissions to access it: %s" % str(value))
       else:
-        exec "%s = \"%s\"" % (arg,path)
+        exec( "%s = \"%s\"" % (arg,path))
     
     self.bim_path = bim_path
     self.plink_path = plink_path

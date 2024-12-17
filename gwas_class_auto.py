@@ -4812,7 +4812,7 @@ class gwas_pipe:
             gtf = gtf[gtf.source.str.contains('BestRefSeq')]
             commaj =  lambda x: ','.join(x.astype(str).values)
             def gtfgene2refflatrow(tdf):
-                return pd.concat((tdf[['transcript_id','Chr', 'strand']].dropna().iloc[0],
+                return pd.concat((tdf[['db_xref','Chr', 'strand']].dropna().iloc[0],
                         tdf.agg({'start':'min', 'end' : 'max'}),
                         tdf[tdf.biotype.str.contains('codon$')].agg({'start':'min', 'end' : 'max'}),
                         tdf.query('biotype == "exon"').agg({'Chr': len, 'start':commaj, 'end':commaj})))
@@ -4823,15 +4823,23 @@ class gwas_pipe:
             refflat = refflat.reset_index(names = 'geneName')
             #refflat['chrom'] = refflat['chrom'].astype(str)
             gdatapath = f'{self.path}genome_info/ncbi_dataset/data/{self.genome_accession}/'
-            refflat['chrom'] = 'chr'+refflat.chrom.astype(str)
-            refflat.to_csv(f'{gdatapath}refflat.txt',index = False, sep = '\t')
-            pd.read_csv(f'{self.all_genotypes}.bim', header = None, 
-                        sep = '\s+', usecols = [1, 0, 3], names = ['chr', 'snp', 'pos'])\
-                        [[ 'snp','chr', 'pos']]\
-                        .to_csv(f'{gdatapath}snppos.txt',index = False, sep = '\t')
-            lzpath = [ y for x in sys.path if os.path.isdir(y := (x.rstrip('/') + '/locuszoom/') ) ][0]
-            bash(f'''conda run -n lzenv {lzpath}bin/dbmeister.py --db {gdatapath}lz.db --refflat {gdatapath}refflat.txt --snp_pos {gdatapath}snppos.txt''', 
-                 shell = True)
+            refflat['chrom'] = 'chr'+refflat.chrom.astype(str).map(self.replacenumstoXYMT).str.upper()
+            # refflat.to_csv(f'{gdatapath}refflat.txt',index = False, sep = '\t')
+            # pd.read_csv(f'{self.all_genotypes}.bim', header = None, 
+            #             sep = '\s+', usecols = [1, 0, 3], names = ['chr', 'snp', 'pos'])\
+            #             [[ 'snp','chr', 'pos']]\
+            #             .to_csv(f'{gdatapath}snppos.txt',index = False, sep = '\t')
+            # lzpath = [ y for x in sys.path if os.path.isdir(y := (x.rstrip('/') + '/locuszoom/') ) ][0]
+            # bash(f'''conda run -n lzenv {lzpath}bin/dbmeister.py --db {gdatapath}lz.db --refflat {gdatapath}refflat.txt --snp_pos {gdatapath}snppos.txt''', 
+            #      shell = True)
+            import sqlite3
+            with sqlite3.connect(f"{gdatapath}lz.db") as conn:
+                refflat.to_sql('refFlat', conn, if_exists="replace", index=False)
+                snp_pos= pd.read_csv(f'{self.all_genotypes}.bim', header = None, 
+                    sep = '\s+', usecols = [1, 0, 3], names = ['chr', 'snp', 'pos'])
+                snp_pos[[ 'snp','chr', 'pos']].to_sql('snp_pos', conn, if_exists="replace", index=False)
+                snp_pos[['snp', 'snp']].set_axis(['rs_orig','rs_current' ], axis = 1).sort_values('rs_orig').to_sql('refsnp_trans', conn, if_exists="replace", index=False)
+
         ret = []
         for num, (_, qtl_row) in tqdm(list(enumerate(qtltable.reset_index().iterrows()))):
             topsnpchr, topsnpbp = qtl_row.SNP.split(':')
@@ -4853,9 +4861,9 @@ class gwas_pipe:
                                     [['snp1', 'snp2', 'rsquare', 'dprime']].to_csv(lzr2name, index = False, sep = '\t')
             for filest in glob(f'{self.path}temp/{qtl_row.trait}*{qtl_row.SNP}'): os.system(f'rm -r {filest}')
             def lzcall(c, start, end, snp, title, trait, lzpvalname, lzr2name, lg = ''):
-                lzpath = [ y for x in sys.path if os.path.isdir(y := (x.rstrip('/') + '/locuszoom/'))][0]
+                lzpath = [ y for x in sys.path if os.path.isdir(y := (x.rstrip('/') + '/locuszoom_py3/'))][0]
                 gdatapath = f'{self.path}genome_info/ncbi_dataset/data/{self.genome_accession}/'
-                call = f'''conda run -n lzenv {lzpath}bin/locuszoom --metal {lzpvalname} --ld {lzr2name}\
+                call = f'''{lzpath}bin/locuszoom --metal {lzpvalname} --ld {lzr2name}\
                      --refsnp {snp} --chr {int(c)} --start {start} --end {end}\
                      --build manual --db {gdatapath}lz.db\
                      --plotonly showRecomb=FALSE showAnnot=FALSE\
@@ -4866,23 +4874,29 @@ class gwas_pipe:
                      leftMarginLines=5 rightMarginLines=5 width=20 height=14 axisTextSize=2\
                      smallDot=1 largeDot=2 refsnpTextSize=2\
                      prelude="{lzpath}prelude.R"
-                     title = "{title}"'''
+                     title = "{title}"''' #conda run -n lzenv 
                 if silent: bash(re.sub('\s+',' ' ,call),print_call=False, silent=True )
                 else: bash(re.sub('\s+',' ' ,call),print_call=True, silent=False )
                 added_p = 'legacyr2' if not lg else 'legacy6m'
-                
-                if os.path.isfile(f'''{self.path}temp/{lg}{trait}_{datetime.today().strftime('%y%m%d')}_{snp.replace(':', '_')}/chr{c}_{start}-{end}.pdf'''):
-                    bash(f'''cp {self.path}temp/{lg}{trait}_{datetime.today().strftime('%y%m%d')}_{snp.replace(':', '_')}/chr{c}_{start}-{end}.pdf \
-                         {self.path}images/lz/{added_p}/lz__{trait}__{snp.replace(':', '_')}.pdf''',print_call=False, shell = True )
-                    os.system(f'''rm -r {self.path}temp/{lg}{trait}_{datetime.today().strftime('%y%m%d')}_{snp.replace(':', '_')}''')
-                elif os.path.isfile(f'''{self.path}temp/{lg}{trait}_{datetime.today().strftime('%y%m%d')}_{snp.replace(':', '_')}.pdf'''):
-                    bash(f'''cp {self.path}temp/{lg}{trait}_{datetime.today().strftime('%y%m%d')}_{snp.replace(':', '_')}.pdf \
-                         {self.path}images/lz/{added_p}/lz__{trait}__{snp.replace(':', '_')}.pdf''',print_call=False, shell = True )
-                    os.system(f'''rm {self.path}temp/{lg}{trait}_{datetime.today().strftime('%y%m%d')}_{snp.replace(':', '_')}.pdf''')
+                tdstr,s_ = datetime.today().strftime('%y%m%d'), snp.replace(':', '_')
+                if os.path.isfile(f'''{self.path}temp/{lg}{trait}_{tdstr}_{s_}/chr{c}_{start}-{end}.pdf'''):
+                    bash(f'''cp {self.path}temp/{lg}{trait}_{tdstr}_{s_}/chr{c}_{start}-{end}.pdf \
+                         {self.path}images/lz/{added_p}/lz__{trait}__{s_}.pdf''',print_call=False, shell = True )
+                    os.system(f'''rm -r {self.path}temp/{lg}{trait}_{tdstr}_{s_}''')
+                elif os.path.isfile(f'''{self.path}temp/{lg}{trait}_{tdstr}_{s_}.pdf'''):
+                    bash(f'''cp {self.path}temp/{lg}{trait}_{tdstr}_{s_}.pdf \
+                         {self.path}images/lz/{added_p}/lz__{trait}__{s_}.pdf''',print_call=False, shell = True )
+                    os.system(f'''rm {self.path}temp/{lg}{trait}_{dtdstr}_{s_}.pdf''')
                 else: 
-                    printwithlog('could not run locuszoom properly')
-                    printwithlog('\n'.join(glob(f'''{self.path}temp/{lg}{trait}_{datetime.today().strftime('%y%m%d')}*pdf''')))
-                return pn.pane.PDF(f'''{self.path}images/lz/{added_p}/lz__{trait}__{snp.replace(':', '_')}.pdf''',  width = 1040, height = 748)
+                    lglist = glob(f'{self.path}temp/{lg}{trait}_{tdstr}_{s_}/chr*_{start}-{end}.pdf') +\
+                             glob(f'{self.path}temp/{lg}{trait}_{tdstr}_*.pdf')
+                    if not len(lglist):
+                        printwithlog(f'could not find the pdf for {lg} {trait} {snp}')
+                        return pn.pane.Markdown(f'could not find the pdf for {lg} {trait} {snp}')
+                    bash(f'''cp {lglist[0]} \
+                         {self.path}images/lz/{added_p}/lz__{trait}__{s_}.pdf''',print_call=False, shell = True )
+                    os.system(f'''rm {lglist[0]}''')
+                return pn.pane.PDF(f'''{self.path}images/lz/{added_p}/lz__{trait}__{s_}.pdf''',  width = 1040, height = 748)
             _1 = lzcall(topsnpchr, int(range_interest["min"] - padding), int(range_interest["max"] + padding),
                    qtl_row.SNP, f'{qtl_row.trait} SNP {qtl_row.SNP}',  qtl_row.trait,lzpvalname, lzr2name )
             _2 = lzcall(topsnpchr, int(range_interest["min"] - 3e6), int(range_interest["max"] + 3e6),

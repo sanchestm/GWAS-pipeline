@@ -48,7 +48,7 @@ from prettytable import *
 from textwrap import fill
 from vcf_ld import *
 from verboseparser import *
-from cStringIO import StringIO
+from io import StringIO
 from ordered_set import OrderedSet
 
 # Try importing modules that may not exist on a user's machine. 
@@ -120,10 +120,10 @@ class Conf(object):
 
   def _load(self,file):
     conf_dict = {}
-    execfile(file,conf_dict)
-
-    for k,v in conf_dict.iteritems():
-      exec "self.%s = v" % str(k)
+    with open(file, "r") as fil:
+        exec(fil.read(), conf_dict)
+    for k, v in conf_dict.items():
+        setattr(self, k, v)
 
 def getConf(conf_file=M2ZFAST_CONF):
   conf_file = find_relative(conf_file)
@@ -169,7 +169,7 @@ def printGWACatalogs(cat_db,build):
   table.set_field_align('Description','l')
 
   exists = False;  
-  for cat_code, cat_tree in tree.iteritems():
+  for cat_code, cat_tree in tree.items():
     table.add_row([
       cat_code,
       cat_tree['desc']
@@ -191,7 +191,7 @@ def getAllGWACatalogs(cat_db):
   for build in cat_db:
     tree = cat_db.get(build)
 
-    for cat_code, cat_tree in tree.iteritems():
+    for cat_code, cat_tree in tree.items():
       table.add_row([
         build,
         cat_code,
@@ -227,12 +227,12 @@ def getSupportedTrios(ld_db):
   return s
 
 def parse_rargs(arg_list):
-  args = map(str.strip," ".join(arg_list).split("="))
+  args = list(map(str.strip," ".join(arg_list).split("=")))
 
   new_args = {}
 
   try:
-    for i in xrange(1,len(args)):
+    for i in range(1,len(args)):
       k = args[i-1].split()[-1]
 
       vlist = args[i].split()
@@ -243,7 +243,7 @@ def parse_rargs(arg_list):
 
       new_args[k] = v
   except:
-    raise Exception, ("Error: something wrong with your plotting arguments. They "
+    raise Exception("Error: something wrong with your plotting arguments. They "
                       "should all be of the form arg=value, no spaces, value should "
                       "be quoted if it has spaces. ")
 
@@ -251,7 +251,7 @@ def parse_rargs(arg_list):
 
 #def parse_rargs(args):
 #  result = []
-#  for i in xrange(len(args)):
+#  for i in range(len(args)):
 #    if args[i] != "=" and args[i].find("=") != -1:
 #      result.append(args[i])
 #    elif args[i] == "=":
@@ -307,7 +307,7 @@ def parse1000G(snp):
 
     chrom = chrom2chr(chrom)
     try:
-      pos = long(pos)
+      pos = int(pos)
     except:
       return None
     
@@ -402,7 +402,7 @@ def findGeneInfo(gene,db_file):
   if row is not None:
     chrom = chrom2chr(row['chrom'][3:])
     if chrom is None:
-      raise ValueError, "Error: refgene found on non-supported chromosome: %s" % str(row['chrom'])
+      raise ValueError("Error: refgene found on non-supported chromosome: %s" % str(row['chrom']))
     else:
       row['chrom'] = chrom
 
@@ -452,7 +452,7 @@ class PosLookup:
 
 # Given a list of header elements, determine if col_name is among them. 
 def findCol(header_elements,col_name):
-  for i in xrange(len(header_elements)):
+  for i in range(len(header_elements)):
     if header_elements[i] == col_name:
       return i
 
@@ -524,14 +524,14 @@ def read_metal(metal_file,snp_column,pval_column,no_transform,chr,start,end,db_f
         die("Error: gzip is not supported on your system, cannot read --metal file.")
     elif is_bz2(metal_file):
       try:
-        f = bz2.BZ2File(metal_file,"rU")
+        f = bz2.BZ2File(metal_file,"r")
       except NameError:
         die("Error: bz2 is not supported on your system, cannot read --metal file.")
     else:
-      f = open(metal_file,"rU")
+      f = open(metal_file,"r")
 
   # Find snp column.
-  metal_header = f.next().split(delim)
+  metal_header = next(f).split(delim)
   metal_header[-1] = metal_header[-1].rstrip()
 
   snp_col = None; 
@@ -566,7 +566,7 @@ def read_metal(metal_file,snp_column,pval_column,no_transform,chr,start,end,db_f
   
   out = open(output_file,"w")
   print("\t".join(["chr","pos"] + metal_header), file = out)
-  format_str = "\t".join(["%i","%i"] + ["%s" for i in xrange(len(metal_header))])
+  format_str = "\t".join(["%i","%i"] + ["%s" for i in range(len(metal_header))])
   
   # P-value check functions
   pval_checks = [
@@ -683,11 +683,11 @@ def read_epacts(epacts_file,chr,start,end,chr_col,beg_col,end_col,pval_col,no_tr
 
       # No variants in the region...
       if stdout == '':
-        raise IOError, "Error: no variants in region (%s) when using tabix on EPACTS file" % region
+        raise IOError("Error: no variants in region (%s) when using tabix on EPACTS file" % region)
 
       # Unknown error occurred
       if stderr != '':
-        raise IOError, "Error: while grabbing region from EPACTS file, tabix generated an error: \n%s" % stderr
+        raise IOError("Error: while grabbing region from EPACTS file, tabix generated an error: \n%s" % stderr)
 
       # Setup the input handle for reading.
       f = StringIO(stdout)
@@ -701,17 +701,17 @@ def read_epacts(epacts_file,chr,start,end,chr_col,beg_col,end_col,pval_col,no_tr
           die("Error: gzip is not supported on your system, cannot read --epacts file.")
       elif is_bz2(epacts_file):
         try:
-          f = bz2.BZ2File(epacts_file,"rU")
+          f = bz2.BZ2File(epacts_file,"r")
         except NameError:
           die("Error: bz2 is not supported on your system, cannot read --epacts file.")
       else:
-        f = open(epacts_file,"rU")
+        f = open(epacts_file,"r")
 
   if f is None:
-    raise IOError, "Unknown error while loading EPACTS file, contact developer with this traceback"
+    raise IOError("Unknown error while loading EPACTS file, contact developer with this traceback")
 
   # Find column indices. 
-  epacts_header = f.next().split("\t")
+  epacts_header = next(f).split("\t")
   epacts_header[-1] = epacts_header[-1].rstrip()
 
   # Find chr/begin/end columns. 
@@ -720,20 +720,20 @@ def read_epacts(epacts_file,chr,start,end,chr_col,beg_col,end_col,pval_col,no_tr
     i_begin_col = epacts_header.index(beg_col)
     i_end_col = epacts_header.index(end_col)
   except:
-    raise IOError, "Error: could not find chrom/begin/end columns in EPACTS file. Try specifying --epacts-chr-col, --epacts-beg-col, --epacts-end-col."
+    raise IOError("Error: could not find chrom/begin/end columns in EPACTS file. Try specifying --epacts-chr-col, --epacts-beg-col, --epacts-end-col.")
 
   # Find p-value column.
   try:
     i_pval_col = epacts_header.index(pval_col)
   except:
-    raise IOError, "Error: could not find p-value column in EPACTS file. Try specifying with --epacts-pval-col."
+    raise IOError("Error: could not find p-value column in EPACTS file. Try specifying with --epacts-pval-col.")
 
   cols_not_needed = [chr_col,beg_col,end_col,pval_col] + "MARKER_ID NS AC CALLRATE GENOCNT BETA SEBETA STAT MAF SCORE N.CASE N.CTRL AF.CASE AF.CTRL".split()
   extra_cols = filter(lambda x: x not in cols_not_needed,epacts_header)
   extra_ind = [epacts_header.index(x) for x in extra_cols]
   out = open(output_file,"w")
   print( "\t".join(['chr','pos','MarkerName','P-value'] + extra_cols), file = out)
-  format_str = "\t".join(['%s','%i','%s','%s'] + ["%s" for _ in xrange(len(extra_cols))])
+  format_str = "\t".join(['%s','%i','%s','%s'] + ["%s" for _ in range(len(extra_cols))])
   
   # Arbitrary arithmetic precision  
   decimal.getcontext().prec = 8
@@ -931,7 +931,7 @@ def readWhitespaceHitList(file,db_file):
   if not os.path.isfile(file):
     die("Could not open hitspec file for reading - check your path.")
 
-  f = open(file,"rU")
+  f = open(file,"r")
   h = f.readline()
 
   # This format should have at least 6 columns.
@@ -951,7 +951,7 @@ def readWhitespaceHitList(file,db_file):
     e[-1] = e[-1].strip()
     
     if len(e) < 6:
-      print("Error: hitspec line not formatted properly, missing the proper number of columns on line #%i: %s" (lineno,str(line)), file = sys.stderr)
+      print("Error: hitspec line not formatted properly, missing the proper number of columns on line #%i: %s".format(lineno,str(line)), file = sys.stderr)
       continue
 
     if e[5] == 'no'or e[5] == "":
@@ -1013,8 +1013,8 @@ def readWhitespaceHitList(file,db_file):
         else:
           try:
             chr = int(chr)
-            start = long(start)
-            end = long(end)
+            start = int(start)
+            end = int(end)
           except:
             print("Error: no known SNP or gene present in first column, and invalid chr/start/end given in hitspec file.", file = sys.stderr)
             continue
@@ -1031,8 +1031,8 @@ def readWhitespaceHitList(file,db_file):
           continue
 
       try:
-        start = long(start)
-        end = long(end)
+        start = int(start)
+        end = int(end)
       except:
         print("Error: invalid start/end in hitspec file, line was: '%s'" % " ".join(e), file = sys.stderr)
         continue
@@ -1138,7 +1138,7 @@ def printArgs(args):
   d = parse_rargs(args)
   del d["markerCol"]
   del d["pvalCol"]
-  for i,j in d.iteritems():
+  for i,j in d.items():
     table.add_row([str(i),str(j)])
   
   table.printt()
@@ -1240,7 +1240,7 @@ def getSettings():
 
   gwas_help = "Select GWAS catalog to use for plotting GWAS hits track. Available catalogs are: {spacer}{tables}".format(
     spacer = "".join([os.linesep]*2),
-    tables = getAllGWACatalogs(conf.GWAS_CATS)
+    tables = 0#getAllGWACatalogs(conf.GWAS_CATS)
   )
   
   parser.add_option("--gwas-cat",dest="gwas_cat",help=gwas_help)
@@ -1249,7 +1249,7 @@ def getSettings():
   
   pop_help = "Population to use for LD. This option, and the --source option below, have the following available options: {spacer}{trios}".format(
     spacer = "".join([os.linesep]*2),
-    trios = getSupportedTrios(conf.LD_DB)
+    trios = 0#getSupportedTrios(conf.LD_DB)
   )
   
   parser.add_option("--pop",dest="pop",help=pop_help)
@@ -1464,7 +1464,7 @@ def getSettings():
       with open(opts.ld_vcf) as jsin:
         ld_vcf_dict = json.load(jsin)
 
-      for chrom, vcf_file in ld_vcf_dict.iteritems():
+      for chrom, vcf_file in ld_vcf_dict.items():
         vcf_file_tabix = vcf_file + ".tbi"
         if not os.path.isfile(vcf_file_tabix):
           die("Error: expected tabix index for VCF file, but could not find one: %s" % vcf_file_tabix)
@@ -1567,8 +1567,8 @@ def getSettings():
     (chr,pos) = (opts.refsnp.chr,opts.refsnp.pos)
 
     if opts.start and opts.end and opts.chr:
-      opts.start = long(opts.start)
-      opts.end = long(opts.end)
+      opts.start = int(opts.start)
+      opts.end = int(opts.end)
       opts.chr = chrom2chr(chr)
       if opts.chr == chr and opts.start < pos and opts.end > pos:
         opts.snplist.append( (opts.refsnp,chr,opts.start,opts.end) )
@@ -1679,7 +1679,7 @@ def getSettings():
 # If file "out" exists, appends to file. Otherwise creates a new file "out". 
 def decompGZFile(file,out):
   if not os.path.isfile(file):
-    raise ValueError, "Error: file does not exist: %s" % file
+    raise ValueError("Error: file does not exist: %s" % file)
 
   if platform.system() == "Linux":
     if os.path.isfile(out):
@@ -1688,7 +1688,7 @@ def decompGZFile(file,out):
       os.system("gunzip -c %s > %s" % (file,out))
   
     if not os.path.isfile(out) or os.path.getsize(out) < 1:
-      raise Exception, "Error: could not decompress file %s" % file
+      raise Exception("Error: could not decompress file %s" % file)
   else:
     out = None
     if os.path.isfile(out):
@@ -1721,17 +1721,17 @@ def computeLD(snp,chr,start,end,build,pop,source,cache_file,fugue_cleanup,verbos
     )
 
   else:
-    raise Exception, "Error: conf file specification for %s/%s/%s is invalid, please check syntax." % (pop,source,build)
+    raise Exception("Error: conf file specification for %s/%s/%s is invalid, please check syntax." % (pop,source,build))
 
   # Check that LD program exists. 
   if isinstance(settings,FugueSettings):
     if not os.path.exists(conf.NEWFUGUE_PATH):
-      raise Exception, "Error: could not find %s for computing LD.." % conf.NEWFUGUE_PATH
+      raise Exception("Error: could not find %s for computing LD.." % conf.NEWFUGUE_PATH)
     else:
       print( "Using %s to compute LD.." % conf.NEWFUGUE_PATH)
   elif isinstance(settings,PlinkSettings):
     if not os.path.exists(conf.PLINK_PATH):
-      raise Exception, "Error: could not find %s for computing LD.." % conf.PLINK_PATH
+      raise Exception("Error: could not find %s for computing LD.." % conf.PLINK_PATH)
     else:
       print( "Using %s to compute LD.." % conf.PLINK_PATH)
 
@@ -1792,7 +1792,7 @@ def fixUserLD(file,refsnp,db_file):
   
   for column in ('snp1','snp2','dprime','rsquare'):
     try:
-      exec "%s_col = h_s.index(column)" % column
+      exec( "%s_col = h_s.index(column)" % column)
     except:
       print("Error: user-supplied LD file does not have column '%s' in header (or no header row exists.)" % column, file = sys.stderr)
       return None
@@ -1809,7 +1809,7 @@ def fixUserLD(file,refsnp,db_file):
       found_refsnp = True
       
       skip = False
-      for col in (snp1_col,snp2_col):
+      for col in [0, 1]:#(snp1_col,snp2_col):
         snp = e[col]
         (chr,pos) = find_pos(snp)
         if chr is not None and pos is not None:
@@ -1846,7 +1846,7 @@ def windows_path_replace_chars(name):
 
 def runQuery(query,args):
   hash = str(int(time.time())) + "_" + str(os.getpid())
-  file = "%s_%s.txt" % (query.func_name,hash)
+  file = "%s_%s.txt" % (query.__name__,hash)
  
   try:
     cur = query(*args)
@@ -2050,7 +2050,7 @@ def runAll(input_file,input_type,refsnp,chr,start,end,opts,args):
   if opts.snpset == "NULL":
     user_rargs['snpsetFile'] = "NULL"
 
-  for m2zarg,file in pqueries.iteritems():
+  for m2zarg,file in pqueries.items():
     # If the user overrides any of the "pquery files", don't set it. 
     if m2zarg in user_rargs:
       continue
@@ -2089,7 +2089,7 @@ def runAll(input_file,input_type,refsnp,chr,start,end,opts,args):
 
   if not no_clean:
     print( "Deleting temporary files..")
-    pquery_files = filter(lambda x: x is not None,pqueries.values())
+    pquery_files = list(filter(lambda x: x is not None,pqueries.values()))
     cleanup([ld_temp,metal_temp] + pquery_files)
 
 def main():
@@ -2174,7 +2174,7 @@ def main():
 
       # Check that this directory is valid.
       if temp_dir in ("","/"):
-        raise IOError, "Error: temporary directory is not valid, was: %s, contact developer" % temp_dir
+        raise IOError("Error: temporary directory is not valid, was: %s, contact developer" % temp_dir)
 
       if _DEBUG:
         print( "DEBUG: plot directory: %s" % temp_dir)
@@ -2248,7 +2248,7 @@ def main():
           print("Error: no image file found", file = sys.stderr)
           kill_dir(temp_dir)
         else:
-          for i in xrange(len(image_file)):
+          for i in range(len(image_file)):
             image = image_file[i]
             ext = exts[i]
 

@@ -2,7 +2,7 @@
 import subprocess
 import sys
 import time
-from itertools import imap, chain, izip
+from itertools import chain
 from collections import defaultdict
 
 def rsquared(x, y):
@@ -23,7 +23,7 @@ def rsquared(x, y):
   sum_x_sq = sum(map(lambda x: pow(x, 2), x))
   sum_y_sq = sum(map(lambda x: pow(x, 2), y))
 
-  psum = sum(imap(lambda x, y: x * y, x, y))
+  psum = sum(map(lambda x, y: x * y, x, y))
   num = psum - (sum_x * sum_y/n)
   den = pow((sum_x_sq - pow(sum_x, 2) / n) * (sum_y_sq - pow(sum_y, 2) / n), 0.5)
 
@@ -44,11 +44,11 @@ def geno_to_code(g):
   elif g == '11':
     return 2
   else:
-    raise Exception, "Error: genotypes from VCF have more than 4 possible states (more than 2 ordered alleles.)"
+    raise Exception("Error: genotypes from VCF have more than 4 possible states (more than 2 ordered alleles.)")
 
 def haplo_to_code(g):
   if g[1] != "|":
-    raise Exception, "Error: unable to calculate D or D' since genotypes are not phased"
+    raise Exception("Error: unable to calculate D or D' since genotypes are not phased")
 
   try:
     g0 = int(g[0])
@@ -61,10 +61,10 @@ def haplo_to_code(g):
     g1 = None
 
   if g0 != None and g0 > 1:
-    raise Exception, "Error: more than 2 alleles when trying to calculate LD!"
+    raise Exception("Error: more than 2 alleles when trying to calculate LD!")
 
   if g1 != None and g1 > 1:
-    raise Exception, "Error: more than 2 alleles when trying to calculate LD!"
+    raise Exception("Error: more than 2 alleles when trying to calculate LD!")
 
   return [g0,g1]
 
@@ -196,7 +196,7 @@ def ld_from_vcf(method,*args,**kargs):
   elif method == 'dprime':
     return ld_dprime_indexsnp_vcf(*args,**kargs)
   else:
-    raise Exception, "Error: only 'rsquare' and 'dprime' methods available for calculating LD from VCF file."
+    raise Exception("Error: only 'rsquare' and 'dprime' methods available for calculating LD from VCF file.")
 
 def ld_dprime_indexsnp_vcf(index_pos,vcf_file,region,tabix_path="tabix",ignore_filter=False):
   # First grab the index SNP's genotypes. 
@@ -319,7 +319,7 @@ def ld_dprime_indexsnp_vcf(index_pos,vcf_file,region,tabix_path="tabix",ignore_f
       nonmiss_haplos = 0.0
       index_afs = [0,0]
       afs = [0,0]
-      for haplo in izip(index_gts,gts):
+      for haplo in zip(index_gts,gts):
         if None in haplo:
           continue
 

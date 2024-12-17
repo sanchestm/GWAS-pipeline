@@ -41,7 +41,7 @@ class FugueSettings:
         else:
           die("Error: path either does not exist or insufficient permissions to access it: %s" % str(value))
       else:
-        exec "%s = \"%s\"" % (arg,path)
+        exec( "%s = \"%s\"" % (arg,path))
     
     self.map_dir = map_dir
     self.ped_dir = ped_dir
@@ -256,7 +256,7 @@ class FugueFinder():
     )
 
     if self.verbose:
-      print "Executing new_fugue: %s" % com
+      print( "Executing new_fugue: %s" % com)
       proc = subprocess.Popen(com,shell=True)
     else:
       proc = subprocess.Popen(com,shell=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
