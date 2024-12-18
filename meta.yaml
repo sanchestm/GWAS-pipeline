@@ -1,9 +1,9 @@
 {% set name = "gwas_pipeline" %}
-{% set version = "0.3.0" %}
+{% set version = "0.3.7" %}
 
 package:
-  name: {{ name|lower }}
-  version: {{ version }}
+  name: {{name}}
+  version: {{version}}
 
 source:
   path: .
@@ -17,12 +17,13 @@ requirements:
     - python
     - pip
   run:
+    - python=3.11
     - pandas
     - fastparquet
     - seaborn
     - umap-learn
     - ipywidgets
-    - dask
+    - dask<2024.8.1
     - psycopg2
     - scikit-learn
     - openjdk=11
@@ -34,16 +35,12 @@ requirements:
     - gcta
     - plotly
     - biopython
-    - pdf2image
-    - poppler
     - mygene
     - pytables
     - h5py
-    - pandas-plink
     - hdbscan
     - ydata-profiling
     - arviz
-    - matplotlib-venn
     - prophet
     - lightgbm
     - shap
@@ -59,17 +56,49 @@ requirements:
     - fancyimpute
     - scikit-image
     - selenium
-    - filterpy
     - datashader
+    - nbformat
     - firefox
+    - jinja2=3.1.2
     - geckodriver
     - tabulate
-    - ensembl-vep
+    - ensembl-vep=112.0
+    - pymc>=5
+    - bambi
+    - pdf2image
+    - r-base
+    - r-essentials
+    - r-chron
+    - r-vctrs
+    - r-kableextra
+    - r-rjsonio
+    - r-dt
+    - r-htmltools
+    - r-httr
+    - r-openxlsx
+    - r-rmarkdown
+    - r-plyr
+    - r-readxl
+    - pandoc
+    - r-purrr
+    - r-dplyr
+    - r-data.table
+    - imagemagick
     - pip
     - pip:
+      - pandas-plink>=2.3
       - goatools
       - dash-bio==1.0.1
       - kaleido
+      - transformers
+      - accelerate
+      - enformer-pytorch
+
+
+test:
+  imports:
+    - gwas_pipeline.gwas_class_auto  # Ensure the module can be imported
+    - gwas_pipeline
 
 about:
   home: https://github.com/sanchestm/GWAS-pipeline
@@ -80,7 +109,7 @@ about:
 
 extra:
   recipe-maintainers:
-    - yourusername
+    - sanchestm
 
 channels:
   - conda-forge

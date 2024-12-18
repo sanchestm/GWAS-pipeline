@@ -39,15 +39,20 @@ Last, the main essential file is the data dictionary. It tells the pipeline whic
 
 ## Installation
 
-We use `conda` to manage the installation of all necessary packages. Given the generalist nature of this project, there are a lot of dependencies and the necessity of 2 conda environments. Please consider updating conda and making sure that the solver is `libmamba`.
+We use `conda` to manage the installation of all necessary packages. Given the generalist nature of this project, there are a lot of dependencies for which the classic conda solver can be slow. Please consider updating conda and making sure that the solver is `libmamba`. Also consider adding the bioconda and conda-forge channels too.
 
 ```
 conda update -n base conda
 conda install -n base conda-libmamba-solver
 conda config --set solver libmamba
+conda config --add channels defaults
+conda config --add channels bioconda
+conda config --add channels conda-forge
+
+
 ```
 
-for downloading the GWAS-pipeline use `git clone` and then create the necessary conda environments
+for downloading the GWAS-pipeline use `git clone` and then create the necessary conda environment
 
 ```
 git clone https://github.com/sanchestm/GWAS-pipeline.git

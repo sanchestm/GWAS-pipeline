@@ -6019,7 +6019,7 @@ The decompositions used also allow to extimate a metric of similarity between th
         fafile = self.genomefasta_path.replace('.fna',f"{'_adjusted' if adjustchr else ''}.fna")
         translate_names_dict = {'SYMBOL': 'gene', 'Feature': 'featureid', 'biotype': 'transcriptbiotype', 'Feature_type': 'featuretype',
                                 'IMPACT': 'putative_impact','DISTANCE':'distancetofeature', 'HGVSc': 'HGVS.c', 'HGVSp': 'HGVS.p', 'SNP': 'SNP' }
-        oo = bash(f'''vep -i {self.path}temp/test.vcf -o STDOUT --gff {gfffile} --species {self.species} \
+        oo = bash(f'''vep -i {self.path}temp/test.vcf -o STDOUT --gff {gfffile} --species {self.species} --warning_file STDERR \
                               --synonyms {self.chrsyn} -a {self.genome_accession} --no_check_variants_order \
                               --dir {vdir} --dir_cache {vdir} --dir_plugins {vdir} --fasta {fafile} --tab \
                               --regulatory --force_overwrite --domains --per_gene \
@@ -6995,12 +6995,11 @@ Are there sex differences?
         from goatools.obo_parser import GODag
         from goatools.anno.genetogo_reader import Gene2GoReader
         from goatools.goea.go_enrichment_ns import GOEnrichmentStudyNS
-        
-        gene2go = download_ncbi_associations()
-        obo_fname = download_go_basic_obo()
+        os.makedirs(f'{self.path}genome_info/go', exist_ok = True)
+        gene2go = download_ncbi_associations(f'{self.path}genome_info/go/gene2go')
+        obo_fname = download_go_basic_obo(f'{self.path}genome_info/go/go-basic.obo')
         geneid2gos_rat= Gene2GoReader(gene2go, taxids=[int(self.taxid)])
-        
-        obodag = GODag('go-basic.obo')
+        obodag = GODag(obo_fname)
         ratassc = geneid2gos_rat.get_ns2assc()
 
         if isinstance(qtls, str): qtls = pd.read_csv(qtls)
