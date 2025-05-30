@@ -1,35 +1,39 @@
-measure,count,unique,top,freq,mean,std,min,25%,50%,75%,max,trait_covariate,covariates,description
-rfid,3193,3193,0007929BF5,1,,,,,,,,metadata,,rfid
-sex,3193,2,M,1618,,,,,,,,covariate_categorical,,sex
-center,3193,4,MI,1038,,,,,,,,covariate_categorical,,center
-bmi_wo_tail,3164.0,,,,6.303489454197419,1.2298806821610215,2.77091906721536,5.425,6.06514539286533,7.008403575176647,11.1012345679012,covariate_continuous,,Example of adding better description to bmi_wo_tail trait
-bmi_wo_tail_age,3164.0,,,,123.25031605562579,55.79660159175223,51.0,83.0,92.0,187.0,278.0,covariate_continuous,,bmi_wo_tail_age
-bmi_wo_tail_technician,3164,15,TW,934,,,,,,,,covariate_categorical,,bmi_wo_tail_technician
-bmi_w_tail,3161.0,,,,1.7629437576610536,0.31082907466255205,0.988241511428194,1.52470905717659,1.70900928476686,1.94650222014094,4.10642300456866,covariate_continuous,,bmi_w_tail
-bmi_w_tail_age,3161.0,,,,123.2391648212591,55.798748884036584,51.0,83.0,92.0,187.0,278.0,covariate_continuous,,bmi_w_tail_age
-bmi_w_tail_technician,3161,15,TW,931,,,,,,,,covariate_categorical,,bmi_w_tail_technician
-body_weight_g,3164.0,,,,263.8113147914033,84.73946673511418,121.0,196.0,244.0,313.0,606.0,trait,"sex,center,body_weight_g_age,body_weight_g_technician",body_weight_g
-body_weight_g_age,3164.0,,,,123.25031605562579,55.79660159175223,51.0,83.0,92.0,187.0,278.0,covariate_continuous,,body_weight_g_age
-body_weight_g_technician,3164,15,TW,934,,,,,,,,covariate_categorical,"sex,center",body_weight_g_technician
-epididymis_fat_weight_g,1595.0,,,,3.370046394984326,1.7556093889527085,0.626,2.1715,2.951,4.1485,13.098,covariate_continuous,,epididymis_fat_weight_g
-epididymis_fat_weight_g_age,1595.0,,,,122.5423197492163,55.018269427309235,54.0,84.0,92.0,187.0,274.0,covariate_continuous,,epididymis_fat_weight_g_age
-epididymis_fat_weight_g_technician,1595,18,TW,396,,,,,,,,covariate_categorical,,epididymis_fat_weight_g_technician
-glucose_reading_mg_dl,2246.0,,,,89.1323839715049,10.839035354460474,52.0,82.0,89.0,96.0,130.0,trait,"sex,center,glucose_reading_mg_dl_age,glucose_reading_mg_dl_technician",glucose_reading_mg_dl
-glucose_reading_mg_dl_age,2246.0,,,,143.34016028495103,53.84766154341035,70.0,89.0,147.5,195.0,278.0,covariate_continuous,,glucose_reading_mg_dl_age
-glucose_reading_mg_dl_technician,2246,13,JAT,886,,,,,,,,covariate_categorical,"sex,center",glucose_reading_mg_dl_technician
-length_wo_tail_cm,3164.0,,,,20.24840391908976,1.9504727119659335,14.4,19.0,20.0,21.5,28.0,covariate_continuous,,length_wo_tail_cm
-length_wo_tail_cm_age,3164.0,,,,123.25031605562579,55.79660159175223,51.0,83.0,92.0,187.0,278.0,covariate_continuous,,length_wo_tail_cm_age
-length_wo_tail_cm_technician,3164,15,TW,934,,,,,,,,covariate_categorical,,length_wo_tail_cm_technician
-length_w_tail_cm,3161.0,,,,38.19118949699462,3.4260765714234616,25.5,35.5,38.0,40.5,47.0,covariate_continuous,,length_w_tail_cm
-length_w_tail_cm_age,3161.0,,,,123.2391648212591,55.798748884036584,51.0,83.0,92.0,187.0,278.0,covariate_continuous,,length_w_tail_cm_age
-length_w_tail_cm_technician,3161,15,TW,931,,,,,,,,covariate_categorical,,length_w_tail_cm_technician
-parametrial_fat_weight_g,1481.0,,,,1.556933153274814,0.9711364471107418,0.01,0.857,1.328,1.982,6.35,covariate_continuous,,parametrial_fat_weight_g
-parametrial_fat_weight_g_age,1481.0,,,,124.29101958136394,57.06098900820846,51.0,82.0,91.0,188.0,278.0,covariate_continuous,,parametrial_fat_weight_g_age
-parametrial_fat_weight_g_technician,1481,16,TW,378,,,,,,,,covariate_categorical,,parametrial_fat_weight_g_technician
-retroperitoneal_fat_weight_g_age,3176.0,,,,124.13300712738477,55.784625375413846,51.9083333333333,83.93680555555555,92.81111111111115,187.80295138888874,278.822222222222,covariate_continuous,,retroperitoneal_fat_weight_g_age
-retroperitoneal_fat_weight_g_technician,3176,17,TW,789,,,,,,,,covariate_categorical,,retroperitoneal_fat_weight_g_technician
-tail_length,3158.0,,,,17.94838505383154,2.075568453245946,8.5,16.5,17.7,19.5,24.5,covariate_continuous,,tail_length
-tail_length_age,3158.0,,,,123.2359088030399,55.80276947208293,51.0,83.0,92.0,187.0,278.0,covariate_continuous,,tail_length_age
-tail_length_technician,3158,15,TW,930,,,,,,,,covariate_categorical,,tail_length_technician
-idx,3193.0,,,,1802.3103664265582,956.9744020014916,83.0,989.0,1816.0,2626.0,3472.0,covariate_continuous,,idx
-retroperitoneal_fat_weight_g,3173.0,,,,2.720472887488182,2.6171184010835558,0.065,0.876,1.802,3.64,13.95,covariate_continuous,,retroperitoneal_fat_weight_g
+measure,Unnamed: 0,count,unique,top,freq,mean,std,min,25%,50%,75%,max,trait_covariate,covariates,description
+rfid,0,3193.0,3193.0,0007929BF5,1.0,,,,,,,,metadata,,rfid
+sex,1,3193.0,2.0,M,1618.0,,,,,,,,covariate_categorical,,sex
+center,2,3193.0,4.0,MI,1038.0,,,,,,,,covariate_categorical,,center
+bmi_wo_tail,3,3164.0,,,,6.303489454197419,1.2298806821610215,2.77091906721536,5.425,6.06514539286533,7.008403575176647,11.1012345679012,covariate_continuous,,Example of adding better description to bmi_wo_tail trait
+bmi_wo_tail_age,4,3164.0,,,,123.2503160556258,55.79660159175223,51.0,83.0,92.0,187.0,278.0,covariate_continuous,,bmi_wo_tail_age
+bmi_wo_tail_technician,5,3164.0,15.0,TW,934.0,,,,,,,,covariate_categorical,,bmi_wo_tail_technician
+bmi_w_tail,6,3161.0,,,,1.7629437576610536,0.310829074662552,0.988241511428194,1.52470905717659,1.70900928476686,1.94650222014094,4.10642300456866,covariate_continuous,,bmi_w_tail
+bmi_w_tail_age,7,3161.0,,,,123.2391648212591,55.79874888403658,51.0,83.0,92.0,187.0,278.0,covariate_continuous,,bmi_w_tail_age
+bmi_w_tail_technician,8,3161.0,15.0,TW,931.0,,,,,,,,covariate_categorical,,bmi_w_tail_technician
+body_weight_g,9,3164.0,,,,263.8113147914033,84.73946673511418,121.0,196.0,244.0,313.0,606.0,trait,"sex,center,body_weight_g_age,body_weight_g_technician",body_weight_g
+body_weight_g_age,10,3164.0,,,,123.2503160556258,55.79660159175223,51.0,83.0,92.0,187.0,278.0,covariate_continuous,,body_weight_g_age
+body_weight_g_technician,11,3164.0,15.0,TW,934.0,,,,,,,,covariate_categorical,"sex,center",body_weight_g_technician
+epididymis_fat_weight_g,12,1595.0,,,,3.370046394984326,1.7556093889527085,0.626,2.1715,2.951,4.1485,13.098,covariate_continuous,,epididymis_fat_weight_g
+epididymis_fat_weight_g_age,13,1595.0,,,,122.5423197492163,55.01826942730924,54.0,84.0,92.0,187.0,274.0,covariate_continuous,,epididymis_fat_weight_g_age
+epididymis_fat_weight_g_technician,14,1595.0,18.0,TW,396.0,,,,,,,,covariate_categorical,,epididymis_fat_weight_g_technician
+glucose_reading_mg_dl,15,2246.0,,,,89.1323839715049,10.839035354460474,52.0,82.0,89.0,96.0,130.0,trait,"sex,center,glucose_reading_mg_dl_age,glucose_reading_mg_dl_technician",glucose_reading_mg_dl
+glucose_reading_mg_dl_age,16,2246.0,,,,143.34016028495105,53.84766154341035,70.0,89.0,147.5,195.0,278.0,covariate_continuous,,glucose_reading_mg_dl_age
+glucose_reading_mg_dl_technician,17,2246.0,13.0,JAT,886.0,,,,,,,,covariate_categorical,"sex,center",glucose_reading_mg_dl_technician
+length_wo_tail_cm,18,3164.0,,,,20.24840391908976,1.9504727119659333,14.4,19.0,20.0,21.5,28.0,covariate_continuous,,length_wo_tail_cm
+length_wo_tail_cm_age,19,3164.0,,,,123.2503160556258,55.79660159175223,51.0,83.0,92.0,187.0,278.0,covariate_continuous,,length_wo_tail_cm_age
+length_wo_tail_cm_technician,20,3164.0,15.0,TW,934.0,,,,,,,,covariate_categorical,,length_wo_tail_cm_technician
+length_w_tail_cm,21,3161.0,,,,38.19118949699462,3.4260765714234616,25.5,35.5,38.0,40.5,47.0,covariate_continuous,,length_w_tail_cm
+length_w_tail_cm_age,22,3161.0,,,,123.2391648212591,55.79874888403658,51.0,83.0,92.0,187.0,278.0,covariate_continuous,,length_w_tail_cm_age
+length_w_tail_cm_technician,23,3161.0,15.0,TW,931.0,,,,,,,,covariate_categorical,,length_w_tail_cm_technician
+parametrial_fat_weight_g,24,1481.0,,,,1.556933153274814,0.9711364471107418,0.01,0.857,1.328,1.982,6.35,covariate_continuous,,parametrial_fat_weight_g
+parametrial_fat_weight_g_age,25,1481.0,,,,124.29101958136394,57.06098900820846,51.0,82.0,91.0,188.0,278.0,covariate_continuous,,parametrial_fat_weight_g_age
+parametrial_fat_weight_g_technician,26,1481.0,16.0,TW,378.0,,,,,,,,covariate_categorical,,parametrial_fat_weight_g_technician
+retroperitoneal_fat_weight_g_age,27,3176.0,,,,124.13300712738476,55.784625375413846,51.9083333333333,83.93680555555555,92.81111111111116,187.8029513888888,278.822222222222,covariate_continuous,,retroperitoneal_fat_weight_g_age
+retroperitoneal_fat_weight_g_technician,28,3176.0,17.0,TW,789.0,,,,,,,,covariate_categorical,,retroperitoneal_fat_weight_g_technician
+tail_length,29,3158.0,,,,17.94838505383154,2.075568453245946,8.5,16.5,17.7,19.5,24.5,covariate_continuous,,tail_length
+tail_length_age,30,3158.0,,,,123.2359088030399,55.80276947208293,51.0,83.0,92.0,187.0,278.0,covariate_continuous,,tail_length_age
+tail_length_technician,31,3158.0,15.0,TW,930.0,,,,,,,,covariate_categorical,,tail_length_technician
+idx,32,3193.0,,,,1802.3103664265584,956.9744020014916,83.0,989.0,1816.0,2626.0,3472.0,covariate_continuous,,idx
+retroperitoneal_fat_weight_g,33,3173.0,,,,2.720472887488182,2.617118401083556,0.065,0.876,1.802,3.64,13.95,covariate_continuous,,retroperitoneal_fat_weight_g
+body_weight_g_males,9,1603.0,,,,322.3961322520274,77.34093440632795,151.0,264.0,311.0,381.0,606.0,trait,"center,body_weight_g_age,body_weight_g_technician",body_weight_g just males included
+body_weight_g_females,9,1561.0,,,,203.65022421524662,35.614036976414056,121.0,178.0,197.0,228.0,385.0,trait,"center,body_weight_g_age,body_weight_g_technician",body_weight_g just females included
+glucose_reading_mg_dl_males,15,1142.0,,,,91.29188633975481,10.091338464147869,61.0,84.0,91.0,98.0,130.0,trait,"center,glucose_reading_mg_dl_age,glucose_reading_mg_dl_technician",glucose_reading_mg_dl just males included
+glucose_reading_mg_dl_females,15,1104.0,,,,86.89855090579711,11.133600154130612,52.0,80.0,86.0,94.0,121.0,trait,"center,glucose_reading_mg_dl_age,glucose_reading_mg_dl_technician",glucose_reading_mg_dl just females included

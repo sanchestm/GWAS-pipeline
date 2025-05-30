@@ -8,6 +8,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import panel as pn
+from holoviews import opts
+import holoviews as hv
+import hvplot.pandas
+import hvplot.dask  
+from functools import reduce, wraps
 pn.extension('plotly')
 pn.extension()
 
@@ -19,19 +24,17 @@ class interactive_QC:
         self.uncurated_data.to_csv(f'uncurated_data_N{self.uncurated_data.shape[0]}_{datetime.today().strftime("%Y%m%d")}.csv')
         self.dfog = raw_data.copy()
         self.dd = data_dictionary.copy()
+        self.dd.loc[self.dd.measure =="rfid", 'trait_covariate']='metadata'
         self.align_w_cols = lambda l: list(set(l) & set(self.dfog.columns))
         self.traits = self.align_w_cols(self.dd.query('trait_covariate == "trait"').measure.to_list())
         self.covs = self.align_w_cols(self.dd[self.dd['trait_covariate'].fillna('').str.contains('covariate')].measure.to_list())
         self.covs_cat = self.align_w_cols(self.dd[self.dd['trait_covariate'].fillna('').str.contains('covariate_categorical')].measure.to_list())
         self.covs_cont = self.align_w_cols(self.dd[self.dd['trait_covariate'].fillna('').str.contains('covariate_continuous')].measure.to_list())
         self.cols_metadata = self.align_w_cols(self.dd[self.dd['trait_covariate'].fillna('').str.contains('metadata')].measure.to_list())
-
-        self.dfog[self.traits] = self.dfog[self.traits].applymap(lambda x: (str(x).replace(' ', '').replace('#DIV/0!', 'nan').replace('#VALUE!', 'nan')  
-                                                .replace('n/a','nan' ).replace('#REF!','nan' ).replace('True','1' ).replace('False','0' ))).astype(float)
-        self.dfog[self.covs_cat].fillna('UNK', inplace = True)
-        self.dfog[self.covs_cont].fillna(-9999, inplace = True)
+        self.dfog[self.traits] = self.dfog[self.traits].apply(pd.to_numeric, errors = 'coerce')
+        self.dfog[self.covs_cat] = self.dfog[self.covs_cat].astype(str).fillna('UNK')
+        self.dfog[self.covs_cont] = self.dfog[self.covs_cont].apply(pd.to_numeric, errors = 'coerce').fillna(-9999)
         self.dfog[self.cols_metadata] = self.dfog[self.cols_metadata].astype(str)
-
         self.dffinal = ''
     
         self.value_dict = pd.DataFrame(columns = ['wid_range', 'wid_exclude_rfid', 'wid_trait', 'wid_extra'])
@@ -51,15 +54,18 @@ class interactive_QC:
         self.outdfname = f'raw_data_curated_n{self.dfog.shape[0]}_{datetime.today().strftime("%Y%m%d")}.csv'
 
     def quick_view(self):
+        import statsReport
         if type(self.dffinal) == str: sr = statsReport.stat_check(self.dfog)
         else: sr = statsReport.stat_check(self.dffinal)
-            
+        tabs = pn.Tabs(tabs_location='left') 
         for group, dd1 in self.dd.query('trait_covariate == "trait"').groupby('covariates'):
             traits = dd1.measure.to_list()
             covs = dd1.covariates.iloc[0].split(',')
-            display(sr.do_anova(targets = traits, covariates=covs).loc[:, (slice(None), 'qvalue')].set_axis(covs, axis = 1)) #
             for subtraits in [traits[15*i:15*i+15] for i in range(len(traits)//15+1)]:
-                sr.plot_var_distribution(subtraits, covs)
+                anova_res = sr.do_anova(targets = subtraits, covariates=covs).loc[:, (slice(None), 'qvalue')].set_axis(covs, axis = 1) #
+                pane = sr.plot_var_distribution(subtraits, covs)
+                tabs.append((f"{len(covs)}",pn.Column(anova_res,pane)))    #traits:{','.join(traits)}\ncovariates:{','.join(covs)}
+        return tabs
 
     def _f(self, trait, ranger, remove_rfids, extra):
         todo = '|'.join(sorted(set(self.traits) - set(self.dffinal.columns) - set([trait])))
@@ -76,7 +82,7 @@ class interactive_QC:
                     df.loc[(eval(a_)), trait] = eval(b_)
             
         describer = df[[trait]].describe(percentiles = [0.01, 0.05, 0.1,.9,.95, .99]).T
-        ppfr =  abs(norm.ppf(np.array([0.00001, 0.0001, 0.001, .01, .05][::-1])/2))[:, None]*np.array([-1, 1])*describer['std'][0] + describer['mean'][0]
+        ppfr =  abs(norm.ppf(np.array([0.00001, 0.0001, 0.001, .01, .05][::-1])/2))[:, None]*np.array([-1, 1])*describer['std'].iloc[0] + describer['mean'].iloc[0]
         describer.loc[trait, [f'z{x}%' for x in 100*np.array([0.00001, 0.0001, 0.001, .01, .05][::-1])]] = [' – '.join(x) for x in ppfr.round(2).astype(str)]
         display(describer)
         covariates = set(self.align_w_cols(self.dd.set_index('measure').loc[trait, 'covariates'].split(','))) 
@@ -101,14 +107,14 @@ class interactive_QC:
                     plotname = f'{cv}:violin'
                 else: 
                     plotname = f'{cv}:scatter'
-                    fig = px.density_contour(df, y=trait, x=cv, trendline='ols')
+                    dfsset = df.dropna(subset=trait)
+                    fig = px.density_contour(dfsset, y=trait, x=cv, trendline='ols')
                     for i in fig.data: i['line']['color'] = 'gray'
-                    fig.add_scatter(x = df[cv], y = df[trait], mode='markers', marker= dict(line_width=1, size=7, color = 'black', line_color = 'white'),
-                                    text=df[['rfid']+ list(covariates)].apply(lambda x: '<br>'.join(map(lambda m: ":".join(m), zip(x.index, x.astype(str).values))), axis = 1), ) 
+                    fig.add_scatter(x = dfsset[cv], y = dfsset[trait], mode='markers', marker= dict(line_width=1, size=7, color = 'black', line_color = 'white'),
+                                    text=dfsset[['rfid']+ list(covariates)].apply(lambda x: '<br>'.join(map(lambda m: ":".join(m), zip(x.index, x.astype(str).values))), axis = 1), ) 
                 for rangeri in ranger: fig.add_hline(y=rangeri, line_width=3, line_dash="dash", line_color="red")
                 fig.update_layout(template='simple_white',width = 800, height = 600, coloraxis_colorbar_x=1.05, legend_visible = False, 
-                                          coloraxis_colorbar_y = .3,coloraxis_colorbar_len = .8)
-                #display(fig)
+                                          coloraxis_colorbar_y = .3,coloraxis_colorbar_len = .8) #xaxis_range=[dfsset.query().cv.replace(-9999), xmax]
                 tabs.append((plotname, pn.pane.Plotly(fig)))
             display(tabs)
             self.dffinal.loc[:, trait] = df.loc[:, trait].values
@@ -118,8 +124,6 @@ class interactive_QC:
             print(f'saving data to "{self.outdfname}"')
             self.value_dict.applymap(lambda x: x.value).to_csv('QC_set_boundaries.csv')
             self.dffinal.set_index('rfid').sort_index().to_csv(self.outdfname)
-        #return self.dffinal
-        #return df.loc[:, trait]
 
     def QC(self):
         if not len(self.dffinal): self.dffinal = self.dfog[['rfid']+self.covs].copy() 
@@ -212,3 +216,101 @@ class interactive_QC:
     def get_boundaries(self):
         return self.value_dict.applymap(lambda x: x.value).sort_index()
 
+
+def hv2strmlit(file,width = None, height = 500 ,**kws):
+    import streamlit as st
+    if type(file)!=str:
+        html_buffer = StringIO()
+        hv.save(file,html_buffer)
+        t = html_buffer.getvalue()
+    else:
+        with open(file, 'r', encoding='utf-8') as f: 
+            t = f.read()
+    return  st.components.v1.html(t, width=width, height=height, scrolling=True, **kws)
+
+
+def fancy_display(df: pd.DataFrame, download_name: str = 'default.csv', max_width = 1400, max_height = 600) -> pn.widgets.Tabulator:
+    pn.extension('tabulator')
+    df = df.drop(['index'] + [f'level_{x}' for x in range(100)], errors = 'ignore', axis = 1)
+    numeric_cols = df.select_dtypes(include=np.number).columns.to_list()
+    try:df[numeric_cols] = df[numeric_cols].map(round, ndigits=3)
+    except: df[numeric_cols] = df[numeric_cols].applymap(round, ndigits=3)
+    d = {x : {'type': 'number', 'func': '>=', 'placeholder': 'Enter minimum'} for x in numeric_cols} | \
+        {x : {'type': 'input', 'func': 'like', 'placeholder': 'Similarity'} for x in df.columns[~df.columns.isin(numeric_cols)]}
+    download_table = pn.widgets.Tabulator(df,pagination='local',page_size= 20, header_filters=d, layout = 'fit_data_fill', max_width = max_width, max_height = max_height)
+    filename, button = download_table.download_menu(text_kwargs={'name': 'Enter filename', 'value': download_name},button_kwargs={'name': 'Download table'})
+    return pn.Column(pn.Row(filename, button), download_table)
+
+import html
+def pn_Iframe(file,width = 600, height = 600 ,return_html_iframe=False,**kws):
+    if type(file)!=str:
+        html_buffer = StringIO()
+        hv.save(file,html_buffer)
+        t = html.escape(html_buffer.getvalue())
+    else:
+        with open(file) as f: t = html.escape(f.read())
+    iframe_code = f'<iframe srcdoc="{t}" style="height:100%; width:100%" frameborder="0"></iframe>'
+    if return_html_iframe: return iframe_code
+    return pn.pane.HTML(iframe_code, max_width = 1000, max_height = 1000, height = height, width=width, **kws)
+
+def regex_plt(df, rg, max_cols = 10, full = True):
+    if full:
+        seq = '|'.join(rg) if not isinstance(rg, str) else rg
+        table = fancy_display(df.loc[:, ~df.columns.str.contains(seq)], max_height=400, max_width=1000)
+        return pn.Column(table,  regex_plt(df,rg, max_cols = max_cols, full = False))
+    if not isinstance(rg, str):
+        fig = reduce(lambda x,y: x+y, [regex_plt(df, x, full = False).opts(shared_axes = False) for x in rg]).opts(shared_axes = False).cols(max_cols)
+        return fig
+    sset = df.filter(regex = rg).T
+    return (sset.hvplot(kind='line', rot= 45, grid =True) \
+           * sset.hvplot(kind='scatter', marker='o', size=50, rot= 45,line_width = 1, line_color='black', alpha = .7 ,  legend = False, title = rg, grid =True))\
+           .opts(frame_width = 300, frame_height = 300,show_legend = False, title = rg)
+
+def megaHeatmap(df, sets, cpallete = ['Greys','OrRd', 'Purples', 'Blues', 'Greens', 'Oranges', 'Reds',
+                          'PuRd', 'RdPu', 'BuPu',
+                          'GnBu', 'PuBu', 'BuGn', 'YlGn'], scale_column=True, row_clusters = False, **bokeh_opts):
+    figstack = []
+    figstackna = []
+    bokeh_opts = dict(width = 1450, height = 2000)|bokeh_opts
+    df = df.copy()
+    if row_clusters:
+        from scipy.cluster.hierarchy import ward, dendrogram, leaves_list, linkage
+        from scipy.spatial import distance
+        dfn = df.filter(regex = '|'.join(sets)).select_dtypes(include = 'number')
+        if dfn.shape[1] and dfn.shape[0]:     
+            dist_array = distance.pdist(dfn.fillna(dfn.mean()).fillna(1))
+            if dist_array.size > 0:
+                hieg = linkage(dist_array + 1e-5)
+                df = df.iloc[leaves_list(hieg)]
+            else:
+                print("Warning: Empty distance matrix after pdist; skipping clustering.")
+        elif dfn.shape[0] <= 1:
+            print("Warning: Skipping clustering because there is only one row.")
+        elif dfn.shape[1] == 0:
+            print("Warning: No numeric columns matched the provided regex in this group.")
+    for  i, cmap in zip(sets,cpallete):
+        tempdf = df.filter(regex = i).select_dtypes(include = 'number')
+        if not scale_column or not tempdf.shape[1]:
+            fig = tempdf.hvplot.heatmap(rot = 90, cmap = cmap, colorbar=False, shared_axes = False)
+            labels = hv.Labels(fig).opts( text_font_size="5pt", text_color="black" )
+            fig = fig*labels
+        else: 
+            fig_lis = (tempdf[[tcol]].hvplot.heatmap(rot = 90, cmap = cmap, colorbar=False, shared_axes = False)\
+                         for tcol in tempdf.columns)
+            fig_lis  = (fig*hv.Labels(fig).opts( text_font_size="5pt", text_color="black" ) for fig in fig_lis)
+            fig = reduce(lambda x,y: x*y, fig_lis  )
+        figstack += [fig*labels]
+        figstackna += [df.filter(regex = i).isna().hvplot.heatmap(cmap = 'greys', alpha = 1, rot = 90, colorbar=False)]
+    
+    bigfig = reduce(lambda x,y: x*y, figstack).opts( **bokeh_opts )#"zoom_box",active_tools=['hover']
+    bigfigna = reduce(lambda x,y: x*y, figstackna).opts( **bokeh_opts)#active_tools=['hover']
+    return bigfig, bigfigna
+
+def megaHeatmapGroupby(df, sets, gb_column, scale_column = True,  **bokeh_opts):
+    figs = df.groupby(gb_column).progress_apply(lambda x: megaHeatmap(x, sets, scale_column=scale_column))
+    tabs = pn.Tabs()
+    tabsna = pn.Tabs()
+    for i, v in figs.items():
+        tabs.append((i,  pn.pane.HoloViews(v[0].opts(**bokeh_opts), linked_axes=False)))
+        tabsna.append((i,pn.pane.HoloViews(v[1].opts(**bokeh_opts), linked_axes=False)))
+    return tabs, tabsna

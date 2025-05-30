@@ -17,19 +17,21 @@ requirements:
     - python
     - pip
   run:
-    - python=3.11
+    - python=3.12
     - pandas
     - fastparquet
     - seaborn
     - umap-learn
     - ipywidgets
-    - dask<2024.8.1
+    - dask
     - psycopg2
     - scikit-learn
     - openjdk=11
     - ipykernel
+    - jax
     - pyarrow
     - plink
+    - plink2
     - snpeff
     - dask-jobqueue
     - gcta
@@ -59,12 +61,13 @@ requirements:
     - datashader
     - nbformat
     - firefox
-    - jinja2=3.1.2
+    - jinja2 #=3.1.2
     - geckodriver
     - tabulate
     - ensembl-vep=112.0
-    - pymc>=5
+    - pymc[version='>=5']
     - bambi
+    - pysam
     - pdf2image
     - r-base
     - r-essentials
@@ -84,15 +87,13 @@ requirements:
     - r-dplyr
     - r-data.table
     - imagemagick
+    - transformers
+    - python-kaleido
+    - accelerate
     - pip
     - pip:
-      - pandas-plink>=2.3
       - goatools
       - dash-bio==1.0.1
-      - kaleido
-      - transformers
-      - accelerate
-      - enformer-pytorch
 
 
 test:

@@ -1,32 +1,44 @@
-name: gwas
+name: gpu
 channels:
+  - rapidsai
+  - nvidia
   - conda-forge
   - defaults
   - bioconda
 dependencies:
   - python=3.12
+  - cudf=25.04
+  - cuml=25.04
+  - cugraph=25.04
+  - cuvs=25.04
+  - cupy
+  - jax
+  - dask
+  - dask-cuda=25.04
+  - dask-jobqueue
+  - kvikio
+  - cuda-cudart
+  - cuda-toolkit
   - pandas
   - fastparquet
   - seaborn
   - umap-learn
   - ipywidgets
-  - dask
   - psycopg2
   - scikit-learn
   - openjdk=11
   - ipykernel
-  - jax
   - pyarrow
   - plink
-  - plink2
-  - snpeff
-  - dask-jobqueue
   - gcta
   - plotly
   - biopython
   - mygene
   - pytables
   - h5py
+  - pysam
+  - ocl-icd-system
+  - clinfo
   - hdbscan
   - ydata-profiling
   - arviz
@@ -54,8 +66,11 @@ dependencies:
   - ensembl-vep=112.0
   - pymc[version='>=5']
   - bambi
-  - pysam
+  - transformers
+  - python-kaleido
+  - accelerate
   - pdf2image
+  - boost
   - r-base
   - r-essentials
   - r-chron
@@ -70,18 +85,15 @@ dependencies:
   - r-plyr
   - r-readxl
   - pandoc
+  - pytorch=*=*cuda*   
   - r-purrr
   - r-dplyr
   - r-data.table
   - imagemagick
-  - transformers
-  - python-kaleido
-  - accelerate
   - pip
   - pip:
-    #- pandas-plink>=2.3
     - goatools
     - dash-bio==1.0.1
-    #- enformer-pytorch
+    #- enformer-pytorch    # uncomment this line when you’re ready to reinstall
 
 

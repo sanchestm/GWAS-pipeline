@@ -3,7 +3,7 @@ from gwas_class_auto import *
 import sys
 import pandas as pd
 
-runall = 'regressout subset grm h2 gwas db qtl gcorr phewas eqtl sqtl goea locuszoom h2fig report store publish'.replace(' ', '|||')
+runall = 'regressout subset grm h2 gwas db qtl gcorr phewas eqtl sqtl goea locuszoom h2fig report store publish porcupineplot'.replace(' ', '|||')
 run2phewas = 'regressout subset grm h2 gwas db qtl gcorr eqtl sqtl goea locuszoom h2fig'.replace(' ', '|||')
 
 allargs = '|||'.join(sys.argv[1:]).replace('runall', runall).replace('run2phewas', run2phewas).split('|||')
@@ -15,6 +15,9 @@ def typeconverter(s):
     if s.lower() in ['0', 'false']: return 0
     try: return int(s)
     except: pass
+    if s[-2:] == '()':
+        try: return eval(np.random.choice( re.split(r'(\s|\,|\]|\[)', s)))
+        except: pass
     try: return float(s)
     except: return s
         
@@ -29,10 +32,10 @@ pj = dictionary['project'].rstrip('/')  if (dictionary['project'] ) else 'test'
 if not dictionary['genotypes']:
     dictionary['genotypes'] = '/tscc/projects/ps-palmer/gwas/databases/rounds/r10.2.1'
     
-if not dictionary['threshold']: dictionary['threshold'] = 5.4
+if not dictionary['threshold']: dictionary['threshold'] = 5.39
 if dictionary['threshold'] != 'auto':  dictionary['threshold']= float(dictionary['threshold'])
 
-if not dictionary['threshold05']: dictionary['threshold05'] = 6.0
+if not dictionary['threshold05']: dictionary['threshold05'] = 5.64
 dictionary['threshold05'] = float(dictionary['threshold05'])
     
 if not dictionary['genome_accession']: dictionary['genome_accession'] = 'GCF_015227675.2'
@@ -60,6 +63,8 @@ else:
     rawdata = dictionary['regressout'] if (len(dictionary['regressout']) > 1) else f'{path}{pj}/raw_data.csv'
     df = pd.read_csv(rawdata, dtype = {'rfid': str}).drop_duplicates(subset = 'rfid') 
     traits_, traits_d = [], []
+
+for k,v in dictionary.items(): printwithlog(f'--{k} : {v}')
 gwas = gwas_pipe(path = f'{path}{pj}/',
              all_genotypes = dictionary['genotypes'], #'round9_1.vcf.gz',
              data = df,
@@ -74,7 +79,6 @@ gwas = gwas_pipe(path = f'{path}{pj}/',
              threads = dictionary['threads'])
 printwithlog(path)
 printwithlog(pj)
-for k,v in dictionary.items(): printwithlog(f'--{k} : {v}')
 if dictionary['clear_directories'] and not dictionary['skip_already_present_gwas']: gwas.clear_directories()
 if dictionary['impute']: 
     gbcols =  [] if not dictionary['groupby'] else dictionary['groupby'].split(',')
@@ -82,12 +86,13 @@ if dictionary['impute']:
 if dictionary['add_sex_specific_traits']: 
     gwas.add_sex_specific_traits(save = True)
 if dictionary['regressout'] : 
+    kws = kw(dictionary, 'regressout_')
     if not dictionary['timeseries']:  
-        if not dictionary['groupby']: gwas.regressout(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'))
-        else: gwas.regressout_groupby(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'), groupby_columns=dictionary['groupby'].split(','))
+        if not dictionary['groupby']: gwas.regressout(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'), **kws)
+        else: gwas.regressout_groupby(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'), groupby_columns=dictionary['groupby'].split(','),**kws)
     else:  
-        if not dictionary['groupby']: gwas.regressout_timeseries(data_dictionary=pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'))
-        else: gwas.regressout_timeseries(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'), groupby_columns=dictionary['groupby'].split(','))
+        if not dictionary['groupby']: gwas.regressout_timeseries(data_dictionary=pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'),**kws)
+        else: gwas.regressout_timeseries(data_dictionary= pd.read_csv(f'{gwas.path}data_dict_{pj}.csv'), groupby_columns=dictionary['groupby'].split(','), **kws)
 
 if dictionary['latent_space']: gwas.add_latent_spaces()
 if dictionary['subset'] :  ###essential
@@ -100,7 +105,7 @@ if dictionary['h2'] :  gwas.snpHeritability() ###essential
 if dictionary['BLUP'] : gwas.BLUP()
 if dictionary['BLUP_predict']: gwas.BLUP_predict(dictionary['BLUP_predict']);
 if dictionary['gwas']: gwas.fastGWAS(skip_already_present=dictionary['skip_already_present_gwas']) ###essential
-if dictionary['db']: gwas.addGWASresultsToDb(researcher=dictionary['researcher'],
+if dictionary['db'] and not dictionary['nodb']: gwas.addGWASresultsToDb(researcher=dictionary['researcher'],
                                              round_version=dictionary['round'], 
                                              gwas_version=dictionary['gwas_version'])
 if dictionary['qtl']: ###essential
@@ -113,15 +118,14 @@ if dictionary['effect']: gwas.effectsize()
 if dictionary['gcorr']: ###essential
     kws = kw(dictionary, 'gcorr_')
     gwas.genetic_correlation_matrix(**kws)
-    gwas.make_heritability_figure(display = False)
+    gwas.make_heritability_figure()
 if dictionary['manhattanplot'] or dictionary['porcupineplot']: gwas.porcupineplot() ###essential
 if dictionary['phewas']:gwas.phewas(annotate=True, pval_threshold = 1e-4, nreturn = 1, r2_thresh = .65)  ###essential
 if dictionary['eqtl']:gwas.eQTL(annotate= True) ###essential
 if dictionary['sqtl']:gwas.sQTL(annotate= True) ###essential
 if dictionary['goea']:gwas.GeneEnrichment() ###essential
 if dictionary['locuszoom']: gwas.locuszoom(**kw(dictionary, 'locuszoom_'))  ###essential
-if dictionary['h2fig']: gwas.make_heritability_figure(display = False) 
-if dictionary['phewas_fig']: gwas.make_phewas_figs()
+if dictionary['h2fig']: gwas.make_heritability_figure() 
 if dictionary['report']:
     kws = kw(dictionary, 'report_')
     gwas.report(round_version=dictionary['round'], gwas_version=dictionary['gwas_version'], **kws)
@@ -134,4 +138,5 @@ try:
     if dictionary['publish']:gwas.copy_results() ###essential
 except: 
     print('setting up the minio is necessary')
+if dictionary['phewas_fig']: gwas.make_phewas_figs()
 gwas.print_watermark()
