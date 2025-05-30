@@ -1,23 +1,25 @@
 {% set name = "gwas" %}
-{% set version = "0.3.7" %}
+{% set version = "0.4.0" %}
 
 package:
   name: {{name}}
   version: {{version}}
 
 source:
-  path: .
+  url: https://github.com/sanchestm/GWAS-pipeline/archive/refs/tags/{{ version }}.tar.gz
+  sha256: 8050bb0187c4d7ef4b947a00fd67f13ea6d80dd5eb3a0ac445bf8ed5ec52a79b
 
 build:
+  noarch: python
   number: 0
-  script: python -m pip install .
+  script: build.sh
 
 requirements:
   build:
     - python
     - pip
   run:
-    - python=3.12
+    - python >=3.10,<3.13
     - pandas
     - fastparquet
     - seaborn
@@ -91,14 +93,13 @@ requirements:
     - python-kaleido
     - accelerate
     - pip
-    - pip:
-      - goatools
-      - dash-bio==1.0.1
-
+  pip:
+    - goatools
+    - dash-bio==1.0.1
 
 test:
   imports:
-    - gwas.gwas  # Ensure the module can be imported
+    - gwas.gwas 
     - gwas
 
 about:
@@ -112,7 +113,3 @@ extra:
   recipe-maintainers:
     - sanchestm
 
-channels:
-  - conda-forge
-  - defaults
-  - bioconda

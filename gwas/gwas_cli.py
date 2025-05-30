@@ -1,38 +1,38 @@
 #!/usr/bin/env python
 
-def main():
+try:
+    from gwas.gwas import *
+except ImportError as e:
+    print('Failed to import gwas.gwas; trying local import...')
     try:
-        from gwas.gwas import *
-    except ImportError as e:
-        print('Failed to import gwas.gwas; trying local import...')
-        try:
-            from gwas import *
-        except ImportError:
-            raise ImportError("Could not import `gwas.gwas`. Make sure your package is installed or the structure is correct.") from e
-    import sys
-    import pandas as pd
-    
-    runall = 'regressout subset grm h2 gwas db qtl gcorr phewas eqtl sqtl goea locuszoom h2fig report store publish porcupineplot'.replace(' ', '|||')
-    run2phewas = 'regressout subset grm h2 gwas db qtl gcorr eqtl sqtl goea locuszoom h2fig'.replace(' ', '|||')
+        from gwas import *
+    except ImportError:
+        raise ImportError("Could not import `gwas.gwas`. Make sure your package is installed or the structure is correct.") from e
+import sys
+import pandas as pd
+runall = 'regressout subset grm h2 gwas db qtl gcorr phewas eqtl sqtl goea locuszoom h2fig report store publish porcupineplot'.replace(' ', '|||')
+run2phewas = 'regressout subset grm h2 gwas db qtl gcorr eqtl sqtl goea locuszoom h2fig'.replace(' ', '|||')
+def typeconverter(s):
+    s= str(s)
+    if s.lower() in ['1', 'true']: return 1
+    if s.lower() in ['0', 'false']: return 0
+    try: return int(s)
+    except: pass
+    if s[-2:] == '()':
+        try: return eval(np.random.choice( re.split(r'(\s|\,|\]|\[)', s)))
+        except: pass
+    try: return float(s)
+    except: return s
+        
+def kw(d, prefix):
+    if prefix[-1] != '_': prefix += '_'
+    return {k.replace(prefix, ''):typeconverter(v) for k,v in d.items() if (k[:len(prefix)] == prefix)}
+
+def main():
     
     allargs = '|||'.join(sys.argv[1:]).replace('runall', runall).replace('run2phewas', run2phewas).split('|||')
     dictionary = defaultdict(lambda: 0, {k.replace('-', ''):v for k,v in [(x + '=1' if '=' not in x else x).split('=') for x in allargs] })
-    
-    def typeconverter(s):
-        s= str(s)
-        if s.lower() in ['1', 'true']: return 1
-        if s.lower() in ['0', 'false']: return 0
-        try: return int(s)
-        except: pass
-        if s[-2:] == '()':
-            try: return eval(np.random.choice( re.split(r'(\s|\,|\]|\[)', s)))
-            except: pass
-        try: return float(s)
-        except: return s
-            
-    def kw(d, prefix):
-        if prefix[-1] != '_': prefix += '_'
-        return {k.replace(prefix, ''):typeconverter(v) for k,v in d.items() if (k[:len(prefix)] == prefix)}
+   
     
     path = dictionary['path'].rstrip('/') + '/' if (dictionary['path'] ) else ''
     
