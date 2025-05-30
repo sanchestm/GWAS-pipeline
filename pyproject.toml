@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gwas"
+version = "0.3.0"
+description = "A general package to run GWAS associations and visualize the results"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+  {name = "Thiago Sanches"},
+  {name = "Apurva Chitre"}
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/sanchestm/GWAS-pipeline"
+
+[project.scripts]
+gwas-cli = "gwas.gwas_cli:main"
+gwas-cli-argparse = "gwas.gwas_cli_argparse:main"
+
+[tool.setuptools]
+packages = ["gwas"]
+
+[tool.setuptools.packages.find]
+where = ["."]
