@@ -39,7 +39,9 @@ def main():
     pj = dictionary['project'].rstrip('/')  if (dictionary['project'] ) else 'test'
     
     if not dictionary['genotypes']:
-        dictionary['genotypes'] = '/tscc/projects/ps-palmer/gwas/databases/rounds/r10.2.1'
+        dictionary['genotypes'] = '/tscc/projects/ps-palmer/gwas/databases/rounds/r10.5.2'
+    
+    if not dictionary['gwas_version']: dictionary['gwas_version'] = __version__
         
     if not dictionary['threshold']: dictionary['threshold'] = 5.39
     if dictionary['threshold'] != 'auto':  dictionary['threshold']= float(dictionary['threshold'])
@@ -50,16 +52,13 @@ def main():
     if not dictionary['genome_accession']: dictionary['genome_accession'] = 'GCF_015227675.2'
         
     if not dictionary['researcher']: dictionary['researcher'] = 'tsanches'
-    if not dictionary['n_autosome']: dictionary['n_autosome'] = 20
-    if not dictionary['round']: dictionary['round'] = '10.1.0'
-    
-    if not dictionary['gwas_version']: dictionary['gwas_version'] = '0.1.2'
-        
+    if not dictionary['round']: dictionary['round'] = '10.5.2'
+            
     if not dictionary['phewas_path']: dictionary['phewas_path'] = 'phewasdb.parquet.gz'
         
     if not dictionary['regressout']:
-        df = pd.read_csv(f'{path}{pj}/processed_data_ready.csv', 
-                         dtype = {'rfid': str}).drop_duplicates(subset = 'rfid') 
+        df = pd.read_csv(f'{path}{pj}/processed_data_ready.csv',
+                         dtype={'rfid': str}).drop_duplicates(subset='rfid')
         if not dictionary['traits']:
             traits_ = df.columns[df.columns.str.startswith('regressedlr_')]
         elif 'prefix_' in dictionary['traits']: 

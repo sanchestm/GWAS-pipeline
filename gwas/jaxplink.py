@@ -229,3 +229,6 @@ def GWA(traits, snps, dtype='pandas'):
         return res.to_dataset(dim="metric").to_dataframe().reset_index()
     else:
         return res
+
+
+

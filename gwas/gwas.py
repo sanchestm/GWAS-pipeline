@@ -1,4 +1,23 @@
 #logging.basicConfig(filename=f'gwasRun.log', filemode='w', level=logging.DEBUG)
+
+from importlib import metadata as _meta, import_module
+from pathlib import Path
+import subprocess, inspect
+
+try:
+    __version__ = _meta.version(__name__)    
+except _meta.PackageNotFoundError:
+    root = Path(__file__).resolve().parent
+    try:
+        print('running git describe to get version')
+        __version__ = subprocess.check_output(
+            ["git", "-C", root, "describe", "--tags"],
+            text=True).strip()
+    except Exception:
+        __version__ = "0.0.0+unknown"
+
+print(__version__)
+print('print importing packages...')
 from IPython.display import display
 from IPython.utils import io
 from bokeh.resources import INLINE, CDN
@@ -24,7 +43,6 @@ from lightgbm import LGBMClassifier, LGBMRegressor, LGBMRanker
 from matplotlib.colors import PowerNorm
 from matplotlib.colors import rgb2hex as mplrgb2hex
 from os.path import dirname, basename
-from pathlib import Path
 from prophet.plot import plot_plotly, plot_components_plotly
 from prophet.utilities import regressor_coefficients 
 from scipy.cluster.hierarchy import ward, dendrogram, leaves_list, linkage
@@ -58,7 +76,6 @@ import gzip
 import holoviews as hv
 import hvplot.pandas
 import hvplot.dask  
-import inspect
 import itertools
 import json
 import logging
@@ -80,8 +97,7 @@ import psycopg2
 import re
 import requests
 import seaborn as sns
-from . import statsReport, npplink
-import subprocess
+from . import statsReport, npplink, locuszoom_py3
 import sys
 import umap
 #import utils
@@ -89,11 +105,12 @@ import warnings
 import scipy.spatial as spa
 import scipy.sparse as sps
 import xarray as xr
+print('done importing packages...')
 
 # gene2go = download_ncbi_associations()
 # geneid2gos_rat= Gene2GoReader(gene2go, taxids=[10116])
 #bioconda::ensembl-vep=112.0-0
-__VERSION__ = 'v0.3.0-8-gb472330'
+__VERSION__ = 'v0.4.1'
 
 mg = mygene.MyGeneInfo()
 ProgressBar(minimum =120).register()
@@ -4005,15 +4022,12 @@ class gwas_pipe:
         
         kdims1=hv.Dimension('trait1', values=alltraits)
         kdims2=hv.Dimension('trait2', values=alltraits)
+        fig_opts = {'frame_width': 900, 'frame_height': 900, 'tools':['hover'], 'padding': 0.05, 'cmap':'RdBu', 'colorbar':True, 'clim': (-1, 1)}
         fig = hv.Points(gcorr.query('or2< or1'), kdims = [kdims1, kdims2],vdims=['phenotypic_correlation','genetic_correlation','rG_SE', 'size']) \
-                                                  .opts( color='genetic_correlation', cmap='RdBu', size=hv.dim('size')*1.5 if ('gcorr' in include) else 0,
-                                                        colorbar=True, frame_width=900, frame_height=900, tools=['hover'],line_color='black', padding=0.05) #
+                                                  .opts( color='genetic_correlation', size=hv.dim('size')*1.5 if ('gcorr' in include) else 0, **fig_opts) #
         fig = fig*hv.Points(gcorr.query('or2> or1'), kdims = [kdims1, kdims2],vdims=['phenotypic_correlation','genetic_correlation','rG_SE', 'size']) \
-                                                  .opts( color='phenotypic_correlation', cmap='RdBu', size=18*30/len(traits)*1.5 if ('pcorr' in include) else 0, marker = 'square',
-                                                        colorbar=True, frame_width=900, frame_height=900, tools=['hover'],line_color='black', padding=0.005) #
-        # fig = fig*hv.Points(H2, kdims = ['trait', 'trait'],vdims=['V(G)','V(e)','Vp', 'heritability_SE'	, 'g', 'size']) \
-        #                                           .opts( color='g', cmap='Greys', size=hv.dim('size'), marker = '+', 
-        #                                                 colorbar=True, width=400, height=400, tools=['hover'],line_color='black', padding=0.005, angle=45) #
+                                                  .opts( color='phenotypic_correlation', size=18*30/len(traits)*1.5 if ('pcorr' in include) else 0, marker = 'square',
+                                                        **fig_opts) #
         fig = fig*hv.Labels(H2.assign(gtex = H2.g.map(lambda x: f"{int(x*100)}%")), kdims = ['trait', 'trait'],vdims=['gtex']).opts(text_font_size=f'{min(int(7*1.5*30/len(traits)), 20)}pt', text_color='black')
         fig = fig.opts(frame_height=900, frame_width=900,title = f'Genetic correlation', xlabel = '', ylabel = '',
                        fontsize={ 'xticks': f'{min(int(7*1.5*30/len(traits)), 20)}pt', 'yticks': f'{min(int(7*1.5*30/len(traits)), 20)}pt'},
@@ -4074,7 +4088,7 @@ class gwas_pipe:
         fontsizes = {'title': 40,  'labels': 25,   'xticks': 10,  'yticks': 20, 'legend': 15 }
         yrange = max(-.1, (her.heritability -her.heritability_SE).min()-.02), min(1, (her.heritability + her.heritability_SE).max()+.02)
         fig = (hv.HLine(0).opts(color = 'black')*\
-         reduce(lambda x,y: x*y,  [hv.HLine(x).opts(color = 'black', line_dash = 'dashed', line_width = 2) for x in np.linspace(.1, 1, 8)])*\
+         reduce(lambda x,y: x*y,  [hv.HLine(x).opts(color = 'black', line_dash = 'dashed', line_width = 2) for x in np.linspace(.1, 1, 10)])*\
          her.hvplot.scatter(y= 'heritability', frame_height = 600, frame_width = 900, color ='cluster' if 'cluster' in her.columns else 'steelblue',
                             line_width = 2, line_color = 'black', size = 400, 
                             alpha = .7, hover_cols =her.columns.to_list())*\
@@ -4371,7 +4385,7 @@ class gwas_pipe:
         >>> result = gwas.addGWASresultsToDb(researcher='John Doe', round_version='v1', gwas_version='v2', pval_thresh=1e-5)
         >>> print(result)
         """
-        if gwas_version is None: gwas_version = __VERSION__
+        if gwas_version is None: gwas_version = __version__
         printwithlog(f'starting adding gwas to database ... {self.project_name}') 
         if type(filenames) == str:
             filenames = [filenames]
@@ -5229,7 +5243,7 @@ class gwas_pipe:
                                     [['snp1', 'snp2', 'rsquare', 'dprime']].to_csv(lzr2name, index = False, sep = '\t')
             for filest in glob(f'{self.path}temp/{qtl_row.trait}*{qtl_row.SNP}'): os.system(f'rm -r {filest}')
             def lzcall(c, start, end, snp, title, trait, lzpvalname, lzr2name, lg = ''):
-                import locuszoom_py3
+                #import locuszoom_py3
                 lzpath = str(Path(locuszoom_py3.__file__).parent)
                 #lzpath = [ y for x in sys.path if os.path.isdir(y := (x.rstrip('/') + '/locuszoom_py3/'))][0]
                 gdatapath = f'{self.path}genome_info/ncbi_dataset/data/{self.genome_accession}/'
@@ -5968,7 +5982,7 @@ class gwas_pipe:
             if display: fig2.show(renderer = 'png',width = 1920, height = 800)
         return fig2, df_gwas
 
-    def porcupineplot(self, qtltable = '', traitlist: list = [], display_figure = False, skip_manhattan = False, maxtraits = 60, save = True):
+    def porcupineplot(self, qtltable = '', traitlist: list = [], display_figure = False, skip_manhattan = False, maxtraits = 20, save = True):
         """
         Generate an enhanced Porcupine plot for visualizing multiple GWAS traits with additional options.
     
@@ -6662,11 +6676,11 @@ The decompositions used also allow to extimate a metric of similarity between th
         hgenes = hgenes.map(_genebassmk)
         genes_in_range = genes_in_range.merge(hgenes.rename('ensemblh'), left_on = 'symbol', right_on = 'query', how = 'left')
         genes_in_range['ensemblh'] =genes_in_range['ensemblh'].fillna('')
-        list_of_cols =  [('genecard', _genecardmk), ('gwashub', _gwashubmk), ('genecup',_genecupmk), 
-                       ('twashub', _twashubmk), ('genebass', _genebassmk)]
-        if self.species == 'rattus_norvegicus': list_of_cols += [('RGD',_rgdhtmk )]
-        for idx,fu in list_of_cols:
-            genes_in_range[idx] = genes_in_range['symbol' if idx != 'RGD' else 'AllianceGenome'].map(fu)
+        list_of_cols =  [('genecard','symbol' ,_genecardmk), ('gwashub', 'symbol' ,_gwashubmk), ('genecup', 'symbol', _genecupmk), 
+                       ('twashub', 'symbol' ,_twashubmk), ('genebass', 'ensemblh' ,_genebassmk)]
+        if self.species == 'rattus_norvegicus': list_of_cols += [('RGD','AllianceGenome', _rgdhtmk )]
+        for idx,_col,fu in list_of_cols:
+            genes_in_range[idx] = genes_in_range[_col].map(fu)
         genes_in_range = genes_in_range.drop('ensemblh', axis = 1)
         genes_in_range = genes_in_range.loc[~genes_in_range.name.fillna('').str.contains('uncharacterized LOC|^Trna')]
         genes_in_range = genes_in_range.loc[~(genes_in_range.symbol.fillna('').str.contains('uncharacterized LOC|^Trna') & genes_in_range.name.isna())]
@@ -6715,7 +6729,7 @@ The decompositions used also allow to extimate a metric of similarity between th
         :param add_experimental: Boolean indicating whether to add experimental sections to the report.
         :return: None
         """
-        if gwas_version is None: gwas_version = __VERSION__
+        if gwas_version is None: gwas_version = __version__
         printwithlog('generating report...')
         printwithlog('generating report... making header...')
         with open(f'{self.path}genotypes/parameter_thresholds.txt', 'r') as f: 
@@ -6842,9 +6856,9 @@ Threshold Info
         fulldf = fulldf.loc[:, ~fulldf.columns.str.contains('^Unnamed:')]
         fulldf = fulldf.T.dropna(how = 'all').T
         
-        cov_card = pn.Card(pn.Card(fancy_display(fulldf, download_name = 'full_dataset.csv'), title = 'Full dataset', collapsed=False),
-                           pn.Card(*covariates_list, 
+        cov_card = pn.Card(pn.Card(*covariates_list, 
                                    title = 'r<sup>2</sup> between traits and covariates (%)', collapsed=False),\
+                           pn.Card(fancy_display(fulldf, download_name = 'full_dataset.csv'), title = 'Full dataset', collapsed=True),
                            title = 'Preprocessing', collapsed=True)
         add_metadata(cov_card).save(f'{self.path}images/report_pieces/covariates.html')
         template.main.append(cov_card)
@@ -7259,7 +7273,7 @@ Are there sex differences?
         :param remove_folders: Boolean indicating whether to remove the original folders after zipping.
         :return: None
         """
-        if gwas_version is None: gwas_version = __VERSION__
+        if gwas_version is None: gwas_version = __version__
         base_folder_files = reduce(lambda x, y : x+y, [glob(self.path + x) for x in \
                            ['environment.yml', 'package_versions.txt',
                             f'data_dict_{self.project_name}.csv',\
@@ -7992,7 +8006,7 @@ The knowledge Graph used comes from the Harvard's [PrimeKG](https://zitniklab.hm
             add_sex_specific_traits:bool = False,
             **kws):
         if gwas_version is None: 
-            gwas_version = __VERSION__ #+ datetime.today().strftime(format = '%Y_%m_%d')
+            gwas_version = __version__ #+ datetime.today().strftime(format = '%Y_%m_%d')
         def kw(d, prefix):
             if prefix[-1] != '_': prefix += '_'
             return {k.replace(prefix, '') : typeconverter(v) for k,v in d.items() if (k[:len(prefix)] == prefix)}
@@ -8632,3 +8646,287 @@ def set_nan_color(plot, element):
     if color_mapper is not None:
         color_mapper.nan_color = 'black'
 
+
+
+
+import numpy as np, pandas as pd, os, re, math
+from joblib import Parallel, delayed
+from sklearn.model_selection import KFold
+from sklearn.base import clone
+from sklearn.multioutput import MultiOutputRegressor
+from sklearn.metrics import (r2_score, accuracy_score,
+                             explained_variance_score,
+                             max_error, mean_absolute_error,
+                             balanced_accuracy_score, f1_score)
+from lightgbm import LGBMRegressor, LGBMClassifier
+
+# turbo_lgbm_imputer.py
+import numpy as np, pandas as pd, os, re, math
+from joblib import Parallel, delayed
+from sklearn.base import clone
+from sklearn.model_selection import KFold
+from sklearn.multioutput import MultiOutputRegressor, MultiOutputClassifier
+from sklearn.metrics import (r2_score, explained_variance_score, max_error,
+                             mean_absolute_error, accuracy_score,
+                             balanced_accuracy_score, f1_score)
+from lightgbm import LGBMRegressor, LGBMClassifier
+
+
+class TurboLGBMImputer:
+    """
+    Fast LightGBM-based imputer with:
+      • early-stopping       • row subsampling        • column bagging
+      • multi-output blocks  • prediction-only CV     • *iterative passes*
+
+    Parameters
+    ----------
+    n_iter : int, default 1
+        Number of complete imputation sweeps.  If >1, the freshly
+        imputed matrix is fed back into the next sweep.
+    atol : float, default 1e-4
+        Absolute tolerance for early convergence between passes.
+    window : int
+        Predictor window size each side of the target column.
+    qc : bool
+        If True, compute “prediction-only” fold scores (cheap).
+    max_rows : int or None
+        Cap on rows used per target/block (after removing missing).
+    block_size : int
+        Number of numeric targets fitted together in a MultiOutputRegressor.
+    early_stopping_rounds, feature_fraction, n_estimators, n_jobs_outer,
+    device_type, **lgbm_kw
+        Passed through to LightGBM learners.
+    """
+
+    # ───────────────────────── static helpers ──────────────────────────
+    _KF = KFold(n_splits=5, shuffle=True, random_state=42)
+
+    _NUM_SCORERS = dict(explained_variance=explained_variance_score,
+                        max_error=max_error,
+                        neg_mean_absolute_error=lambda y, p:
+                            -mean_absolute_error(y, p),
+                        r2=r2_score)
+
+    _CAT_SCORERS = dict(accuracy=accuracy_score,
+                        balanced_accuracy=balanced_accuracy_score,
+                        f1_weighted=lambda y, p:
+                            f1_score(y, p, average="weighted"))
+
+    # ───────────────────────── constructor ─────────────────────────────
+    def __init__(self,
+                 *,
+                 n_iter: int = 1,
+                 atol: float = 1e-4,
+                 window: int = 100,
+                 qc: bool = False,
+                 max_rows: int | None = None,
+                 block_size: int = 10,
+                 early_stopping_rounds: int = 50,
+                 feature_fraction: float = 0.6,
+                 n_estimators: int = 400,
+                 n_jobs_outer: int | None = None,
+                 device_type: str = "cpu",
+                 **lgbm_kw):
+
+        if n_iter < 1:
+            raise ValueError("n_iter must be ≥ 1")
+
+        self.n_iter   = n_iter
+        self.atol     = atol
+        self.window   = window
+        self.qc       = qc
+        self.max_rows = max_rows
+        self.block_sz = max(1, block_size)
+        self.es_rounds= early_stopping_rounds
+        self.n_jobs_outer = n_jobs_outer or os.cpu_count()
+
+        # base LightGBM estimators
+        self._reg = LGBMRegressor(device_type=device_type,
+                                  n_estimators=n_estimators,
+                                  n_jobs=1,
+                                  feature_fraction=feature_fraction,
+                                  early_stopping_rounds=self.es_rounds,
+                                  verbosity=-1,
+                                  **lgbm_kw)
+
+        self._clf = LGBMClassifier(device_type=device_type,
+                                   n_estimators=n_estimators,
+                                   n_jobs=1,
+                                   class_weight='balanced',
+                                   feature_fraction=feature_fraction,
+                                   early_stopping_rounds=self.es_rounds,
+                                   verbosity=-1,
+                                   **lgbm_kw)
+
+        # artefacts filled during last pass
+        self.models_: dict[str, object] = {}
+        self.model_table: pd.DataFrame = pd.DataFrame()
+
+    # ──────────────────── public API wrappers ─────────────────────────
+    def fit_transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        imputed = X.copy()
+        prev    = None
+
+        for it in range(self.n_iter):
+            if it:
+                print(f"[TurboLGBMImputer] pass {it+1}/{self.n_iter}")
+
+            imputed = self._single_pass(imputed)    # ← 1 sweep
+
+            if prev is not None and np.allclose(prev.values,
+                                                imputed.values,
+                                                atol=self.atol,
+                                                equal_nan=True):
+                print(f"[TurboLGBMImputer] converged at pass {it+1}")
+                break
+            prev = imputed.copy()
+
+        return imputed
+
+    def fit(self, X: pd.DataFrame):
+        self.fit_transform(X)
+        return self
+
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        Xnew = X.copy()
+        for feat, row in self.model_table.dropna(how="all").iterrows():
+            miss = Xnew[feat].isna()
+            if miss.any():
+                cols = row["columns"]
+                Xnew.loc[miss, feat] = self.models_[feat].predict(
+                    Xnew.loc[miss, cols])
+        return Xnew
+
+    # ───────────────── internal single-sweep logic ────────────────────
+    #  (this is essentially the previous “Turbo” version)
+    # ------------------------------------------------------------------
+    def _wins(self, p: int) -> list[np.ndarray]:
+        return [np.r_[max(0, i-self.window):i,
+                      i+1:min(p, i+self.window+1)] for i in range(p)]
+
+    @staticmethod
+    def _train_val_split(idx: np.ndarray):
+        if len(idx) < 10:
+            return idx, np.array([], int)
+        cut = math.ceil(0.8 * len(idx))
+        return idx[:cut], idx[cut:]
+
+    # numeric multi-output block
+    def _fit_numeric_block(self, X, miss, targ_idx, cols_idx):
+        rows = np.flatnonzero(~miss[:, targ_idx].any(axis=1))
+        if rows.size == 0:
+            return None
+        if self.max_rows and len(rows) > self.max_rows:
+            rows = np.random.choice(rows, self.max_rows, replace=False)
+
+        Xtr = X[rows][:, cols_idx]
+        Ytr = X[rows][:, targ_idx]
+
+        tr, val = self._train_val_split(np.arange(len(rows)))
+        eval_set = [(Xtr[val], Ytr[val])] if val.size else None
+
+        est = MultiOutputRegressor(clone(self._reg))
+        est.fit(Xtr[tr], Ytr[tr], eval_set=eval_set, verbose=False)
+
+        preds_tr = est.predict(Xtr)
+        train_scores = [r2_score(Ytr[:, k], preds_tr[:, k])
+                        for k in range(len(targ_idx))]
+
+        cv_scores = None
+        if self.qc:
+            cv_scores = {nm: np.zeros(len(targ_idx))
+                         for nm in self._NUM_SCORERS}
+            for tr_idx, te_idx in self._KF.split(Xtr):
+                pr = est.predict(Xtr[te_idx])
+                for k in range(len(targ_idx)):
+                    for nm, fn in self._NUM_SCORERS.items():
+                        cv_scores[nm][k] += fn(Ytr[te_idx, k], pr[:, k])
+            cv_scores = {k: v/self._KF.get_n_splits() for k, v in cv_scores.items()}
+
+        return est, train_scores, cv_scores
+
+    def _single_pass(self, Xdf: pd.DataFrame) -> pd.DataFrame:
+        Xnp   = Xdf.to_numpy(np.float32, copy=True)
+        miss  = np.isnan(Xnp)
+        n, p  = Xnp.shape
+        wins  = self._wins(p)
+        isnum = Xdf.dtypes.map(pd.api.types.is_numeric_dtype).to_numpy()
+        names = Xdf.columns.to_numpy()
+
+        # build blocks
+        num_cols = [i for i, b in enumerate(isnum) if b]
+        cat_cols = [i for i, b in enumerate(isnum) if not b]
+        blocks   = [num_cols[i:i+self.block_sz]
+                    for i in range(0, len(num_cols), self.block_sz)]
+        blocks  += [[j] for j in cat_cols]          # categorical singletons
+
+        def _process_block(tidx):
+            cols_idx = np.unique(np.concatenate([wins[j] for j in tidx]))
+            if len(tidx) > 1:                       # numeric group
+                res = self._fit_numeric_block(Xnp, miss, tidx, cols_idx)
+                return tidx, cols_idx, res
+            # single target (num or cat)
+            j = tidx[0]
+            rows = np.flatnonzero(~miss[:, j])
+            if rows.size == 0:
+                return tidx, cols_idx, None
+            if self.max_rows and len(rows) > self.max_rows:
+                rows = np.random.choice(rows, self.max_rows, replace=False)
+
+            Xtr, ytr = Xnp[rows][:, cols_idx], Xnp[rows, j]
+            tr, val  = self._train_val_split(np.arange(len(rows)))
+            eval_set = [(Xtr[val], ytr[val])] if val.size else None
+            base = clone(self._reg if isnum[j] else self._clf)
+            base.fit(Xtr[tr], ytr[tr], eval_set=eval_set, verbose=False)
+            train_score = (r2_score if isnum[j] else accuracy_score)(
+                ytr, base.predict(Xtr))
+
+            cv_scores = None
+            if self.qc:
+                scorers = (self._NUM_SCORERS if isnum[j]
+                           else self._CAT_SCORERS)
+                sums = {k: 0. for k in scorers}
+                for tr_idx, te_idx in self._KF.split(Xtr):
+                    pr = base.predict(Xtr[te_idx])
+                    for nm, fn in scorers.items():
+                        sums[nm] += fn(ytr[te_idx], pr)
+                cv_scores = {k: v/self._KF.get_n_splits() for k, v in sums.items()}
+
+            return tidx, cols_idx, (base, [train_score], cv_scores)
+
+        # run blocks in parallel
+        results = Parallel(self.n_jobs_outer, verbose=10)(
+                      delayed(_process_block)(blk) for blk in blocks)
+
+        records = []
+        for tidx, cols_idx, payload in results:
+            if payload is None:
+                continue
+            est, tr_scores, cv_scores = payload
+            preds_full = est.predict(Xnp[:, cols_idx]) \
+                if len(tidx) > 1 else est.predict(Xnp[:, cols_idx]).reshape(-1, 1)
+
+            for k, j in enumerate(tidx):
+                msk = miss[:, j]
+                if msk.any():
+                    Xnp[msk, j] = preds_full[msk, k]
+                name = names[j]
+                self.models_[name] = (est.estimators_[k]
+                                      if hasattr(est, "estimators_")
+                                      else est)
+                rec = dict(feature=name,
+                           isnumeric=bool(isnum[j]),
+                           model=self.models_[name],
+                           num=int(j),
+                           columns=list(names[cols_idx]),
+                           train_score=tr_scores[k])
+                if cv_scores:
+                    for nm, arr in cv_scores.items():
+                        rec[nm] = arr[k] if isinstance(arr, np.ndarray) else arr
+                records.append(rec)
+
+        self.model_table = (pd.DataFrame(records)
+                              .set_index("feature")
+                              .reindex(Xdf.columns))
+
+        return pd.DataFrame(Xnp, index=Xdf.index, columns=Xdf.columns)

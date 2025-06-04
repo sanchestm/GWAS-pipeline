@@ -1,10 +1,9 @@
 [build-system]
-requires = ["setuptools>=64", "wheel"]
+requires = ["setuptools>=64", "wheel", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "gwas"
-version = "0.3.0"
 description = "A general package to run GWAS associations and visualize the results"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,6 +13,7 @@ authors = [
   {name = "Apurva Chitre"}
 ]
 dependencies = []
+dynamic = ["version"]
 
 [project.urls]
 Homepage = "https://github.com/sanchestm/GWAS-pipeline"
@@ -22,8 +22,10 @@ Homepage = "https://github.com/sanchestm/GWAS-pipeline"
 gwas-cli = "gwas.gwas_cli:main"
 gwas-cli-argparse = "gwas.gwas_cli_argparse:main"
 
-[tool.setuptools]
-packages = ["gwas"]
-
 [tool.setuptools.packages.find]
-where = ["."]
+where   = ["."]
+include = ["gwas*"]     # picks up gwas and any sub-packages
+
+[tool.setuptools_scm]
+version_scheme = "post-release"       # or another scheme you like
+local_scheme   = "node-and-date"
