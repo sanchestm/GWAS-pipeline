@@ -1,13 +1,15 @@
 #logging.basicConfig(filename=f'gwasRun.log', filemode='w', level=logging.DEBUG)
 
-from importlib import metadata as _meta, import_module
+from importlib import metadata as _meta, resources as impl_resources, import_module
 from pathlib import Path
 import subprocess, inspect
 
 try:
-    __version__ = _meta.version(__name__)    
+    __version__ = _meta.version(__name__)
+    icon_path = resources.files(__name__).joinpath("rat.ico")
 except _meta.PackageNotFoundError:
     root = Path(__file__).resolve().parent
+    icon_path = root / "rat.ico"
     try:
         print('running git describe to get version')
         __version__ = subprocess.check_output(
@@ -38,7 +40,7 @@ from holoviews.operation.datashader import datashade, bundle_graph, rasterize, s
 from holoviews.operation.resample import ResampleOperation2D
 from holoviews.operation import decimate
 from io import StringIO
-from .interactiveqc import interactive_QC
+from gwas.interactiveqc import interactive_QC
 from lightgbm import LGBMClassifier, LGBMRegressor, LGBMRanker
 from matplotlib.colors import PowerNorm
 from matplotlib.colors import rgb2hex as mplrgb2hex
@@ -61,12 +63,15 @@ from sklearn.ensemble import HistGradientBoostingClassifier, GradientBoostingReg
 from sklearn.preprocessing import QuantileTransformer, MinMaxScaler, OneHotEncoder, LabelEncoder, StandardScaler
 from sklearn.semi_supervised import LabelSpreading
 from sklearn.utils.extmath import randomized_svd
-from .statsReport import quantileTrasformEdited as quantiletrasform
-from .statsReport import StepWiseRegression
+from gwas.statsReport import quantileTrasformEdited as quantiletrasform
+from gwas.statsReport import StepWiseRegression
 from time import sleep, time
 from tqdm import tqdm
 from umap import UMAP
+import base64
 import dash_bio as dashbio
+import dask
+import dask.bag as db
 import dask.array as da
 import dask.dataframe as dd
 import datashader as ds
@@ -83,6 +88,7 @@ import lightgbm
 import matplotlib.pyplot as plt
 import mygene
 import networkx as nx
+import nltk
 import numba
 import numpy as np
 from holoviews import opts
@@ -149,8 +155,7 @@ def clipboard_button(text,title='copy LLM query',**kwargs):
         "width": 30,
         "margin": 0}
     for key, value in zz.items():
-        if not key in kwargs:
-            kwargs[key] = value
+        if not key in kwargs: kwargs[key] = value
     button = pn.widgets.Button(**kwargs)
     copy_code = f'''navigator.clipboard.writeText({json.dumps(text)});'''
     #copy_code = f'''navigator.clipboard.writeText("{text}");'''
@@ -178,6 +183,36 @@ def read_csv_zip(path, zippath, file_func = basename, zipfile_func = basename, q
         raise FileNotFoundError( f'[Errno 2] No such files or in pattern: {path}')
     return pd.concat(res)
 
+from bokeh.models import CustomJS
+def js_hook_factory( scaler=3e6,  base_px=15,  min_px=10,  max_px=50, font="Arial Narrow", **kws):
+    def _js_hook(plot, element):
+        p   = plot.state
+        # locate the Text glyph renderer
+        txt = next(
+            r for r in p.renderers
+            if getattr(r, "glyph", None)
+               and r.glyph.__class__.__name__ == "Text")
+        start, end = p.x_range.start, p.x_range.end
+        if start is not None and end is not None:
+            vis   = end - start
+            raw   = scaler / vis
+            px0   = base_px * raw
+            px0   = max(min_px, min(max_px, px0))
+            txt.glyph.text_font_size = f"{int(px0)}px"
+            txt.glyph.text_font      = font
+        code = f"""
+            const vis   = cb_obj.end - cb_obj.start;
+            const raw   = {scaler} / vis;
+            const scale = Math.log(raw + 1);
+            let px = {base_px} * raw;
+            px = Math.max({min_px}, Math.min({max_px}, px));
+            txt.glyph.text_font_size = px.toFixed(0) + "px";
+            txt.glyph.text_font      = "{font}";
+        """
+        cb = CustomJS(args=dict(txt=txt), code=code)
+        p.x_range.js_on_change("start", cb)
+        p.x_range.js_on_change("end",   cb)
+    return _js_hook
     
 def GRM(X, scale = True, return_weights= False, nan_policy = 'ignore', correlation_matrix= False):
     ##### z calculation
@@ -239,7 +274,6 @@ class NamedColumnTransformer(ColumnTransformer):
     def _get_transformer_output_shape(self, transformer, X_subset):
         """Determine the shape of the transformer's output."""
         try:
-            # Apply transformer to subset and return shape
             output = transformer.fit_transform(X_subset)
             transformer_name = type(transformer).__name__.lower()
             if hasattr(transformer, 'get_feature_names_out'):
@@ -457,9 +491,6 @@ def daskR2(X, Y=None, return_named= True):
     return res
 
 def off_diagonalR2(snps, snp_dist = 1000, min_snp_dist = 0, return_square = True):
-    import nltk
-    import dask.bag as db
-    import dask
     step = 200
     step_list = [list(snps.columns[step*x:step*x+step]) for x in range(int(snps.shape[1]/step)+1)]
     off_diagonal_range = (int(min_snp_dist/step)+1,int(snp_dist/step)+1)
@@ -469,7 +500,7 @@ def off_diagonalR2(snps, snp_dist = 1000, min_snp_dist = 0, return_square = True
         else: res =  R2(snps.loc[:,tup[0]],snps.loc[:,tup[-1]] )
         res = res.reset_index(names = 'bp1').melt(id_vars = 'bp1', var_name='bp2')
         return pd.concat([res, res.rename({'bp1': 'bp2','bp2': 'bp1'}, axis = 1)])
-    rr2 = pd.concat(db.map(_dr2, all_ngrams).compute())\
+    rr2 = pd.concat(db.map(_dr2, all_ngrams).compute(scheduler='threads'))\
            .astype({'bp1': str, 'bp2': str, 'value' : float})\
            .drop_duplicates(['bp1', 'bp2'])
     if return_square:
@@ -850,63 +881,6 @@ def decompose_grm_pca(grm_path: str, n_comp: int = 5, verbose: bool = True):
           \ntotal explained var:{sum(pca.explained_variance_ratio_)}' )
     return pd.DataFrame(decomp, columns = [f'GRM_PC{x}' for x in range(1, decomp.shape[1]+1)],
              index= grmxr.sample_0.astype(str))
-
-# def plink2df(plinkpath: str, rfids: list = None, c: int = None, 
-#              pos_start: int = None, pos_end: int = None, 
-#              snplist: list = None) -> pd.DataFrame:
-#     """
-#     Convert PLINK files to Pandas dataframe.
-
-#     This function reads genotype data from PLINK files and converts it into a pandas dataframe.
-
-#     Steps:
-#     1. Read the PLINK files using npplink.
-#     2. Set the chromosome and position columns to integer type.
-#     3. Create an index for the SNPs dataframe.
-#     4. If no SNP list is provided, select a subset of SNPs based on chromosome and position range.
-#     5. If an SNP list is provided, select the SNPs from the list.
-#     6. Create an index for the IID dataframe.
-#     7. Subset the genotype data based on the selected SNPs and IIDs.
-#     8. Convert the genotype data to a pandas dataframe and return it.
-
-#     :param plinkpath: Path to the PLINK files.
-#     :type plinkpath: str or tuple
-#     :param rfids: List of RFIDs.
-#     :type rfids: list or int
-#     :param c: Chromosome number.
-#     :type c: int
-#     :param pos_start: Start position.
-#     :type pos_start: int
-#     :param pos_end: End position.
-#     :type pos_end: int
-#     :param snplist: List of SNPs.
-#     :type snplist: list or int
-#     :return: Dataframe with genotype data.
-#     :rtype: pandas.DataFrame
-
-#     Example:
-#     >>> plinkpath = "path/to/plink_files"
-#     >>> df = plink2pddf(plinkpath, c=1, pos_start=1000, pos_end=5000)
-#     >>> print(df.head())
-#     """
-#     if type(plinkpath) == str: 
-#         snps, iid, gen = pandas_plink.read_plink(plinkpath)
-#     else: snps, iid, gen = plinkpath
-#     snps.chrom = snps.chrom.astype(int)
-#     snps.pos = snps.pos.astype(int)
-#     isnps = snps.set_index(['chrom', 'pos'])
-#     iiid = iid.set_index('iid')
-#     if snplist is None:
-#         if (pos_start is None) and (pos_end is None):
-#             if c is None: index = isnps
-#             else: index = isnps.loc[(slice(c, c)), :]
-#         index = isnps.loc[(slice(c, c),slice(pos_start, pos_end) ), :]
-#     else:
-#         snplist = list(set(snplist) & set(isnps.snp))
-#         index = isnps.set_index('snp').loc[snplist].reset_index()
-#     col = iiid  if rfids is None else iiid.loc[rfids]
-#     return pd.DataFrame(gen.astype(np.float16)[index.i.values ][:, col.i].T, 
-#                         index = col.index.values.astype(str), columns = index.snp.values )
 
 def plink(print_call: bool = False, **kwargs) -> None:
     """
@@ -1356,7 +1330,8 @@ def get_founder_snp_balance(plinkpath:str, snplist: list):
     
 def UMAP_HDBSCAN_(plinkpath: str, c: str= None, pos_start: int = None, pos_end:int= None, r2_window = 3000, nsnps = None,
                   founderbimfambed= None, keep_xaxis = True, decompose_samples = False, subsample = None, hdbscan_confidence=.7):
-    snps = npplink.plink2df(plinkpath=plinkpath, c=c, pos_start=pos_start, pos_end=pos_end)
+    if isinstance(plinkpath, pd.DataFrame): snps = plinkpath
+    else: snps = npplink.plink2df(plinkpath=plinkpath, c=c, pos_start=pos_start, pos_end=pos_end)
     if nsnps is not None: 
         snps = snps.loc[:, ::max(1,snps.shape[1]//nsnps)]
     if decompose_samples: 
@@ -2299,7 +2274,7 @@ def plotly_read_from_html(file: str):
     plotly_json = {'data': call_args[1], 'layout': call_args[2]}    
     return plotio.from_json(json.dumps(plotly_json))
     
-def fancy_display(df: pd.DataFrame, download_name: str = 'default.csv', max_width = 1400, max_height = 600) -> pn.widgets.Tabulator:
+def fancy_display(df: pd.DataFrame, download_name: str = 'default.csv', max_width = 1400, max_height = 600, layout =  'fit_data_fill', **kws) -> pn.widgets.Tabulator:
     """
     Display a dataframe with interactive filtering and downloading options using Panel Tabulator.
 
@@ -2332,7 +2307,7 @@ def fancy_display(df: pd.DataFrame, download_name: str = 'default.csv', max_widt
     except: df[numeric_cols] = df[numeric_cols].applymap(round, ndigits=3)
     d = {x : {'type': 'number', 'func': '>=', 'placeholder': 'Enter minimum'} for x in numeric_cols} | \
         {x : {'type': 'input', 'func': 'like', 'placeholder': 'Similarity'} for x in df.columns[~df.columns.isin(numeric_cols)]}
-    download_table = pn.widgets.Tabulator(df,pagination='local',page_size= 20, header_filters=d, layout = 'fit_data_fill', max_width = max_width, max_height = max_height)
+    download_table = pn.widgets.Tabulator(df,pagination='local',page_size= 20, header_filters=d, layout = layout, max_width = max_width, max_height = max_height,show_index=False, **kws)
     filename, button = download_table.download_menu(text_kwargs={'name': 'Enter filename', 'value': download_name},button_kwargs={'name': 'Download table'})
     return pn.Column(pn.Row(filename, button), download_table)
 
@@ -4022,8 +3997,8 @@ class gwas_pipe:
         
         kdims1=hv.Dimension('trait1', values=alltraits)
         kdims2=hv.Dimension('trait2', values=alltraits)
-        fig_opts = {'frame_width': 900, 'frame_height': 900, 'tools':['hover'], 'padding': 0.05, 'cmap':'RdBu', 'colorbar':True, 'clim': (-1, 1)}
-        fig = hv.Points(gcorr.query('or2< or1'), kdims = [kdims1, kdims2],vdims=['phenotypic_correlation','genetic_correlation','rG_SE', 'size']) \
+        fig_opts = {'frame_width': 900, 'frame_height': 900, 'tools':['hover'], 'padding': 0.05, 'cmap':'RdBu', 'colorbar':True, 'clim': (-1, 1), 'line_color':'black', 'line_width':1}
+        fig = hv.Points(gcorr.query('(or2<or1) and (rG_SE<1)'), kdims = [kdims1, kdims2],vdims=['phenotypic_correlation','genetic_correlation','rG_SE', 'size']) \
                                                   .opts( color='genetic_correlation', size=hv.dim('size')*1.5 if ('gcorr' in include) else 0, **fig_opts) #
         fig = fig*hv.Points(gcorr.query('or2> or1'), kdims = [kdims1, kdims2],vdims=['phenotypic_correlation','genetic_correlation','rG_SE', 'size']) \
                                                   .opts( color='phenotypic_correlation', size=18*30/len(traits)*1.5 if ('pcorr' in include) else 0, marker = 'square',
@@ -4086,7 +4061,7 @@ class gwas_pipe:
             her.cluster = ('cluster_'+ her.cluster).replace('cluster_-1', 'unassigned')
         
         fontsizes = {'title': 40,  'labels': 25,   'xticks': 10,  'yticks': 20, 'legend': 15 }
-        yrange = max(-.1, (her.heritability -her.heritability_SE).min()-.02), min(1, (her.heritability + her.heritability_SE).max()+.02)
+        yrange = -.01 , min(1, (her.heritability + her.heritability_SE).max()+.02) #max(-.1, (her.heritability -her.heritability_SE).min()-.02)
         fig = (hv.HLine(0).opts(color = 'black')*\
          reduce(lambda x,y: x*y,  [hv.HLine(x).opts(color = 'black', line_dash = 'dashed', line_width = 2) for x in np.linspace(.1, 1, 10)])*\
          her.hvplot.scatter(y= 'heritability', frame_height = 600, frame_width = 900, color ='cluster' if 'cluster' in her.columns else 'steelblue',
@@ -4324,30 +4299,29 @@ class gwas_pipe:
         chrsingrm = pd.read_csv(f'{self.path}grm/listofchrgrms.txt', header = None)[0]\
                       .map(lambda x: basename(x).replace('chrGRM', '')).to_list()
         ranges = chrlist if len(chrlist) else [i for i in range(1,self.n_autosome+5) if i != self.n_autosome+3]
-        looppd = pd.DataFrame(itertools.product(traitlist,ranges), columns = ['trait', 'chrom'] )
-        #print(f'estimated time assuming 10min per chr {round(looppd.shape[0]*600/3600/float(self.threadnum), 5)}H')
-        loop = dd.from_pandas(looppd, npartitions=max(len(traitlist)*5, 200))#.persist() #npartitions=self.threadnum 
-        check_present_extra = lambda trait, chromp2: os.path.exists(f'{self.path}results/gwas/{trait}_chrgwas{chromp2}.mlma')
+        path, gcta, nauto, genotypes   = self.path, self.gcta , self.n_autosome, self.genotypes_subset
+        num2xymt =  lambda x: str(int(float(x))).replace(str(nauto+1), 'x')\
+                                                .replace(str(nauto+2), 'y')\
+                                                .replace(str(nauto+4), 'mt')
+        check_present_extra = lambda trait, chromp2: os.path.exists(f'{path}results/gwas/{trait}_chrgwas{chromp2}.mlma')
         def _smgwas(trait, chrom):
-            chromp2 = self.replacenumstoXYMT(chrom)
+            chromp2 = num2xymt(chrom)
             if check_present_extra(trait, chromp2) and skip_already_present:
                     printwithlog(f'''skipping gwas for trait: {trait} and chr {chromp2}, 
                           output files already present, to change this behavior use skip_already_present = False''')
             else:
-                subgrmflag = f'--mlma-subtract-grm {self.path}grm/{chromp2}chrGRM' if chromp2 in chrsingrm else ''
-                bash(f'{self.gcta} --thread-num 1 --pheno {self.path}data/pheno/{trait}.txt --bfile {self.genotypes_subset} \
-                                           --grm {self.path}grm/AllchrGRM --autosome-num {self.n_autosome} \
+                subgrmflag = f'--mlma-subtract-grm {path}grm/{chromp2}chrGRM' if chromp2 in chrsingrm else ''
+                bash(f'{gcta} --thread-num 1 --pheno {path}data/pheno/{trait}.txt --bfile {genotypes} \
+                                           --grm {path}grm/AllchrGRM --autosome-num {nauto} \
                                            --chr {chrom} {subgrmflag} --mlma \
-                                           --out {self.path}results/gwas/{trait}_chrgwas{chromp2}', 
-                            print_call = print_call)#f'GWAS_{chrom}_{trait}', 
-        tasks = []
-        for _, row in looppd.iterrows():
-            trait, chrom = row['trait'], row['chrom']
-            tasks.append(delayed(_smgwas)(trait, chrom))
-        future = cline.compute(tasks)
-        progress(future,notebook = False,  interval="300s")
-        wait(future)
-        del future
+                                           --out {path}results/gwas/{trait}_chrgwas{chromp2}', 
+                            print_call = print_call, shell = False)
+            return True
+        traits_, chroms_ = zip(*itertools.product(traitlist, ranges))
+        futures = cline.map(_smgwas, traits_, chroms_)
+        progress(futures, notebook=False, interval="300s")
+        results = cline.gather(futures)
+        del futures, results
         return 1
     
     def addGWASresultsToDb(self, researcher: str , round_version: str, gwas_version: str = None,filenames: list = [],
@@ -6673,9 +6647,9 @@ The decompositions used also allow to extimate a metric of similarity between th
                                                                                   left_on = ['symbol','description'], right_on =['query', 'name'], how = 'left')
         hgenes = query_gene(genes_in_range.symbol, species = 'human')['ensembl'].map(lambda x: x[0] if isinstance(x, list) else x).map(lambda x: x['gene'] if isinstance(x, dict) else x).dropna()
         hgenes = hgenes[~hgenes.index.duplicated(keep='first')]
-        hgenes = hgenes.map(_genebassmk)
+        #hgenes = hgenes.map(_genebassmk)
         genes_in_range = genes_in_range.merge(hgenes.rename('ensemblh'), left_on = 'symbol', right_on = 'query', how = 'left')
-        genes_in_range['ensemblh'] =genes_in_range['ensemblh'].fillna('')
+        #genes_in_range['ensemblh'] =genes_in_range['ensemblh'].fillna('')
         list_of_cols =  [('genecard','symbol' ,_genecardmk), ('gwashub', 'symbol' ,_gwashubmk), ('genecup', 'symbol', _genecupmk), 
                        ('twashub', 'symbol' ,_twashubmk), ('genebass', 'ensemblh' ,_genebassmk)]
         if self.species == 'rattus_norvegicus': list_of_cols += [('RGD','AllianceGenome', _rgdhtmk )]
@@ -6699,7 +6673,7 @@ The decompositions used also allow to extimate a metric of similarity between th
     def report(self, round_version: str = '10.5.2', covariate_explained_var_threshold: float = 0.02, gwas_version: str =None, add_gpt_query = False,
                sorted_gcorr: bool = True, add_gwas_latent_space: str = 'nmf', add_experimental: bool = False, remove_umap_traits_faq = True, 
                qqplot_add_pval_thresh: bool = True, add_qqplot:bool = True, add_cluster_color_heritability: bool = False,
-               legacy_locuszoom = True, static = True):
+               legacy_locuszoom = True, static = True, traits = None):
         """
         Generate a comprehensive GWAS report.
     
@@ -6730,6 +6704,11 @@ The decompositions used also allow to extimate a metric of similarity between th
         :return: None
         """
         if gwas_version is None: gwas_version = __version__
+        if traits is None: 
+            traits = self.traits
+            redo_figs = False
+        else: redo_figs = True
+        traitfilter = list(map(lambda x:x.replace('regressedlr_', ''),traits)) 
         printwithlog('generating report...')
         printwithlog('generating report... making header...')
         with open(f'{self.path}genotypes/parameter_thresholds.txt', 'r') as f: 
@@ -6750,9 +6729,11 @@ The decompositions used also allow to extimate a metric of similarity between th
 * {self.genome_version}:{round_version} 5% : {round(self.threshold05, 2)}'''
                     
         text_sidepanel = f"""# General Information
-<hr>
+
 
 * Generated on {datetime.today().strftime('%Y-%m-%d')}
+* Pipeline version *{gwas_version}*
+<hr>
 
 Phenotype Info
 
@@ -6765,8 +6746,6 @@ Genotype Info
 
 * genotypes version: \n*{self.genome_version}:{round_version}*
 
-* gwas pipeline version: \n*{gwas_version}*
-
 * number of snps: \nbefore filter *{format(int(params['snpsb4']), ',')}*, \nafter filter *{format(int(params['snpsafter']), ',')}*
 
 * genotype missing rate filter: < *{params['geno']}* \n(*{format(int( params['removed_geno']),',')}* snps removed)
@@ -6774,16 +6753,21 @@ Genotype Info
 * minor allele frequency filter: > *{params['maf']}* \n(*{format(int(params['removedmaf']), ',')}* snps removed)
 
 * hardy-weinberg equilibrium filter: < *{params['hwe']}* \n(*{format(int(params['removedhwe']), ',')}* snps removed)
+<hr>
 
 Threshold Info
 
-{threshtext}"""
+{threshtext}
+
+"""
 
         # '''* phenotype data: [🔗](https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/{self.project_name}/processed_data_ready.csv)
 
         # * covariate dropboxes: [🔗](https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/{self.project_name}/data_dict_{self.project_name}.csv) '''
-        
-        template = pn.template.BootstrapTemplate(title=f'GWAS REPORT')
+        # favicon = icon_path.read_bytes()
+        # favicon = base64.b64encode(favicon).decode("ascii")
+        # favicon = f"data:image/x-icon;base64,{favicon}"
+        template = pn.template.BootstrapTemplate(title=f'GWAS REPORT', favicon = icon_path)
         os.makedirs(f'{self.path}images/report_pieces/',exist_ok=True )
         os.makedirs(f'{self.path}images/report_pieces/regional_assoc/',exist_ok=True )
         add_metadata = lambda x: pn.Column(x, pn.pane.Alert(text_sidepanel, alert_type="primary"))
@@ -6796,6 +6780,11 @@ Threshold Info
         dd = pd.read_csv(f'{self.path}data_dict_{self.project_name}.csv').fillna('')\
            [['measure', 'trait_covariate','covariates', 'description']]\
            .query("measure != ''")
+        dd =dd[~dd.trait_covariate.isin(['', np.nan])]
+        if redo_figs:
+            dd = dd[dd.measure.isin(traitfilter) | ~dd.trait_covariate.str.contains('^trait$')]
+            dd_covs_covcol = (set(dd.covariates.replace('', np.nan).str.strip(',').dropna().str.split(',').sum()) )
+            dd = dd[dd.measure.isin(dd_covs_covcol) | ~dd.trait_covariate.str.contains('covariate')]
 
         trait_d_card = ['Collaborative data dictionary google document: ', fancy_display(dd, 'data_dictionary.csv')]
         if os.path.isfile(f'{self.path}missing_rfid_list.txt'): 
@@ -6810,9 +6799,9 @@ Threshold Info
         for col in self.df.filter(regex = 'regressedlr').columns:
             #printwithlog(f'''warning: {col} doesn't have a non regressedout version''')
             if col.replace('regressedlr_', '') not in self.df.columns: self.df[col.replace('regressedlr_', '')] = self.df[col]
-        g0 = px.imshow(self.df.set_index('rfid')[self.traits].rename(lambda x: x.replace('regressedlr_', ''), axis = 1), aspect = 3, color_continuous_scale='RdBu')
+        g0 = px.imshow(self.df.set_index('rfid')[traits].rename(lambda x: x.replace('regressedlr_', ''), axis = 1), aspect = 3, color_continuous_scale='RdBu')
         g0.update_layout( width=1000, height=1400,autosize=False,showlegend=False, template='simple_white',plot_bgcolor='black')
-        g1df = self.df.set_index('rfid')[list(map(lambda x: x.replace('regressedlr_', ''), self.traits))]
+        g1df = self.df.set_index('rfid')[list(map(lambda x: x.replace('regressedlr_', ''), traits))]
         g1df.loc[:, :] = StandardScaler().fit_transform(g1df)
         g1 = px.imshow(g1df, aspect = 3, color_continuous_scale='RdBu')
         g1.update_layout(  width=1000, height=1400,autosize=False,showlegend=False, template='simple_white',plot_bgcolor='black')
@@ -6822,12 +6811,9 @@ Threshold Info
             explained_vars = pd.read_csv(f'{self.path}melted_explained_variances.csv')\
                                .rename({'group':'covariate', 'variable': 'trait'}, axis = 1)\
                                .pivot(columns = 'covariate', values='value', index = 'trait')
-            for x in set(map(lambda x:  x.replace('regressedlr_', ''), self.traits)) - set(explained_vars.index.values):
+            for x in set(map(lambda x:  x.replace('regressedlr_', ''), traits)) - set(explained_vars.index.values):
                 explained_vars.loc[x, :] = [np.nan]
-            # fig, ax = plt.subplots(figsize=(10,10), dpi = 72)
-            # sns.heatmap(explained_vars.dropna(how = 'all'), ax = ax)
-            # fig.tight_layout()
-            #fig.savefig(f'{self.path}images/melted_explained_variances.png', dpi = 72)
+            explained_vars = explained_vars[explained_vars.index.isin(traitfilter)]
             fig_exp_vars = explained_vars.dropna(how = 'all').hvplot.heatmap(frame_width = 600, frame_height =600, 
                                                                  cmap= 'reds',line_width =.1, line_color ='black')\
                               .opts(xrotation =45, yrotation = 45)
@@ -6868,20 +6854,21 @@ Threshold Info
             printwithlog('genetic pca failed')
             panel_genetic_pca = pn.Card('failure calculating genomic PCA', title = 'Genomic PCA', collapsed = True)
         #template.main.append(panel_genetic_pca)
-        if len(self.traits)>1:
+        if len(traits)>1:
             gcorrtext = f'''# *Genetic Correlation Matrix*
 
 Genetic correlation is a statistical concept that quantifies the extent to which two traits share a common genetic basis. The estimation of genetic correlation can be accomplished using Genome-wide Complex Trait Analysis (GCTA), a software tool that utilizes summary statistics from genome-wide association studies (GWAS) to estimate the genetic covariance between pairs of traits. GCTA implements a method that decomposes the total phenotypic covariance between two traits into genetic and environmental components, providing an estimate of the genetic correlation between them. This approach allows researchers to examine the degree of shared genetic architecture between traits of interest and gain insights into the biological mechanisms underlying complex traits and diseases. 
 
 For the figure, the upper triangle represents the genetic correlation (ranges from [-1:1]), while the lower triangle represents the phenotypic correlation. Meanwhile the diagonal displays the heritability (ranges from [0:1]) of the traits. Hierarchical clustering is performed using [scipy's linkage function](https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.linkage.html) with the genetic correlation. Dendrogram is drawn using [scipy dendrogram](https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.dendrogram.html) where color coding for clusters depends on a distance threshold set to 70% of the maximum linkage distance. Asterisks means that test failed, for genetic relationship the main failure point is if the 2 traits being tested are colinear, while for the phenotypic correlation it's due to no overlapping individuals between the 2 traits.'''
             gcorrorder = 'sorted' if sorted_gcorr else 'cluster' 
-            bokehgcorrfig = self.make_genetic_correlation_figure(order = gcorrorder,save=True)
+            bokehgcorrfig = self.make_genetic_correlation_figure(order = gcorrorder,save=True, traits = traits)
             if static:gcorrfig = pn.pane.PNG(f"{self.path}images/genetic_correlation_matrix2{('_'+gcorrorder).replace('_cluster', '')}.png")
             else: gcorrfig = pn.pane.HoloViews(bokehgcorrfig)
             #gcorrfig = pn.pane.PNG(f'{self.path}images/genetic_correlation_matrix2{"_sorted" if sorted_gcorr else "cluster"}.png', max_width=1200, max_height=1200, width = 1200, height = 1200)
             try: gcorr = pd.read_csv(f"{self.path}results/heritability/genetic_correlation_melted_table.csv", index_col=0).map(lambda x: round(x, 3) if type(x) == float else x.replace('regressedlr_', ''))
             except: gcorr = pd.read_csv(f"{self.path}results/heritability/genetic_correlation_melted_table.csv", index_col=0).applymap(lambda x: round(x, 3) if type(x) == float else x.replace('regressedlr_', ''))
-            gcorr = fancy_display(gcorr, 'genetic_correlation.csv')
+            gcorr = fancy_display(gcorr.query('trait1.isin(@traitfilter) or trait2.isin(@traitfilter)'), 
+                                  'genetic_correlation.csv')
             genetic_corr = pn.Card(gcorrtext, gcorrfig, pn.Card(gcorr, title = 'tableView', collapsed=True),title = 'Genetic Correlation', collapsed=True)
             add_metadata(genetic_corr).save(f'{self.path}images/report_pieces/genetic_corr.html')
             template.main.append(genetic_corr)
@@ -6900,12 +6887,13 @@ Column definitions:
         
         #
         printwithlog('generating report... making heritability section...')
-        herfig = pn.pane.HoloViews(self.make_heritability_figure(add_classes = add_cluster_color_heritability))
+        herfig = pn.pane.HoloViews(self.make_heritability_figure(add_classes = add_cluster_color_heritability, traitlist = traits))
         if static: herfig = pn.pane.PNG(f'{self.path}images/heritability_sorted.png', width = 1000)
             
         her = pd.read_csv(f'{self.path}results/heritability/heritability.tsv', sep = '\t')\
              .set_axis(['trait', 'gen_var', 'env_var', 'phe_var', 'heritability', 'likelihood', 'lrt', 'df', 'pval', 'n', 'heritability_se'], axis = 1).drop(['env_var', 'lrt', 'df'],axis = 1)
         her.trait = her.trait.str.replace('regressedlr_', '')
+        her = her[her.trait.isin(traitfilter)]
         her = fancy_display(her, 'heritablitity.csv')
         herit_card =  pn.Card(heritext, herfig, her, title = 'Heritability', collapsed=True)
         add_metadata(herit_card).save(f'{self.path}images/report_pieces/heritability.html')
@@ -6915,7 +6903,6 @@ Column definitions:
                  .query('QTL')\
                  .rename({'p':'-Log10(p)', 'b':'beta', 'se': 'betase', 'af': 'Freq', 'SNP': 'TopSNP'}, axis = 1).round(3)\
                  .merge(pd.read_parquet(f'{self.path}genotypes/snpquality.parquet.gz', columns=['F_MISS','GENOTYPES','HWE']), left_on = 'TopSNP', right_index=True)
-        traitfilter = list(map(lambda x:x.replace('regressedlr_', ''),self.traits))  
         qtls = qtls[qtls.trait.isin(traitfilter)]
         founder_ids = set(self.foundersbimfambed[1].fid.sort_values().to_list()) if len(self.foundersbimfambed) else set()
         qtlstext = f'''
@@ -6952,20 +6939,26 @@ Column definitions:
         porcupinetext = f'''# **Porcupine Plot**
         
 Porcupine plot is a graphical tool that combines multiple Manhattan plots, each representing a single trait, into a single plot. The resulting plot provides a visual representation of the regions of the genome that influence multiple traits, enabling researchers to identify genetic loci that have pleiotropic effects. These plots allow for a quick and efficient analysis of multiple traits simultaneously. For the porcupine plots shown below, only traits with at least one significant QTL are shown.'''
-        skipmanhattan = len(set(map(lambda x: x.replace('regressedlr_',''),self.traits)) \
+        skipmanhattan = len(set(map(lambda x: x.replace('regressedlr_',''),traits)) \
                 - set(map(lambda x: basename(x).replace('.png', ''), glob(f'{self.path}images/manhattan/*.png'))) )
         skipmanhattan = True if not skipmanhattan else False
-
-        if static and os.path.isfile(f'{self.path}images/porcupineplot.png'):
+        print()
+        if (not static) or redo_figs or (not os.path.isfile(f'{self.path}images/porcupineplot.png')):
+            porcfig = pn.pane.HoloViews(self.porcupineplot(display_figure = False, skip_manhattan=skipmanhattan, traitlist=traits ),\
+                                        max_width=1200, max_height=600, width = 1200, height = 600)
+        else: 
+            printwithlog('generating report... loading already ran porcupinefig...')
             porcfig = pn.pane.PNG(f'{self.path}images/porcupineplot.png')
-        else:
-            porcfig = pn.pane.HoloViews(self.porcupineplot(display_figure = False, skip_manhattan=skipmanhattan ),max_width=1200, max_height=600, width = 1200, height = 600)
-            if static: porcfig = pn.pane.PNG(f'{self.path}images/porcupineplot.png')
+        # if static and os.path.isfile(f'{self.path}images/porcupineplot.png') and (not redo_figs):
+        #     porcfig = pn.pane.PNG(f'{self.path}images/porcupineplot.png')
+        # else:
+        #     porcfig = pn.pane.HoloViews(self.porcupineplot(display_figure = False, skip_manhattan=skipmanhattan),max_width=1200, max_height=600, width = 1200, height = 600)
+        #     if static: porcfig = pn.pane.PNG(f'{self.path}images/porcupineplot.png')
         pcp_o = [porcupinetext,porcfig]
-        if add_qqplot and (len(self.traits)< 20):
+        if add_qqplot and (len(traits)< 20):
             printwithlog('generating report... making qqplot section...')
-            if not os.path.isfile(f'{self.path}images/qqplot.png') or not static:
-                if len(self.traits)> 80: qqplot_add_pval_thresh = False
+            if not os.path.isfile(f'{self.path}images/qqplot.png') or not static or redo_figs:
+                if len(traits)> 80: qqplot_add_pval_thresh = False
                 qqplotfig = pn.pane.HoloViews(self.qqplot(add_pval_thresh= qqplot_add_pval_thresh),
                                               max_width=1200, max_height=1200, width = 900, height = 900)
             if static:
@@ -6992,8 +6985,7 @@ To control type I error, we estimated the significance threshold by a permutatio
         
         manhatanfigs2 = [pn.Card(pn.pane.PNG(f'{self.path}images/manhattan/{trait}.png', max_width=1000, 
                      max_height=600, width = 1000, height = 600), title = trait, collapsed = True) \
-                        for trait in set(map(lambda x: x.replace('regressedlr_', ''), self.traits)) - set(qtls.trait)]
-        
+                        for trait in set(map(lambda x: x.replace('regressedlr_', ''), traits)) - set(qtls.trait)]
         
         manhatan_card = pn.Card(manhattantext, 
                               pn.Card(*manhatanfigs, title='Plots with QTLs', collapsed=True),
@@ -7024,7 +7016,7 @@ Defining columns:
 
 
 ### splice QTL (sQTLs) 
-We examine if the identified SNP does significant alter the splicing patterns of genes in cis, possibly describing a pathway in which the SNP impact the phenotype. We also examine SNPs within 3 Mb window and a r2  above 0.6 of the topSNP from the current study, in case the selected SNP is in high LD with another SNP that can alter the splicing in cis.
+We examine if the identified SNP does significant alter the splicing patterns of genes in cis, possibly describing a pathway in which the SNP impact the phenotype. We also examine SNPs within 3 Mb window and a r2 above 0.6 of the topSNP from the current study, in case the selected SNP is in high LD with another SNP that can alter the splicing in cis.
 
 Defining columns:
 
@@ -7095,6 +7087,7 @@ Defining columns:
             #row_desc = fancy_display(row.to_frame().T)
             row_desc = pn.pane.Markdown(row.to_frame().T.fillna('').to_markdown())
             snp_doc = row.TopSNP.replace(":", '_')
+            c_num  = row.Chr if isinstance(snp_doc.split('_')[0], int) else int(self.replaceXYMTtonums(snp_doc.split('_')[0]))
             if row.TopSNP in genes_in_range2.index:
                 giran = pn.Card(pn.pane.Markdown(genes_in_range2.loc[[row.TopSNP]].fillna('').to_markdown()), title = 'Gene Links', collapsed = False, min_width=500)
                 all_genes_string = ', '.join(genes_in_range2.loc[[row.TopSNP]].symbol.unique())
@@ -7151,7 +7144,7 @@ Defining columns:
             if eqtlstemp_string: eqtlstemp_string += '\n' + eqtltemp.to_markdown() + '\n'
             else: eqtlstemp_string = 'none contain an expression QTL'
             if eqtltemp.shape[0]: eqtltemp = fancy_display(eqtltemp.fillna(''),f'eqtl_{row.trait}{row.TopSNP}.csv'.replace(':', '_'))
-            else: eqtltemp = pn.pane.Markdown(' \n SNPS were not detected for eQTLs in 3Mb window of trait topSNP  \n   \n')
+            else:eqtltemp = pn.pane.Markdown(f' \n SNPS were not {"tested" if c_num > self.n_autosome else "detected"} for eQTLs in 3Mb window of trait topSNP  \n   \n')
         
             sqtl_title = pn.pane.Markdown(f"### sQTL: Lowest P-values for splice qtls in a 3Mb window of {row.trait} {row.TopSNP}\n")
             sqtltemp = sqtl.query(f'SNP=="{"chr"+row.TopSNP}" and trait == "{row.trait}"').rename({'Ensembl_gene': 'gene'}, axis = 1)\
@@ -7160,7 +7153,7 @@ Defining columns:
             if sqtltemp_string: sqtltemp_string += '\n' + sqtltemp.to_markdown() + '\n'
             else: sqtltemp_string = 'none contain an splice QTL'
             if sqtltemp.shape[0]: sqtltemp = fancy_display(sqtltemp.fillna(''), f'sqtl_{row.trait}{row.TopSNP}.csv'.replace(':', '_'))
-            else: sqtltemp = pn.pane.Markdown(' \n  SNPS were not detected for sQTLs in 3Mb window of trait topSNP  \n   \n')
+            else: sqtltemp = pn.pane.Markdown(f' \n  SNPS were not {"tested" if c_num > self.n_autosome else "detected"} for sQTLs in 3Mb window of trait topSNP  \n   \n')
 
             dt2append = [giran, cau_title, cau] + phewas_section #+[phe_title,  phetemp, phew_title, phewtemp]
             if self.genome_accession in ['GCF_015227675.2', 'GCF_000001895.5']:
@@ -7251,12 +7244,12 @@ Are there sex differences?
         reftext = '''* Chitre AS, Polesskaya O, Holl K, Gao J, Cheng R, Bimschleger H, Garcia Martinez A, George T, Gileta AF, Han W, Horvath A, Hughson A, Ishiwari K, King CP, Lamparelli A, Versaggi CL, Martin C, St Pierre CL, Tripi JA, Wang T, Chen H, Flagel SB, Meyer P, Richards J, Robinson TE, Palmer AA, Solberg Woods LC. Genome-Wide Association Study in 3,173 Outbred Rats Identifies Multiple Loci for Body Weight, Adiposity, and Fasting Glucose. Obesity (Silver Spring). 2020 Oct;28(10):1964-1973. doi: 10.1002/oby.22927. Epub 2020 Aug 29. PMID: 32860487; PMCID: PMC7511439.'''
         template.main.append(pn.Card(reftext, title = 'References', collapsed = True))
         template.header.append(f'## {self.project_name}')
-        template.save(f'{self.path}results/gwas_report.html', resources=CDN, embed = False)
+        template.save(f'{self.path}results/gwas_report.html', resources=CDN, embed = False, title = f'{self.project_name}_GWAS')
         #template.save(f'{self.path}results/gwas_report.html', resources=INLINE)
         bash(f'''cp {self.path}results/gwas_report.html {self.path}results/gwas_report_{self.project_name}_round{round_version}_threshold{round(self.threshold,2)}_n{self.df.shape[0]}_date{datetime.today().strftime('%Y-%m-%d')}_gwasversion_{gwas_version}.html''')
         #printwithlog(f'{destination.replace("/tscc/projects/ps-palmer/s3/data", "https://palmerlab.s3.sdsc.edu")}/{self.project_name}/results/gwas_report.html')
     
-    def store(self, researcher: str , round_version: str, gwas_version: str= None, remove_folders: bool = True):
+    def store(self, researcher: str , round_version: str, gwas_version: str= None, remove_folders: bool = False):
         """
         Store the project data by compressing it into a zip file.
     
@@ -7795,8 +7788,12 @@ The knowledge Graph used comes from the Harvard's [PrimeKG](https://zitniklab.hm
 
     def make_genetrack_figure_(self, c: str= None, pos_start: int = None, pos_end:int= None,  frame_width = 1000, simplify_genes=True):
         genecolors = {'transcript': 'black', 'exon': 'seagreen', 'CDS': 'steelblue','start_codon': 'firebrick' ,'stop_codon': 'firebrick'}
-        genesizes = {'transcript': .05, 'exon': .25, 'CDS': .35,'start_codon': .45 ,'stop_codon': .45}
+        genesizes = {'transcript': .03, 'exon': .06, 'CDS': .07,'start_codon': .1 ,'stop_codon': .1}
         gtf = self.get_gtf() if not hasattr(self, 'gtf') else self.gtf
+        if pos_start is None: pos_start = 0
+        if pos_end is None:
+            pos_end = self.chr_conv_table.set_index('Chr').loc[self.replacenumstoXYMT(20), 'length'] - 1
+        
         genes_in_section = self.gtf.query(f'Chr == {int(c)} and end > {pos_start} and start < {pos_end}')\
                                                .reset_index(drop = True)\
                                                .query("source not in ['cmsearch','tRNAscan-SE']")
@@ -7815,51 +7812,57 @@ The knowledge Graph used comes from the Harvard's [PrimeKG](https://zitniklab.hm
         tt['mean_pos'] = tt[['start', 'end']].mean(axis = 1)
         tt = tt.assign(color = tt.biotype.map(genecolors), size = tt.biotype.map(genesizes), genestrand = tt.gene.str.replace('LOC', '') ) #+ tt.strand
         ttgenes = tt.query('gbkey == "Gene"').reset_index(drop = True)#.set_index('end')
-        spacing_genes = (pos_end - pos_start)/(20 if len(ttgenes)<= 15 else 40)
-        intergene_space = .36 if len(ttgenes)<= 15 else  .11*ttgenes.gene.map(len).max()
+        scaling_factor = (pos_end - pos_start) / frame_width
+        ogrange = (pos_end - pos_start)
+        def scalling_law():
+            r = (pos_end - pos_start)
+            if r<3e6: return dict(buffer = 10, scaler = 2e6,  min_px=8, max_px = 30)
+            if r<6e6: return dict(buffer = 8, scaler = 3e6,  min_px=8, max_px = 60)
+            return dict(buffer = 4, scaler = 4e6,  min_px=9, max_px = 80)
+        sclaw = scalling_law()
+            
+        ttgenes["label_width"] = ttgenes["gene"].map(len) * scaling_factor * sclaw['buffer']  # adjust 6 as needed
+        ttgenes["start_buffer"] = ttgenes["start"] - ttgenes["label_width"] / 2
+        ttgenes["end_buffer"] = ttgenes["end"] + ttgenes["label_width"] / 2
+        
+        spacing_genes = (pos_end - pos_start)/(20)
+        intergene_space = .05
         for idx, row in ttgenes.iterrows():
             if idx == 0: ttgenes.loc[idx, 'stackingy'] = 0
-            genes_inreg = set(ttgenes[min(idx-1000, 0): idx].query(f"end + {spacing_genes} > @row.start").stackingy)
+            row_start = ttgenes.loc[idx, "start_buffer"] 
+            genes_inreg = set(ttgenes[max(idx-1000, 0): idx].query(f"end_buffer > @row_start").stackingy)
             if idx>0: ttgenes.loc[idx, 'stackingy'] = min(set(range(1000)) - genes_inreg)
+            
         yticks3 = (intergene_space*ttgenes[['stackingy','stackingy']]).round(2).agg(lambda x: tuple(x), axis = 1).to_list()
         yticks3l = [(x[0], '') for x in yticks3]
         size_scalers = ttgenes['stackingy'].max()*intergene_space
         stackgenepos = defaultdict(lambda: -1, (ttgenes.set_index('gene')['stackingy']*intergene_space).to_dict())
         tt = tt.assign(stackingy = tt.gene.map(stackgenepos), 
-                       stackingy0 = tt.gene.map(stackgenepos) - tt['size']/5, #*size_scalers/10/2
-                       stackingy1 = tt.gene.map(stackgenepos) + tt['size']/5)
+                       stackingy0 = tt.gene.map(stackgenepos) - tt['size']/8, #*size_scalers/10/2
+                       stackingy1 = tt.gene.map(stackgenepos) + tt['size']/8)
         
         nrows_genes = int((np.array(yticks3)/intergene_space).max())
-        hgenelabels = 300 + nrows_genes*70
+        hgenelabels = min(700, 300 + nrows_genes*40)
         fullgene = tt.query('gbkey == "Gene"')
-        fullgene = fullgene.assign(ymax = fullgene.stackingy + max(genesizes.values())/5 ) #size_scalers/10/2
-        largenames = fullgene.genestrand.str.lower().str.contains(r'^loc\d+') | fullgene.genestrand.map(lambda x: len(x) >= 8 )
-        labels1 = hv.Labels(fullgene[~largenames], kdims = ['mean_pos','ymax'], vdims=['genestrand'])\
-                    .opts( opts.Labels(text_color='Black', text_font_style='normal',
-                                      text_font_size='14px' if (nrows_genes > 6 or len(ttgenes)> 15) else '25px', 
-                                      angle=90 if (nrows_genes > 6 or len(ttgenes)> 15) else 0,
-                                      text_baseline='middle' if (nrows_genes > 6 or len(ttgenes)> 15) else 'top',
-                                      text_align='right' if (nrows_genes > 6 or len(ttgenes)> 15) else 'center',
-                                        frame_width = frame_width, height = hgenelabels) )
-        labels2 = hv.Labels(fullgene[largenames], kdims = ['mean_pos','ymax'], vdims=['genestrand'])\
-                    .opts( opts.Labels(text_color='Black', text_font_style='normal', 
-                                      text_font_size='14px' if (nrows_genes > 6 or len(ttgenes)> 15) else '18px',
-                                      text_baseline='middle' if (nrows_genes > 6 or len(ttgenes)> 15) else 'top',
-                                      text_align='right' if (nrows_genes > 6 or len(ttgenes)> 15) else 'center',
-                                      angle=90 if (nrows_genes > 6 or len(ttgenes)> 15) else 0, 
-                                        frame_width = frame_width, height = hgenelabels) )
-        #text_font_size='8px' if (nrows_genes > 6 or len(ttgenes)> 15) else '12px',
-        labels = (labels1 * labels2).opts(xaxis = None)
+        fullgene = fullgene.assign(ymax = fullgene.stackingy + max(genesizes.values())/8 ) #size_scalers/10/2
+        largenames = fullgene.genestrand.str.lower().str.contains(r'^loc\d+') | fullgene.genestrand.map(lambda x: len(x) >= 6 )
+        
+        labels = hv.Labels(fullgene, kdims=['mean_pos', 'ymax'], vdims=['genestrand']).opts(
+            hooks=[js_hook_factory(**sclaw,  font="Arial Narrow")], text_color='Black',text_font_style='normal',
+            frame_width=frame_width,
+            height=hgenelabels, text_baseline='top', text_align='center',
+        )
+        
         rect = hv.Rectangles(tt.sort_values('size', ascending = False).rename({'start':'bp'}, axis = 1), kdims=['bp', 'stackingy0', 'end', 'stackingy1'], 
                              vdims=['color', 'gene'])\
-                 .opts(xformatter=NumeralTickFormatter(format='0,0.[0000]a') ,xticks=5,xrotation = 0,  frame_width = frame_width, height = hgenelabels,
-                       tools = ['hover'],  invert_yaxis=True,
-                      ylim= (-intergene_space*.4, max(np.array(yticks3).max()+(.9 if (nrows_genes > 6 or len(ttgenes)> 15) else .5)*intergene_space, intergene_space*1.5)), 
+                 .opts(xformatter=NumeralTickFormatter(format='0,0.[0000]a') ,xticks=5,xrotation = 0,  frame_width = frame_width, height = hgenelabels, 
+                       tools = [],  invert_yaxis=True,
+                      ylim= (-intergene_space*.4, max(np.array(yticks3).max()+(.9 if ( len(ttgenes)> 200) else .5)*intergene_space, intergene_space*1.5)), 
                        xlim = ( pos_start, pos_end)) 
         rect = rect.opts(hv.opts.Rectangles(fill_color='color', line_color='color', line_width=2, fill_alpha=0.3))\
                    .opts(ylabel = 'genes', yticks =yticks3l, xformatter=NumeralTickFormatter(format='0,0.[0000]a'), frame_width = frame_width)# yticks =yticks3l, 
-        return rect*labels
-    #width = width, 
+        return rect*labels.opts(xformatter=NumeralTickFormatter(format='0,0.[0000]a'), xticks=20)
+ 
     def make_phewas_figure_single(self, c: str= None, pos_start: int = None, pos_end:int= None, founderbimfambed= None, subsample = None,
                                   decompose_samples = False, add_r2fig= False, return_fig_as_list: bool = False):
         from matplotlib.colors import rgb2hex as mplrgb2hex
@@ -8698,7 +8701,6 @@ class TurboLGBMImputer:
         Passed through to LightGBM learners.
     """
 
-    # ───────────────────────── static helpers ──────────────────────────
     _KF = KFold(n_splits=5, shuffle=True, random_state=42)
 
     _NUM_SCORERS = dict(explained_variance=explained_variance_score,
@@ -8712,7 +8714,6 @@ class TurboLGBMImputer:
                         f1_weighted=lambda y, p:
                             f1_score(y, p, average="weighted"))
 
-    # ───────────────────────── constructor ─────────────────────────────
     def __init__(self,
                  *,
                  n_iter: int = 1,
@@ -8762,17 +8763,21 @@ class TurboLGBMImputer:
         self.models_: dict[str, object] = {}
         self.model_table: pd.DataFrame = pd.DataFrame()
 
-    # ──────────────────── public API wrappers ─────────────────────────
-    def fit_transform(self, X: pd.DataFrame) -> pd.DataFrame:
+    def fit_transform(self, X: pd.DataFrame, columns_subset=None) -> pd.DataFrame:
+        if columns_subset is not None:
+            missing = set(columns_subset) - set(X.columns)
+            if missing:
+                raise KeyError(f"columns_subset not in DataFrame: {missing}")
+            target_mask = X.columns.isin(columns_subset)
+        else:
+            target_mask = np.repeat(True, X.shape[1])
+
         imputed = X.copy()
         prev    = None
-
         for it in range(self.n_iter):
             if it:
                 print(f"[TurboLGBMImputer] pass {it+1}/{self.n_iter}")
-
-            imputed = self._single_pass(imputed)    # ← 1 sweep
-
+            imputed = self._single_pass(imputed, target_mask) 
             if prev is not None and np.allclose(prev.values,
                                                 imputed.values,
                                                 atol=self.atol,
@@ -8780,11 +8785,10 @@ class TurboLGBMImputer:
                 print(f"[TurboLGBMImputer] converged at pass {it+1}")
                 break
             prev = imputed.copy()
-
         return imputed
 
-    def fit(self, X: pd.DataFrame):
-        self.fit_transform(X)
+    def fit(self, X: pd.DataFrame, columns_subset=None):
+        self.fit_transform(X, columns_subset)
         return self
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
@@ -8797,9 +8801,6 @@ class TurboLGBMImputer:
                     Xnew.loc[miss, cols])
         return Xnew
 
-    # ───────────────── internal single-sweep logic ────────────────────
-    #  (this is essentially the previous “Turbo” version)
-    # ------------------------------------------------------------------
     def _wins(self, p: int) -> list[np.ndarray]:
         return [np.r_[max(0, i-self.window):i,
                       i+1:min(p, i+self.window+1)] for i in range(p)]
@@ -8811,7 +8812,6 @@ class TurboLGBMImputer:
         cut = math.ceil(0.8 * len(idx))
         return idx[:cut], idx[cut:]
 
-    # numeric multi-output block
     def _fit_numeric_block(self, X, miss, targ_idx, cols_idx):
         rows = np.flatnonzero(~miss[:, targ_idx].any(axis=1))
         if rows.size == 0:
@@ -8894,18 +8894,15 @@ class TurboLGBMImputer:
 
             return tidx, cols_idx, (base, [train_score], cv_scores)
 
-        # run blocks in parallel
         results = Parallel(self.n_jobs_outer, verbose=10)(
                       delayed(_process_block)(blk) for blk in blocks)
 
         records = []
         for tidx, cols_idx, payload in results:
-            if payload is None:
-                continue
+            if payload is None: continue
             est, tr_scores, cv_scores = payload
             preds_full = est.predict(Xnp[:, cols_idx]) \
                 if len(tidx) > 1 else est.predict(Xnp[:, cols_idx]).reshape(-1, 1)
-
             for k, j in enumerate(tidx):
                 msk = miss[:, j]
                 if msk.any():
@@ -8930,3 +8927,71 @@ class TurboLGBMImputer:
                               .reindex(Xdf.columns))
 
         return pd.DataFrame(Xnp, index=Xdf.index, columns=Xdf.columns)
+
+
+def make_genetrack_figure_(self, c: str= None, pos_start: int = None, pos_end:int= None,  frame_width = 1000, simplify_genes=True):
+    genecolors = {'transcript': 'black', 'exon': 'seagreen', 'CDS': 'steelblue','start_codon': 'firebrick' ,'stop_codon': 'firebrick'}
+    genesizes = {'transcript': .05, 'exon': .25, 'CDS': .35,'start_codon': .45 ,'stop_codon': .45}
+    gtf = self.get_gtf() if not hasattr(self, 'gtf') else self.gtf
+    genes_in_section = self.gtf.query(f'Chr == {int(c)} and end > {pos_start} and start < {pos_end}')\
+                                           .reset_index(drop = True)\
+                                           .query("source not in ['cmsearch','tRNAscan-SE']")
+    if simplify_genes:
+        biotype_str = 'lncRNA|misc_RNA|pseudogene|RNase_|telomerase_RNA|snoRNA|rRNA|_RNA|tRNA|s[cn]RNA|other'
+        gbkey_str = 'misc_RNA|ncRNA|precursor_RNA|rRNA|tRNA'
+        genes_in_section = genes_in_section[~genes_in_section.gene_biotype.fillna('').str.contains(biotype_str) &\
+            ~genes_in_section.gbkey.fillna('').str.contains(gbkey_str)]
+    tt = genes_in_section.dropna(how = 'all', axis = 1).reset_index(drop= True).assign(y=1)
+    if (not tt.shape[0]) or ('gbkey' not in tt.columns):
+        resdf = pd.DataFrame(dict(genes=[0], bp = [(pos_start+pos_end)/2], label = ['no genes in section']))
+        res = hv.Labels(resdf, kdims = ['bp','genes'], vdims=['label'])\
+                .opts(yaxis = None,xformatter=NumeralTickFormatter(format='0,0.[0000]a'),\
+                      xlabel = '', xlim = ( pos_start, pos_end), frame_width = frame_width, height = 100, text_color = 'Red')
+        return res
+    tt['mean_pos'] = tt[['start', 'end']].mean(axis = 1)
+    tt = tt.assign(color = tt.biotype.map(genecolors), size = tt.biotype.map(genesizes), genestrand = tt.gene.str.replace('LOC', '') ) #+ tt.strand
+    ttgenes = tt.query('gbkey == "Gene"').reset_index(drop = True)#.set_index('end')
+    spacing_genes = (pos_end - pos_start)/(20 if len(ttgenes)<= 15 else 120)
+    intergene_space = .36 if len(ttgenes)<= 15 else  .11*ttgenes.gene.map(len).max()
+    for idx, row in ttgenes.iterrows():
+        if idx == 0: ttgenes.loc[idx, 'stackingy'] = 0
+        genes_inreg = set(ttgenes[min(idx-1000, 0): idx].query(f"end + {spacing_genes} > @row.start").stackingy)
+        if idx>0: ttgenes.loc[idx, 'stackingy'] = min(set(range(1000)) - genes_inreg)
+    yticks3 = (intergene_space*ttgenes[['stackingy','stackingy']]).round(2).agg(lambda x: tuple(x), axis = 1).to_list()
+    yticks3l = [(x[0], '') for x in yticks3]
+    size_scalers = ttgenes['stackingy'].max()*intergene_space
+    stackgenepos = defaultdict(lambda: -1, (ttgenes.set_index('gene')['stackingy']*intergene_space).to_dict())
+    tt = tt.assign(stackingy = tt.gene.map(stackgenepos), 
+                   stackingy0 = tt.gene.map(stackgenepos) - tt['size']/5, #*size_scalers/10/2
+                   stackingy1 = tt.gene.map(stackgenepos) + tt['size']/5)
+    
+    nrows_genes = int((np.array(yticks3)/intergene_space).max())
+    hgenelabels = 300 + nrows_genes*70
+    fullgene = tt.query('gbkey == "Gene"')
+    fullgene = fullgene.assign(ymax = fullgene.stackingy + max(genesizes.values())/5 ) #size_scalers/10/2
+    largenames = fullgene.genestrand.str.lower().str.contains(r'^loc\d+') | fullgene.genestrand.map(lambda x: len(x) >= 8 )
+    labels1 = hv.Labels(fullgene[~largenames], kdims = ['mean_pos','ymax'], vdims=['genestrand'])\
+                .opts( opts.Labels(text_color='Black', text_font_style='normal',
+                                  text_font_size='14px' if (nrows_genes > 6 or len(ttgenes)> 15) else '25px', 
+                                  angle=90 if (nrows_genes > 6 or len(ttgenes)> 15) else 0,
+                                  text_baseline='middle' if (nrows_genes > 6 or len(ttgenes)> 15) else 'top',
+                                  text_align='right' if (nrows_genes > 6 or len(ttgenes)> 15) else 'center',
+                                    frame_width = frame_width, height = hgenelabels) )
+    labels2 = hv.Labels(fullgene[largenames], kdims = ['mean_pos','ymax'], vdims=['genestrand'])\
+                .opts( opts.Labels(text_color='Black', text_font_style='normal', 
+                                  text_font_size='14px' if (nrows_genes > 6 or len(ttgenes)> 15) else '18px',
+                                  text_baseline='middle' if (nrows_genes > 6 or len(ttgenes)> 15) else 'top',
+                                  text_align='right' if (nrows_genes > 6 or len(ttgenes)> 15) else 'center',
+                                  angle=90 if (nrows_genes > 6 or len(ttgenes)> 15) else 0, 
+                                    frame_width = frame_width, height = hgenelabels) )
+    #text_font_size='8px' if (nrows_genes > 6 or len(ttgenes)> 15) else '12px',
+    labels = (labels1 * labels2).opts(xaxis = None)
+    rect = hv.Rectangles(tt.sort_values('size', ascending = False).rename({'start':'bp'}, axis = 1), kdims=['bp', 'stackingy0', 'end', 'stackingy1'], 
+                         vdims=['color', 'gene'])\
+             .opts(xformatter=NumeralTickFormatter(format='0,0.[0000]a') ,xticks=5,xrotation = 0,  frame_width = frame_width, height = hgenelabels,
+                   tools = ['hover'],  invert_yaxis=True,
+                  ylim= (-intergene_space*.4, max(np.array(yticks3).max()+(.9 if (nrows_genes > 6 or len(ttgenes)> 15) else .5)*intergene_space, intergene_space*1.5)), 
+                   xlim = ( pos_start, pos_end)) 
+    rect = rect.opts(hv.opts.Rectangles(fill_color='color', line_color='color', line_width=2, fill_alpha=0.3))\
+               .opts(ylabel = 'genes', yticks =yticks3l, xformatter=NumeralTickFormatter(format='0,0.[0000]a'), frame_width = frame_width)# yticks =yticks3l, 
+    return rect*labels

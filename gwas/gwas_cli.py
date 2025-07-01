@@ -1,15 +1,19 @@
 #!/usr/bin/env python
+import numpy as np
+import re
+from collections import defaultdict
+import pandas as pd
+import sys
 
 try:
-    from gwas.gwas import *
+    from . import gwas as gg
 except ImportError as e:
     print('Failed to import gwas.gwas; trying local import...')
     try:
-        from gwas import *
+        from gwas import gwas as gg
     except ImportError:
         raise ImportError("Could not import `gwas.gwas`. Make sure your package is installed or the structure is correct.") from e
-import sys
-import pandas as pd
+
 runall = 'regressout subset grm h2 gwas db qtl gcorr phewas eqtl sqtl goea locuszoom h2fig report store publish porcupineplot'.replace(' ', '|||')
 run2phewas = 'regressout subset grm h2 gwas db qtl gcorr eqtl sqtl goea locuszoom h2fig'.replace(' ', '|||')
 def typeconverter(s):
@@ -41,7 +45,7 @@ def main():
     if not dictionary['genotypes']:
         dictionary['genotypes'] = '/tscc/projects/ps-palmer/gwas/databases/rounds/r10.5.2'
     
-    if not dictionary['gwas_version']: dictionary['gwas_version'] = __version__
+    if not dictionary['gwas_version']: dictionary['gwas_version'] = gg.__version__
         
     if not dictionary['threshold']: dictionary['threshold'] = 5.39
     if dictionary['threshold'] != 'auto':  dictionary['threshold']= float(dictionary['threshold'])
@@ -65,15 +69,15 @@ def main():
             pref = dictionary['traits'].replace('prefix_', '')
             traits_ = df.columns[df.columns.str.startswith(f'regressedlr_{pref}')]
         else: traits_ = dictionary['traits'].split(',')
-        try: traits_d = get_trait_descriptions_f(pd.read_csv(f'{path}{pj}/data_dict_{pj}.csv'), traits_)
+        try: traits_d = gg.get_trait_descriptions_f(pd.read_csv(f'{path}{pj}/data_dict_{pj}.csv'), traits_)
         except: traits_d = ['UNK' for x in range(len(traits_))]
     else:
         rawdata = dictionary['regressout'] if (len(dictionary['regressout']) > 1) else f'{path}{pj}/raw_data.csv'
         df = pd.read_csv(rawdata, dtype = {'rfid': str}).drop_duplicates(subset = 'rfid') 
         traits_, traits_d = [], []
     
-    for k,v in dictionary.items(): printwithlog(f'--{k} : {v}')
-    gwas = gwas_pipe(path = f'{path}{pj}/',
+    for k,v in dictionary.items(): gg.printwithlog(f'--{k} : {v}')
+    gwas = gg.gwas_pipe(path = f'{path}{pj}/',
                  all_genotypes = dictionary['genotypes'], #'round9_1.vcf.gz',
                  data = df,
                  project_name = pj.split('/')[-1],
@@ -85,8 +89,8 @@ def main():
                  threshold = dictionary['threshold'],
                  threshold05 = dictionary['threshold05'],
                  threads = dictionary['threads'])
-    printwithlog(path)
-    printwithlog(pj)
+    gg.printwithlog(path)
+    gg.printwithlog(pj)
     if dictionary['clear_directories'] and not dictionary['skip_already_present_gwas']: gwas.clear_directories()
     if dictionary['impute']: 
         gbcols =  [] if not dictionary['groupby'] else dictionary['groupby'].split(',')
