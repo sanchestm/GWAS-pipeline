@@ -8,6 +8,13 @@ import numba
 from sklearn.utils.extmath import randomized_svd
 from scipy.stats import t as scipyt
 from scipy.stats import chi2
+from scipy.special import stdtr, erfc
+from tqdm import tqdm
+import itertools
+from typing import Literal
+from scipy.linalg import blas
+import os
+from collections import defaultdict
 
 
 # try:
@@ -194,7 +201,6 @@ def load_plink_xarray(prefix, chunk_variants=10000, dtype=np.float16, use_memmap
     geno_xr : xarray.DataArray
          An xarray.DataArray wrapping the Dask array with dimensions ('iid', 'snp') and associated coordinates.
     """
-    import xarray as xr
     bim, fam, genotype_dask = load_plink(prefix, chunk_variants, dtype, use_memmap)
     geno_xr = xr.DataArray(
         genotype_dask,
@@ -269,12 +275,13 @@ def king_robust_kinship_numba(G):
             kin[j, i] = phi
     return kin
 
-    
-def GRM(X, scale = True, return_weights= False, nan_policy = 'ignore', correlation_matrix= False):
+def GRM(X, scale = True, return_weights= False, nan_policy = 'ignore', correlation_matrix= False, savefile = None):
     ##### z calculation
+    ids = X.index if isinstance(X, pd.DataFrame) else None
+    toxr = lambda x,ids: xr.DataArray(x, dims=["sample_0", "sample_1"], coords={"sample_0":ids, "sample_1":ids})
     x = np.array(X)
     z = x - np.nanmean(x, axis = 0)
-    if scale: z /=  np.nanstd(x, axis = 0)
+    if scale: z /= np.nanstd(x, axis = 0)
     np.nan_to_num(z, copy = False,  nan=0.0, posinf=None, neginf=None )
     zzt = np.dot(z,z.T)
     if nan_policy == 'mean': zzt_w = x.shape[1]-1
@@ -286,14 +293,132 @@ def GRM(X, scale = True, return_weights= False, nan_policy = 'ignore', correlati
         if nan_policy == 'per_iid':
             zzt_w = zzt_w.max(axis =1)[:, None]
     grm = zzt/zzt_w
+    if savefile is not None:
+        if ids is not None:
+            ids.to_frame().set_axis(['idx'], axis = 1).reset_index()\
+               .to_csv(f"{savefile}.grm.id", index = False, header = None, sep = '\t')
+        idxs = np.tril_indices_from(grm)
+        grm[idxs].astype(np.float32).tofile(f"{savefile}.grm.bin") 
+        zzt_w[idxs].astype(np.float32).tofile(f"{savefile}.grm.N.bin")
     if correlation_matrix:
         sig = np.sqrt(np.diag(grm))
         grm /= np.outer(sig, sig)
         np.fill_diagonal(grm, 1)
-    if return_weights: 
-        return {'zzt': zzt, 'weights': zzt_w, 'grm': grm }
+    if ids is not None:
+        if not return_weights: return toxr(grm,ids)
+        else: return {'zzt':toxr(zzt,ids),'w':toxr(zzt_w,ids),'grm':toxr(grm,ids)}
+    if return_weights: return {'zzt': zzt, 'w': zzt_w, 'grm': grm }
+    else: return grm
+
+
+def GRM_lowmem(X,*, scale: bool = True, return_weights: bool = False, nan_policy: str = "ignore", correlation_matrix: bool = False, dtype=np.float32,  savefile = None):
+    ids = X.index if isinstance(X, pd.DataFrame) else None
+    toxr = lambda x,ids: xr.DataArray(x, dims=["sample_0", "sample_1"], coords={"sample_0":ids, "sample_1":ids})
+    syrk = blas.ssyrk if np.dtype(dtype) == np.float32 else blas.dsyrk
+    x = np.array(X)# X = np.asarray(X, dtype=dtype, order="C")
+    m, n = X.shape
+    mask = ~np.isnan(X)
+    counts = mask.sum(0)
+    sums   = np.where(mask, X, 0).sum(0)
+    means  = sums / np.maximum(counts, 1)
+    Z = np.where(mask, X - means, 0)
+    if scale:
+        ssq = (Z**2).sum(0)
+        std = np.sqrt(ssq / np.maximum(counts - 1, 1))
+        Z /= np.where(std == 0, 1.0, std)
+    zzt_low = syrk(1.0, Z, lower=1, trans=0, beta=0.0)
+    if nan_policy == "mean":  denom_low = n - 1
     else:
-        return grm
+        w_low = syrk(1.0, mask.astype(dtype), lower=1, trans=0, beta=0.0)
+        np.maximum(w_low - 1, 1, out=w_low)
+        if nan_policy == "per_iid":
+            row_max = np.maximum(w_low.max(1), w_low.max(0)) 
+            denom_low = row_max[:, None]                   
+        else: denom_low = w_low
+    grm_low = zzt_low / denom_low
+    if correlation_matrix:
+        d = np.sqrt(np.diag(grm_low))
+        grm_low /= d[:, None] * d[None, :]
+        np.fill_diagonal(grm_low, 1.0)
+    grm_full = grm_low + grm_low.T - np.diag(np.diag(grm_low))
+    if (savefile is not None) or return_weights:
+        w_full = denom_low + denom_low.T - np.diag(np.diag(denom_low))
+    if savefile is not None:
+        if ids is not None:
+            ids.to_frame().set_axis(['idx'], axis = 1).reset_index()\
+               .to_csv(f"{savefile}.grm.id", index = False, header = None, sep = '\t')
+        idxs = np.tril_indices_from(grm_full)
+        grm_full[idxs].astype(np.float32).tofile(f"{savefile}.grm.bin")
+        w_full[idxs].astype(np.float32).tofile(f"{savefile}.grm.N.bin")
+    if return_weights:
+        zzt_full = zzt_low+zzt_low.T-np.diag(np.diag(zzt_low))
+        if ids is None: return {"zzt":zzt_full,"w":w_full, "grm":grm_full}
+        else: return {"zzt":toxr(zzt_full, ids),"w":toxr(w_full,ids), "grm":toxr(grm_full,ids)}
+    return grm_full if ids is None else toxr(grm_full, ids)
+
+def plink2GRM(plinkfile:str, n_autosomes:int=None, downsample_snps:float = None, downsample_stategy:str = 'equidistant', rfids = None, 
+              double_male_x:bool = False, double_y:bool = False, double_mt:bool = False,save_grms_path:bool = None, decompose_grm:bool = False):
+    if isinstance(plinkfile, pd.DataFrame):
+        load_snps_from_df = True
+        if 'sex' in plinkfile.columns: 
+            fam = plinkfile.loc[:, ['sex']].rename({'sex':'gender'}, axis = 1).reset_index(names = 'iid')
+        elif 'gender' in plinkfile.columns: 
+            fam = plinkfile.loc[:, ['gender']].reset_index(names = 'iid')
+        else: 
+            print('sex|gender data not provided assigning all individuals to male')
+            double_male_x = False
+            fam = pd.DataFrame(data = {'gender':1, 'iid': plinkfile.index})
+        bim = plinkfile.columns[plinkfile.columns.str.contains(':')].to_series()\
+                  .str.split(':', expand = True).set_axis(['chrom', 'pos'], axis = 1)\
+                  .astype({'pos': int}) 
+    else:
+        bim, fam, gen = load_plink(plinkfile) if isinstance(plinkfile,str) else plinkfile 
+        load_snps_from_df = False
+    if save_grms_path is not None:
+        save_grms_path = save_grms_path.rstrip('/')
+        if not os.path.isdir(save_grms_path): os.makedirs(save_grms_path, exist_ok=True)
+    allgrms = pd.DataFrame(columns = ['grm', 'w', 'zzt'])
+    for c in tqdm(bim.chrom.unique(), desc = 'making grm'):
+        if load_snps_from_df: 
+            snps = plinkfile.filter(regex = f'^{c}:')
+            if rfids is not None: snps = snps.loc[list(rfids)]
+        else: snps = plink2df((bim, fam, gen), c = c, downsample_snps=downsample_snps, rfids = rfids,
+                                downsample_stategy=downsample_stategy)
+        if n_autosomes is not None:
+            num2xymt = lambda x: x if not (z:=defaultdict(int, {n_autosomes+1:'x',n_autosomes+2:'y',
+                                                                n_autosomes+3:'xy', n_autosomes+4:'mt'})[int(x)]) else z
+            if (c2 := str(c).replace('chr', '').lower()).isdigit(): 
+                c2 = num2xymt(c2)
+            if c2 in ['x', 'y']: 
+                maleiids = fam[fam.gender.isin(['M', 'm', 1, '1'])].iid
+                if   c2 == 'x' and double_male_x: snps.loc[maleiids, :] *= 2
+                elif c2 == 'y':  
+                    snps = snps.loc[maleiids, :]
+                    if double_y: snps *= 2
+                elif c2 == 'mt' and double_mt: snps *= 2
+        else: c2 = c
+        filename = f'{save_grms_path}/{c2}chrGRM' if (save_grms_path is not None) else None
+        allgrms.loc[str(c2)] = GRM(snps, return_weights=True, savefile=filename)
+    allgrms['isnum'] = allgrms.index.str.isnumeric()
+    allzzt = allgrms.loc[allgrms.isnum,'zzt'].sum()
+    allw = allgrms.loc[allgrms.isnum,'w'].sum()    
+    allgrmf = allzzt/allw
+    if save_grms_path is not None:
+        fam[['iid', 'iid']].to_csv(f"{save_grms_path}/AllchrGRM.grm.id", index = False, header = None, sep = '\t')
+        idxs = np.tril_indices_from(allgrmf)
+        allgrmf.values[idxs].astype(np.float32).tofile(f"{save_grms_path}/AllchrGRM.grm.bin") 
+        allw.values[idxs].astype(np.float32).tofile(f"{save_grms_path}/AllchrGRM.grm.N.bin") 
+    allgrms['subtracted_grm'] = allgrms.progress_apply(lambda x: (allgrmf.to_pandas() if not x.isnum else 
+                                                                 (allzzt - x.zzt)/(allw-x.w).to_pandas()), axis = 1)
+    allgrms.loc['All', ['grm', 'w', 'zzt', 'subtracted_grm']] = (allgrmf, allw, allzzt, allgrmf)
+    allgrms.loc['All','isnum'] = False
+    if decompose_grm:
+        allgrms[['U', 's']] = allgrms.progress_apply(lambda x: grm2Us(x.subtracted_grm.values, n_components=2000)[:2], 
+                                                         axis=1, result_type="expand")
+    allgrms = allgrms.sort_index(key = lambda idx : idx.str.lower().map({str(i): int(i) for i in range(1000)}|\
+                                  {i: int(i) for i in range(1000)}|\
+                                  {'all': -1000, 'x':1001, 'y' : 1002, 'mt': 1003, 'm': 1003}))
+    return allgrms
 
 
 def king_robust_kinship(G):
@@ -338,45 +463,33 @@ def king_robust_kinship(G):
     np.fill_diagonal(kin, 0.5)
     return kin
 
-def plink2df_old(plinkpath: str, rfids: list = None, c: int = None, 
-             pos_start: int = None, pos_end: int = None, 
-             snplist: list = None) -> pd.DataFrame:
-    if type(plinkpath) == str: 
-        snps, iid, gen = load_plink(plinkpath)
+def recodeSNP(s, a1, a2):
+    return np.where(np.isnan(s), 'NA',
+                    np.where(s == 0, a1+a1,
+                    np.where(s == 1, a1+a2,
+                    np.where(s == 2, a2+a2, '??')))).astype('U2')
+
+def recodeSNPs(arr, a0, a1):
+    a0, a1 = np.asarray(a0, dtype='U1'), np.asarray(a1, dtype='U1')
+    hom_ref, het, hom_alt = np.char.add(a0, a0), np.char.add(a0, a1), np.char.add(a1, a1)
+    out = np.full(arr.shape, 'NA', dtype='U2')
+    rows, cols = np.indices(arr.shape)
+    out[(arr == 0)] = hom_ref[cols[(arr == 0)]]
+    out[(arr == 1)] = het[cols[(arr == 1)]]
+    out[(arr == 2)] = hom_alt[cols[(arr == 2)]]
+    if isinstance(arr, pd.DataFrame):
+        out = pd.DataFrame(out, index = arr.index, columns = arr.columns).astype('string[pyarrow]')
+    return out
+
+def plink2df(plinkpath: str, rfids: list = None, snplist: list = None, c: int = None, pos_start: int = None, pos_end: int = None, 
+             downsample_snps: int = None, downsample_stategy: Literal['random', 'equidistant'] = 'random', recodeACGT: bool = False) -> pd.DataFrame:
+    if type(plinkpath) == str:  snps, iid, gen = load_plink(plinkpath)
     else: snps, iid, gen = plinkpath
     try:
         snps.chrom = snps.chrom.astype(int)
         if c is not None: c = int(c)
     except: 
-        c = str(c)
-        print('non numeric chromosomes: using str(c) in this case')
-        snps = snps.sort_values(['chrom', 'pos'])
-    iiid = iid.assign(i = iid.index).set_index('iid')
-    if snplist is None:
-        snps.pos = snps.pos.astype(int)
-        isnps = snps.set_index(['chrom', 'pos'])
-        if (pos_start is None) and (pos_end is None):
-            if c is None: index = isnps
-            else: index = isnps.loc[(slice(c, c)), :]
-        else:index = isnps.loc[(slice(c, c),slice(pos_start, pos_end) ), :]
-    else: 
-        index = snps[snps.snp.isin(snplist)]
-    col = iiid if rfids is None else iiid.loc[rfids]
-    return pd.DataFrame(gen[col.i ][:,  index.i.values].astype(np.float32), 
-                        index = col.index.values.astype(str), columns = index.snp.values )
-
-
-def plink2df(plinkpath: str, rfids: list = None, c: int = None, 
-             pos_start: int = None, pos_end: int = None, 
-             snplist: list = None) -> pd.DataFrame:
-    if type(plinkpath) == str: 
-        snps, iid, gen = load_plink(plinkpath)
-    else: snps, iid, gen = plinkpath
-    try:
-        snps.chrom = snps.chrom.astype(int)
-        if c is not None: c = int(c)
-    except: 
-        c = str(c)
+        if c is not None: c = str(c)
         print('non numeric chromosomes: using str(c) in this case')
     iiid = iid.assign(i = iid.index).set_index('iid')
     query_sentence = []
@@ -387,10 +500,19 @@ def plink2df(plinkpath: str, rfids: list = None, c: int = None,
     if snplist is not None: query_sentence += ['snp.isin(@snplist)']
     query_sentence = ' and '.join(query_sentence)
     sset = snps.query(query_sentence) if len(query_sentence) else snps
+    if downsample_snps is not None:
+        if (0<downsample_snps<=1): downsample_snps= int(downsample_snps*sset.shape[0])
+        if downsample_stategy == 'random': sset = sset.sample(min(int(downsample_snps), sset.shape[0])).sort_values('i')
+        elif downsample_stategy == 'equidistant': sset = sset[::max(1,sset.shape[0]//int(downsample_snps))]
+        else: print('''downsample_stategy not in ['random', 'equidistant'], ignoring downsampling''')
     col = iiid if rfids is None else iiid.loc[rfids]
-    return pd.DataFrame(gen[col.i.values ][:,  sset.i.values].astype(np.float32), 
-                        index = col.index.values, columns = sset.snp.values )
-
+    if not recodeACGT:
+        return pd.DataFrame(gen[col.i.values ][:, sset.i.values].astype(np.float32),
+                            index = col.index.values, columns = sset.snp.values )
+    return pd.DataFrame(recodeSNPs(gen[col.i.values ][:, sset.i.values].astype(np.float32), 
+                                   sset.a0.values, sset.a1.values),
+                        index = col.index.values, columns = sset.snp.values )\
+             .astype('string[pyarrow]').replace('NA', np.nan)
 
 def whiten_data(U, D_inv_sqrt, X):
     d = np.diag(D_inv_sqrt)
@@ -399,9 +521,9 @@ def whiten_data(U, D_inv_sqrt, X):
     result = np.einsum('ij,jk->ik', U, temp, optimize=True)
     return result
 
-def subblock_svd_from_full(U, s, obs):
-    U, s, _ = randomized_svd(U[obs, :] * np.sqrt(s)[None, :]  ,  n_components=len(obs))
-    return U, s
+def subblock_svd_from_full(U, s, obs, n_components=50):
+    Usub, ssub = grm2Us(U[obs, :] * np.sqrt(s)[None, :]  ,  n_components=min(obs.sum(), n_components))
+    return Usub, ssub**2
 
 def _read_bin_url(path):
     import urllib
@@ -429,7 +551,18 @@ def read_grm(path):
     w = xr.DataArray(w, dims=["sample_0", "sample_1"], coords={"sample_0":grm.sample_0, "sample_1": grm.sample_1} )
     return {'grm':grm,'w': w, 'path': path}
 
-def load_all_grms(paths):
+def grm2Us(G, n_components=None):
+    rsvd = n_components if (n_components is not None) else 2000
+    if (G.shape[0]> 4000) or (rsvd<200): 
+        U, s, _ = randomized_svd(G, n_components=rsvd, random_state=0)
+    else:
+        s, U = np.linalg.eigh(G)
+        idx = np.argsort(s)[::-1]
+        s, U = s[idx], U[:, idx]
+        if n_components is not None: s, U = s[:n_components], U[:, :n_components]
+    return U, s
+
+def load_all_grms(paths, decompose_grm = True):
     from glob import glob
     if isinstance(paths, str): paths = glob(paths)
     allgrms = pd.DataFrame.from_records([read_grm(x.replace('.N', '').replace('.grm.bin', '.grm')) for x in paths])
@@ -441,7 +574,9 @@ def load_all_grms(paths):
     allgrms['subtracted_grm'] = allgrms.progress_apply(lambda x: (allgrms.loc["All", 'grm'] if not x.isnum else 
                                                              (allgrms_weighted - x.grm*x.w)/(allgrms.loc["All", 'w']-x.w)).to_pandas(),
                                                    axis = 1)
-    allgrms[['U', 's']] = allgrms.progress_apply(lambda x: randomized_svd(x.subtracted_grm.values, n_components=2000, random_state=0)[:2], axis=1,  result_type="expand")
+    if decompose_grm:
+        allgrms[['U', 's']] = allgrms.progress_apply(lambda x: grm2Us(x.subtracted_grm.values, n_components=2000, random_state=0)[:2], 
+                                                     axis=1,  result_type="expand")
     allgrms = allgrms.sort_index(key = lambda idx : idx.str.lower().map({str(i): int(i) for i in range(1000)}|\
                               {i: int(i) for i in range(1000)}|\
                               {'all': -1000, 'x':1001, 'y' : 1002, 'mt': 1003, 'm': 1003}))
@@ -461,14 +596,16 @@ def H2SVD(y, grm=None,s=None, U=None, l='REML', n_components = None, return_SVD 
         grm = np.array(grm)
         grm = grm[np.ix_(obs, obs)]
         if n_components is None: n_components =grm.shape[0]
-        U, s, _ = randomized_svd(grm, n_components=n_components, random_state=0)
+        U, s = grm2Us(grm, n_components=n_components)
     elif s is not None and U is not None and grm is None: 
+        #Ue, se = subblock_svd_from_full(U, s, obs, n_components = 700)
         U = U[obs, :]
         s *= np.sum(U**2, axis=0) #* s
         if n_components is not None:
-            U = U[:, :n_components]
-            s = s[:n_components] 
-        #U, s = subblock_svd_from_full(U, s, obs)
+            U, s = U[:, :n_components], s[:n_components] 
+        # U[:, :len(se)] = Ue
+        # s[:len(se)]    = se
+        
     else: raise ValueError('cannot submit both grm and U s at the same time')
     Ur2 = np.dot(U.T, y)**2
     s = np.maximum(s, tol)        
@@ -505,7 +642,7 @@ def remove_relatedness_transformation(G=None, U=None, s=None, h2=0.5, yvar=1, to
     if s is None and U is None and G is not None:
         G = yvar * (h2 * G + (1 - h2) * np.eye(G.shape[0]))
         if n_components is None: n_components = G.shape[0]
-        U, s, _ = randomized_svd(G, n_components=n_components, random_state=0)
+        U, s  = grm2Us(G, n_components=n_components)
     elif s is not None and U is not None and G is None: pass
     else: raise ValueError('cannot submit both G and U s at the same time')
     eigs_fG = yvar * (h2 * s + (1 - h2))
@@ -515,7 +652,7 @@ def remove_relatedness_transformation(G=None, U=None, s=None, h2=0.5, yvar=1, to
     W = U @ D_inv_sqrt @ U.T
     return W
     
-def rm_relatedness(c, trait, df, n_components = None,return_eigen=True, svd_input = True, ):
+def rm_relatedness(c, trait, df, allgrms, n_components = None,return_eigen=True, svd_input = True, ):
     grm_c = allgrms.loc[str(c),'subtracted_grm']
     trait_ = df.loc[grm_c.index, trait]
     navals = ~trait_.isna()
@@ -524,16 +661,10 @@ def rm_relatedness(c, trait, df, n_components = None,return_eigen=True, svd_inpu
         print('not enough samples')
         return None
     if svd_input:
-        h2_res = H2SVD(y = trait_, 
-                   s = allgrms.loc[str(c),'s'], 
-                   U = allgrms.loc[str(c),'U'], #grm = grm_c, 
-                   return_SVD=True, 
-                   n_components = n_components) 
+        h2_res = H2SVD(y = trait_, s = allgrms.loc[str(c),'s'], U = allgrms.loc[str(c),'U'],
+                   return_SVD=True, n_components = n_components) 
     else: 
-        h2_res = H2SVD(y = trait_, 
-                   grm = grm_c, 
-                   return_SVD=True, 
-                   n_components = n_components) 
+        h2_res = H2SVD(y = trait_, grm = grm_c, return_SVD=True, n_components = n_components) 
     U, D_inv_sqrt = remove_relatedness_transformation(yvar= yvar,**h2_res, return_eigen=True)
     if U.shape[0] == sum(navals): 
         trait_vec = trait_.loc[navals]#.to_frame()
@@ -541,20 +672,20 @@ def rm_relatedness(c, trait, df, n_components = None,return_eigen=True, svd_inpu
     else: 
         trait_vec = trait_.copy()
         idx = navals.index
-    transformed = U @ (D_inv_sqrt @ (U.T @ trait_vec))
+    uttrait = U.T @ trait_vec
+    transformed = U @ (D_inv_sqrt @ uttrait)
     #transformed = whiten_data(U,D_inv_sqrt,trait_vec)
+    weights = (h2_res['h2'] * h2_res['s']) / (h2_res['h2'] * h2_res['s'] + (1.0 - h2_res['h2']))
+    blup_vec = (U @ (weights * uttrait))
     if return_eigen:
         return {'transformed':pd.Series(transformed, index = idx, name = f'{trait}__subtractgrm{c}'),
-                'U': U,
-                'D_inv_sqrt': D_inv_sqrt,
-                'c': c,
-                'trait': trait,
-                'h2': h2_res['h2'],
-                'n_components':n_components}
+                'blup': pd.Series(blup_vec, index=idx, name=f'{trait}__blup{c}'),
+                'U': U, 'D_inv_sqrt': D_inv_sqrt, 'c': c, 'trait': trait,
+                'h2': h2_res['h2'], 'n_components':n_components}
     return pd.Series(transformed, index = idx, name = f'{trait}__subtractgrm{c}')
 
-def scale_with_mask(X):
-    X = np.asarray(X, dtype=np.float32)
+def scale_with_mask(X, precision = np.float32):
+    X = np.asarray(X, dtype=precision)
     M = ~np.isnan(X)
     X_centered = X - np.nanmean(X, axis=0)
     X_centered[~M] = 0.0
@@ -562,9 +693,11 @@ def scale_with_mask(X):
     std = np.sqrt(sum_sq / M.sum(axis=0))
     std[std == 0] = np.nan
     X_scaled = X_centered / std
-    return X_scaled, std, M.astype(np.float32)
+    return X_scaled, std, M.astype(precision)
 
-def regression_with_einsum(ssnps, straits, snps_mask, traits_mask,dof='correct'):
+def regression_with_einsum_old(ssnps, straits, snps_mask, traits_mask,dof='correct', stat = 'ttest', sided = 'two-sided'):
+    if sided not in ['two-sided','one-sided']: raise ValueError("sided must be 'two-sided' or 'one-sided'")
+    if stat  not in ['ttest', 'wald']: raise ValueError("stat must be 'ttest' or 'wald'")
     # Compute cross-product between SNPs and traits.
     XtY = np.einsum("ij,ik->jk", ssnps, straits, optimize=True)  # shape: (num_snps, num_traits)
     # Compute sum of squares of SNP values (over individuals where the trait is observed).
@@ -577,23 +710,171 @@ def regression_with_einsum(ssnps, straits, snps_mask, traits_mask,dof='correct')
     df[df <= 0] = np.nan 
     beta = XtY / diag_XtX
     SSR = term1 - 2 * beta * XtY + beta**2 * diag_XtX
-    sigma2 = SSR / df
-    se_beta = np.sqrt(sigma2 / diag_XtX)
-    t_stats = beta / se_beta
-    p_values = 2 * (1 - scipyt.cdf(np.abs(t_stats), df=df))
+    #sigma2 = SSR / df
+    se_beta = np.sqrt(SSR / df / diag_XtX)
+    stats = beta / se_beta
+    if stat == 'ttest':
+        p_values = (2 if sided == 'two-sided' else 1) * scipyt.sf(np.abs(stats), df=df)
+    else:
+        np.square(stats, out = stats) # *= stats
+        p_values = chi2.sf(stats, df=1)
+        if sided == 'one-sided': p_values = np.where(beta >= 0, 0.5 * p_values, 1 - 0.5 * p_values)
     neg_log10_p_values = -np.log10(p_values)
-    return beta, se_beta, t_stats, neg_log10_p_values, df
+    return beta, se_beta, stats, neg_log10_p_values, df
 
-def GWA(traits, snps, dtype = 'pandas'):
-    ssnps, snps_std, snps_mask = scale_with_mask(snps)
-    straits, traits_std, traits_mask = scale_with_mask(traits)
-    res = xr.DataArray(
-             np.stack(regression_with_einsum(ssnps, straits, snps_mask, traits_mask, dof = 'correct'), axis=0), 
-             dims=["metric", "snp", "trait"],
-             coords={"metric": np.array(['beta', 'beta_se', 't_stat', 'neglog_p', 'dof']),
-                     "snp":   list(snps.columns),
-                     "trait": traits.columns.map(lambda x: x.split('__subtractgrm')[0]).to_list()} )
-    if dtype == 'pandas':
-        return res.to_dataset(dim="metric").to_dataframe().reset_index()
-    else: return res
+def regression_with_einsum(ssnps, straits, snps_mask, traits_mask,dof='correct', stat = 'ttest', sided = 'two-sided'):
+    if sided not in ['two-sided','one-sided']: raise ValueError("sided must be 'two-sided' or 'one-sided'")
+    if stat  not in ['ttest', 'wald', 'score']: raise ValueError("stat must be 'ttest' or 'wald'")
+    XtY      = np.empty((ssnps.shape[1],straits.shape[1]), dtype=float)
+    diag     = np.empty_like(XtY)
+    ssr      = np.empty_like(XtY)
+    df       = np.empty_like(XtY)
+    np.einsum("ij,ik->jk", ssnps, straits, out=XtY, optimize=True)
+    np.einsum("ij,ij,ik->jk", ssnps, ssnps, traits_mask, out=diag,  optimize=True)
+    phen = straits * traits_mask   
+    np.einsum("ij,ik,ik->jk", snps_mask, phen, phen, out=ssr, optimize=True)
+    if dof!='incorrect': 
+        np.einsum("ij,ik->jk", snps_mask, traits_mask, out=df,  optimize=True)
+        df -= 1
+    else: df = np.broadcast_to(traits_mask.sum(axis=0) - 1 , (ssnps.shape[1], traits_mask.shape[1])).copy()
+    df[df <= 0] = np.nan
+    beta = XtY
+    beta /= diag
+    if stat != 'score': ssr -= beta * beta * diag
+    np.divide(ssr, df*diag, out=ssr)
+    np.sqrt(ssr, out=ssr)
+    se_beta = ssr
+    stats = beta/se_beta
+    if stat == 'ttest':
+        p_values = scipyt.sf(np.abs(stats), df=df)
+        if sided == 'two-sided': p_values*=2
+    elif stat in ['wald', 'score']:
+        np.abs(stats, out = stats)
+        p_values = erfc(stats/np.sqrt(2))
+        if sided == 'one-sided': p_values*=.5
+        np.square(stats, out = stats)
+    np.log10(p_values, out=p_values)
+    np.negative(p_values, out=p_values)
+    return beta, se_beta, stats, p_values, df
 
+# def GWA(traits, snps, dtype = 'pandas', precision=np.float32, stat = 'ttest', sided = 'two-sided'):
+#     if isinstance(snps, tuple) and len(snps)==3: ssnps, snps_std, snps_mask = snps
+#     else: ssnps, snps_std, snps_mask = scale_with_mask(snps, precision = precision)
+#     if isinstance(traits, tuple) and len(snps)==3: straits, traits_std, traits_mask = traits
+#     straits, traits_std, traits_mask = scale_with_mask(traits, precision = precision)
+#     if dtype == 'tuple':  
+#         return regression_with_einsum(ssnps, straits, snps_mask, traits_mask, dof = 'correct', stat = stat, sided = sided)
+#     res = xr.DataArray(
+#              np.stack(regression_with_einsum(ssnps, straits, snps_mask, traits_mask, dof = 'correct', stat = stat, sided = sided), axis=0), 
+#              dims=["metric", "snp", "trait"],
+#              coords={"metric": np.array(['beta', 'beta_se', 'stat', 'neglog_p', 'dof']),
+#                      "snp":   list(snps.columns),
+#                      "trait": traits.columns.map(lambda x: x.split('__subtractgrm')[0]).to_list()} )
+#     if dtype == 'pandas':  return res.to_dataset(dim="metric").to_dataframe().reset_index()
+#     return res
+
+def GWA(traits, snps, dtype = 'pandas_highmem', precision=np.float32, stat = 'ttest', sided = 'two-sided',dof='correct'):
+    if isinstance(snps, tuple) and len(snps)==3: ssnps, snps_std, snps_mask = snps
+    else: ssnps, snps_std, snps_mask = scale_with_mask(snps, precision = precision)
+    if isinstance(traits, tuple) and len(snps)==3: straits, traits_std, traits_mask = traits
+    straits, traits_std, traits_mask = scale_with_mask(traits, precision = precision)
+    results = regression_with_einsum(ssnps, straits, snps_mask, traits_mask, dof = dof, stat = stat, sided = sided)
+    metrics     = ['beta', 'beta_se', 'stat', 'neglog_p', 'dof']
+    snp_names, trait_names   = list(snps.columns), [t.split('__subtractgrm')[0] for t in traits.columns]
+    if dtype not in ['tuple', 'xarray', 'pandas', 'pandas_highmem']: raise ValueError(" dtype has to be in ['tuple', 'xarray', 'pandas']")
+    if dtype == 'tuple':  return results
+    elif dtype == 'xarray_dataset':
+        return xr.Dataset( { m: (('snp','trait'), arr) for m,arr in zip(metrics, results) },
+            coords={'snp': snp_names, 'trait': trait_names})
+    elif dtype in ['xarray', 'pandas_highmem']:
+        xar =  xr.DataArray( np.stack(results, axis=0),dims=["metric", "snp", "trait"],
+             coords={"metric": np.array(['beta', 'beta_se', 'stat', 'neglog_p', 'dof']),
+                     "snp":   snp_names, "trait": trait_names} )
+        if dtype == 'xarray': return xar
+        return xar.to_dataset(dim="metric").to_dataframe().reset_index()
+    elif dtype == 'pandas': 
+        snp_col   = np.repeat(snp_names, len(traits.columns))
+        trait_col = np.tile(trait_names, len(snps.columns))
+        return  pd.DataFrame({ 'snp':   snp_col, 'trait': trait_col,
+            **{ metric: arr.ravel(order='C') for metric, arr in zip(metrics, results)}})
+    return results
+
+def GWAS(traitdf, genotypes = 'genotypes/genotypes', grms_folder = 'grm', save = True , y_correction  = 'ystar',
+         save_path = 'results/gwas/', return_table = True, stat = 'ttest', dtype = 'pandas_highmem',dof='correct'):
+    res = []
+    read_gen = load_plink(genotypes)
+    chrunique =[str(x) for x in read_gen[0].chrom.unique()]
+    grms = load_all_grms(f'{grms_folder}/*.grm.bin', decompose_grm=False)
+    tdf = traitdf.loc[grms.loc[ 'All', 'subtracted_grm'].index, :]
+    chrs2run = grms.index[~grms.index.str.contains('^All$')].to_list()
+    for C in tqdm(chrs2run,position=0, desc = 'running Chr'):
+        if y_correction=='blup_resid':
+            traits =  tdf - pd.concat([rm_relatedness(C,_t,tdf,grms, svd_input=False)['blup'] for _t in tdf.columns], axis = 1).rename(lambda x: x.split('__')[0], axis = 1)
+        elif y_correction=='ystar': 
+            traits = pd.concat([rm_relatedness(C,_t,tdf,grms, svd_input=False)['transformed'] for _t in tdf.columns], axis = 1)
+        elif y_correction is None:  traits = tdf
+        else: raise ValueError(" y_correction has to be in ['blup_resid', 'ystar', None]")
+        if str(C) not in chrunique: chr_alias = read_gen[0].loc[read_gen[0].snp.str.lower().str.startswith(f'{C}:').idxmax(), 'chrom']
+        else: chr_alias = C
+        snps = plink2df(read_gen,c=chr_alias, rfids = traits.index)
+        if not (snps.index == traits.index).all(): 
+            print('reordering snps to align with traits')
+            snps =snps.loc[traits.index]
+        if return_table: 
+            res += [GWA(traits, snps, dtype=dtype, stat=stat, dof='correct')]
+            if save: res[-1].to_parquet(f'{save_path}gwas{C}.parquet.gz', compression='gzip', engine = 'pyarrow',  compression_level=1, use_dictionary=True)
+        else: 
+            if save: GWA(traits, snps, dtype=dtype, stat=stat, dof='correct')\
+                           .to_parquet(f'{save_path}gwas{C}.parquet.gz', compression='gzip',  engine = 'pyarrow',  compression_level=1, use_dictionary=True) #use_byte_stream_split=True
+    if return_table: 
+        if 'pandas' not in dtype: return res
+        return pd.concat(res)
+
+
+def describe_trait_chr(traitdf, grms_folder = 'grm', return_allchrs=False, include_cols = ['transformed', 'blup', 'U', 'D_inv_sqrt', 'h2', 'n_components']):
+    grms = load_all_grms(f'{grms_folder}/*.grm.bin', decompose_grm=False)
+    tdf = traitdf.loc[grms.loc[ 'All', 'subtracted_grm'].index, :]
+    include_cols = list(set(include_cols+['c', 'trait'] ))
+    chrs2run = ['All'] + (grms.index[~grms.index.str.contains('^All$')].to_list() if return_allchrs else [])
+    return pd.DataFrame((pd.Series(rm_relatedness(_c,_t,tdf,grms,  svd_input=False)).loc[include_cols] \
+                                for _c, _t in tqdm(list(itertools.product(chrs2run, tdf.columns)), 
+                                                   leave = True, desc = 'describing: ' + '|'.join(include_cols) )))\
+           .set_index(['c', 'trait'])
+
+def BLUP(traitdf, grms_folder = 'grm', return_allchrs=False):
+    grms = load_all_grms(f'{grms_folder}/*.grm.bin', decompose_grm=False)
+    tdf = traitdf.loc[grms.loc[ 'All', 'subtracted_grm'].index, :]
+    chrs2run = ['All'] + (grms.index[~grms.index.str.contains('^All$')].to_list() if return_allchrs else [])
+    return pd.concat([rm_relatedness(_c,_t,tdf,grms, svd_input=False)['blup'] for _c, _t in tqdm(list(itertools.product(chrs2run, tdf.columns)), leave = True, desc = 'calculating BLUP')], axis = 1)
+
+def ySTAR(traitdf, grms_folder = 'grm', return_allchrs=False):
+    grms = load_all_grms(f'{grms_folder}/*.grm.bin', decompose_grm=False)
+    tdf = traitdf.loc[grms.loc[ 'All', 'subtracted_grm'].index, :]
+    chrs2run = ['All'] + (grms.index[~grms.index.str.contains('^All$')].to_list() if return_allchrs else [])
+    return pd.concat([rm_relatedness(_c,_t,tdf,grms, svd_input=False)['transformed'] for _c, _t in tqdm(list(itertools.product(chrs2run, tdf.columns)), leave = True, desc = 'whittening y')], axis = 1)
+
+def heritability(traitdf, grms_folder = 'grm', return_allchrs=False, svd_input=False, n_components = None):
+    allgrms,res = load_all_grms(f'{grms_folder}/*.grm.bin', decompose_grm=False), []
+    chrs2run = ['All'] + (allgrms.index[~allgrms.index.str.contains('^All$')].to_list() if return_allchrs else [])
+    for _c, _t in tqdm(list(itertools.product(chrs2run, traitdf.columns)), leave = True, desc = 'calculating heritability'):
+        grm_c= allgrms.loc[str(_c),'grm'].to_pandas()
+        _y = traitdf.loc[grm_c.index, _t]
+        params = dict(y = _y, return_SVD=True, n_components = n_components) 
+        params = params | (dict(s = allgrms.loc[str(c),'s'], U = allgrms.loc[str(c),'U']) if svd_input else dict(grm = grm_c))
+        res += [pd.Series(H2SVD(**params) | dict(trait = _t, chrom = _c, n = _y.count()), name = f'{_t}_{_c}').drop(['U', 's'])]
+    return pd.concat(res, axis=1).T
+
+def shuffle_replicates(df,col ,n=500):
+    reps = df[[col]*n]
+    for i in range(1, n):  reps.iloc[:, i] = np.random.permutation(reps.iloc[:, i].values)
+    reps.columns = [f'{col}_ORIGINAL'] + [f'{col}_SHUFFLE{str(i).zfill(3)}' for i in range(1, n)]  
+    return reps
+
+def shuffle_replicates_normal(df,col ,n=500):
+    napct = df[col].isna().mean()
+    r = np.random.RandomState(42)
+    reps =  pd.DataFrame(r.normal(size = (df.shape[0], n)), \
+                         columns = [f'{col}_SHUFFLE{str(i).zfill(3)}' for i in range( n)], \
+                         index = df.index )
+    reps  *=  r.choice([1, np.nan],size =  reps.shape ,   p = [1-napct, napct])
+    return reps

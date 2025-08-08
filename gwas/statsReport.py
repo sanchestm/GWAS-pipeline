@@ -10,7 +10,7 @@ from sklearn.decomposition import PCA
 from umap import UMAP
 from hdbscan import HDBSCAN
 from scipy.spatial.distance import cdist
-from sklearn.preprocessing import QuantileTransformer
+from sklearn.preprocessing import QuantileTransformer,PowerTransformer
 from sklearn.impute import KNNImputer
 from sklearn.pipeline import make_pipeline
 from scipy.stats import norm
@@ -194,6 +194,20 @@ def regress_out_v2(df, variable, covariates, model = LinearRegression()):
 def quantileTrasformEdited(df, columns):
     return (df[columns].rank(axis = 0, method = 'first')/(df[columns].count()+1)).apply(norm.ppf)
 
+def ScaleTransformer(df, columns, method):
+    res = df.copy()
+    if isinstance(method, str):
+        if method == 'passthrough': return res
+        elif method == 'quantile_noties': res = quantileTrasformEdited(res, columns)
+        elif method == 'boxcox': res.loc[:, columns] = PowerTransformer().fit_transform(res.loc[:, columns])
+        elif method == 'quantile': res.loc[:, columns] = QuantileTransformer(n_quantiles = res.shape[0]).fit_transform(res.loc[:, columns])
+        else: print('not normalizing after regressing out covariates options are ("quantile", "boxcox", "passthrough")')
+        return res
+    else:
+        try: res.loc[:, columns] = method.fit_transform(res.loc[:, columns])
+        except: raise TypeError('normalize does not contain a fit_transform method')
+        return res
+    
 class StepWiseRegression():
     def __init__(self, threshold: float = 0.02,estimator=LinearRegression()):
         self.threshold = threshold

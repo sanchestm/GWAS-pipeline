@@ -51,7 +51,7 @@ dependencies:
   - jinja2 #=3.1.2
   - geckodriver
   - tabulate
-  - ensembl-vep=112.0
+  - ensembl-vep
   - pymc[version='>=5']
   - bambi
   - pysam
@@ -82,6 +82,5 @@ dependencies:
     #- pandas-plink>=2.3
     - goatools
     - dash-bio==1.0.1
+    - alphagenome
     #- enformer-pytorch
-
-
