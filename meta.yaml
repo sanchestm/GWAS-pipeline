@@ -96,6 +96,7 @@ requirements:
   pip:
     - goatools
     - dash-bio==1.0.1
+    - alphagenome
 
 test:
   imports:

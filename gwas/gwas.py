@@ -2363,8 +2363,10 @@ def fancy_display(df: pd.DataFrame, download_name: str = 'default.csv', max_widt
     if html_cols:
         html_cols = [c for c in html_cols if c in df.columns]  # guard against missing
         if html_cols: formatters.update({c: {"type": "html"} for c in html_cols})
-    tab_kwargs = dict(pagination='local', page_size=page_size, header_filters=d, layout=layout, show_index=False,
+    tab_kwargs = dict( header_filters=d, layout=layout, show_index=False,
                        formatters=formatters, max_width=max_width, max_height=max_height,  **kws)
+    if len(df)> page_size:
+        tab_kwargs = tab_kwargs | dict( pagination='local', page_size=page_size)
     if not add_sort: tab_kwargs["configuration"] = {"columnDefaults": {"headerSort": False}}
     download_table = pn.widgets.Tabulator(df, **tab_kwargs)
     if flexible:
@@ -6940,7 +6942,7 @@ Threshold Info
         
         cov_card = pn.Card(pn.Card(*covariates_list,  title = 'r<sup>2</sup> between traits and covariates (%)', collapsed=False),\
                            pn.Card(fancy_display(fulldf, download_name = 'full_dataset.csv', flexible = True,
-                                                 cell_font_size=10,  header_font_size=10,max_width=1100, layout = 'fit_data_fill',max_cell_width=120 ),
+                                                 cell_font_size=10,  header_font_size=10,max_width=1400, layout = 'fit_data_fill',max_cell_width=120 ),
                                    title = 'Full dataset', collapsed=True),
                            title = 'Preprocessing', collapsed=True)
         add_metadata(cov_card).save(f'{self.path}images/report_pieces/covariates.html')
@@ -7032,8 +7034,9 @@ Column definitions:
         qtl_cols2display = [x for x in ['TopSNP','start_qtl','end_qtl','interval_size','Freq','F_MISS','GENOTYPES','HWE','beta','betase','-Log10(p)','significance_level','trait'] \
                             if x in qtls.columns]
         qtls = qtls[qtl_cols2display + list(founder_ids & set(qtls.columns)) ]
-        qtls_card = pn.Card(qtlstext, fancy_display(qtls, 'qtls.csv', flexible = True, cell_font_size=10, 
-                                                    header_font_size=10,max_width=1100, layout = 'fit_data_fill',max_cell_width=120 ), title = 'QTL', collapsed=True)
+        qtls_card = pn.Card(qtlstext, fancy_display(qtls.rename({'significance_level':"signif_lvl", 'interval_size':'length'}, axis = 1), 'qtls.csv', flexible = True, cell_font_size=10, 
+                                                    header_font_size=10,max_width=1450, layout = 'fit_data_fill',max_cell_width=120), 
+                            title = 'QTL', collapsed=True)
         add_metadata(qtls_card).save(f'{self.path}images/report_pieces/qtls.html')
         template.main.append(qtls_card)
         
@@ -7054,7 +7057,7 @@ Porcupine plot is a graphical tool that combines multiple Manhattan plots, each 
             printwithlog('generating report... making qqplot section...')
             if not os.path.isfile(f'{self.path}images/qqplot.png') or not static or redo_figs:
                 if len(traits)> 80: qqplot_add_pval_thresh = False
-                qqplotfig = pn.pane.HoloViews(self.qqplot(add_pval_thresh= qqplot_add_pval_thresh),
+                qqplotfig = pn.pane.HoloViews(self.qqplot(add_pval_thresh = qqplot_add_pval_thresh),
                                               max_width=1200, max_height=1200, width = 900, height = 900)
             if static:
                 qqplotfig = pn.pane.PNG(f'{self.path}images/qqplot.png')
@@ -7077,8 +7080,9 @@ To control type I error, we estimated the significance threshold by a permutatio
         
         manhatanfigs = [pn.Card(pn.pane.PNG(f'{self.path}images/manhattan/{trait}.png', max_width=1000, 
                      max_height=600, width = 1000, height = 600), 
-                               fancy_display(qtls.query('trait == @trait'), download_name=f'qtls_in_{trait}.csv',
-                                             flexible = True, cell_font_size=10, header_font_size=12,max_width=1100, layout = 'fit_data_fill',max_cell_width=120 ),
+                               fancy_display(qtls.query('trait == @trait').rename({'significance_level': "signif_lvl", 'interval_size':'length'}, axis = 1), 
+                                             download_name=f'qtls_in_{trait}.csv',add_search = False, add_sort = False,
+                                             flexible = True, cell_font_size=10, header_font_size=12,max_width=1300, layout = 'fit_data_fill',max_cell_width=120 ),
                                 title = trait, collapsed = True) for trait in qtls.trait.unique()]
         
         manhatanfigs2 = [pn.Card(pn.pane.PNG(f'{self.path}images/manhattan/{trait}.png', max_width=1000, 
@@ -7228,7 +7232,7 @@ Defining columns:
             if caulstemp_string: caulstemp_string += '\n' + cau.to_markdown() + '\n'
             else: caulstemp_string = 'none contain high impact variants according to VEP annotation'
             if cau.shape[0]: cau = fancy_display(cau.loc[:, ~cau.columns.str.contains('^PASS')].rename({'distance_qtlsnp_annotsnp': 'distance', 'putative_impact': 'impact'}, axis = 1),
-                                                 download_name=f'CodingVariants_{row.trait}{row.TopSNP}.csv'.replace(':', '_'), flexible = True, cell_font_size=10, header_font_size=12,max_width=1100,max_cell_width=100 )
+                                                 download_name=f'CodingVariants_{row.trait}{row.TopSNP}.csv'.replace(':', '_'), flexible = True, cell_font_size=10, header_font_size=12,max_width=1200,max_cell_width=100 )
             else: cau = pn.pane.Markdown(' \n HIGH or MODERATE impact variants absent \n   \n')
 
             phewas_section = []
