@@ -158,8 +158,7 @@ class stat_check:
         display(self.get_outliers(subset = targets, threshold= outlier_thrs))
         
 def regress_out_covariates(df: pd.DataFrame, covariates: list, variates: list, \
-                           preprocessing = make_pipeline(KNNImputer(), 
-                                                         QuantileTransformer(n_quantiles = 100)) 
+                           preprocessing = make_pipeline(KNNImputer(), QuantileTransformer(n_quantiles = 100)) 
                           ):
     df2 = pd.DataFrame(preprocessing.fit_transform(df[covariates + variates]), 
                        columns = covariates + variates)#
@@ -194,13 +193,13 @@ def regress_out_v2(df, variable, covariates, model = LinearRegression()):
 def quantileTrasformEdited(df, columns):
     return (df[columns].rank(axis = 0, method = 'first')/(df[columns].count()+1)).apply(norm.ppf)
 
-def ScaleTransformer(df, columns, method):
+def ScaleTransformer(df, columns, method= 'quantile'):
     res = df.copy()
     if isinstance(method, str):
         if method == 'passthrough': return res
         elif method == 'quantile_noties': res = quantileTrasformEdited(res, columns)
         elif method == 'boxcox': res.loc[:, columns] = PowerTransformer().fit_transform(res.loc[:, columns])
-        elif method == 'quantile': res.loc[:, columns] = QuantileTransformer(n_quantiles = res.shape[0]).fit_transform(res.loc[:, columns])
+        elif method == 'quantile': res.loc[:, columns] = QuantileTransformer(n_quantiles = res.shape[0], output_distribution='normal').fit_transform(res.loc[:, columns])
         else: print('not normalizing after regressing out covariates options are ("quantile", "boxcox", "passthrough")')
         return res
     else:

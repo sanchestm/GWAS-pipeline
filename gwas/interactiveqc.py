@@ -299,8 +299,8 @@ def megaHeatmap(df, sets, cpallete = ['Greys','OrRd', 'Purples', 'Blues', 'Green
                          for tcol in tempdf.columns)
             fig_lis  = (fig*hv.Labels(fig).opts( text_font_size="5pt", text_color="black" ) for fig in fig_lis)
             fig = reduce(lambda x,y: x*y, fig_lis  )
-        figstack += [fig*labels]
-        figstackna += [df.filter(regex = i).isna().hvplot.heatmap(cmap = 'greys', alpha = 1, rot = 90, colorbar=False)]
+        figstack += [fig.opts(xaxis = 'top')]
+        figstackna += [df.filter(regex = i).isna().hvplot.heatmap(cmap = 'greys', alpha = 1, rot = 90, colorbar=False, xaxis = 'top')]
     
     bigfig = reduce(lambda x,y: x*y, figstack).opts( **bokeh_opts )#"zoom_box",active_tools=['hover']
     bigfigna = reduce(lambda x,y: x*y, figstackna).opts( **bokeh_opts)#active_tools=['hover']

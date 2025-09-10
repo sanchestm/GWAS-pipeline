@@ -356,7 +356,7 @@ def GRM_lowmem(X,*, scale: bool = True, return_weights: bool = False, nan_policy
         else: return {"zzt":toxr(zzt_full, ids),"w":toxr(w_full,ids), "grm":toxr(grm_full,ids)}
     return grm_full if ids is None else toxr(grm_full, ids)
 
-def plink2GRM(plinkfile:str, n_autosomes:int=None, downsample_snps:float = None, downsample_stategy:str = 'equidistant', rfids = None, 
+def plink2GRM(plinkfile:str, n_autosomes:int=None, downsample_snps:float = None, downsample_stategy:str = 'equidistant', rfids = None, chrs_subset = None,
               double_male_x:bool = False, double_y:bool = False, double_mt:bool = False,save_grms_path:bool = None, decompose_grm:bool = False):
     if isinstance(plinkfile, pd.DataFrame):
         load_snps_from_df = True
@@ -378,7 +378,11 @@ def plink2GRM(plinkfile:str, n_autosomes:int=None, downsample_snps:float = None,
         save_grms_path = save_grms_path.rstrip('/')
         if not os.path.isdir(save_grms_path): os.makedirs(save_grms_path, exist_ok=True)
     allgrms = pd.DataFrame(columns = ['grm', 'w', 'zzt'])
-    for c in tqdm(bim.chrom.unique(), desc = 'making grm'):
+    loopchr = bim.chrom.unique()
+    if chrs_subset is not None:
+        chrs_subset = list(map(str, chrs_subset))
+        loopchr     = [x for x in loopchr if str(x) in chrs_subset]
+    for c in tqdm(loopchr, desc = 'making grm'):
         if load_snps_from_df: 
             snps = plinkfile.filter(regex = f'^{c}:')
             if rfids is not None: snps = snps.loc[list(rfids)]
@@ -399,20 +403,21 @@ def plink2GRM(plinkfile:str, n_autosomes:int=None, downsample_snps:float = None,
         else: c2 = c
         filename = f'{save_grms_path}/{c2}chrGRM' if (save_grms_path is not None) else None
         allgrms.loc[str(c2)] = GRM(snps, return_weights=True, savefile=filename)
+        
     allgrms['isnum'] = allgrms.index.str.isnumeric()
-    allzzt = allgrms.loc[allgrms.isnum,'zzt'].sum()
-    allw = allgrms.loc[allgrms.isnum,'w'].sum()    
-    allgrmf = allzzt/allw
-    if save_grms_path is not None:
+    if (save_grms_path is not None) and (chrs_subset is None):
+        allzzt = allgrms.loc[allgrms.isnum,'zzt'].sum()
+        allw = allgrms.loc[allgrms.isnum,'w'].sum()    
+        allgrmf = allzzt/allw
         fam[['iid', 'iid']].to_csv(f"{save_grms_path}/AllchrGRM.grm.id", index = False, header = None, sep = '\t')
         idxs = np.tril_indices_from(allgrmf)
         allgrmf.values[idxs].astype(np.float32).tofile(f"{save_grms_path}/AllchrGRM.grm.bin") 
         allw.values[idxs].astype(np.float32).tofile(f"{save_grms_path}/AllchrGRM.grm.N.bin") 
-    allgrms['subtracted_grm'] = allgrms.progress_apply(lambda x: (allgrmf.to_pandas() if not x.isnum else 
-                                                                 (allzzt - x.zzt)/(allw-x.w).to_pandas()), axis = 1)
-    allgrms.loc['All', ['grm', 'w', 'zzt', 'subtracted_grm']] = (allgrmf, allw, allzzt, allgrmf)
-    allgrms.loc['All','isnum'] = False
-    if decompose_grm:
+        allgrms['subtracted_grm'] = allgrms.progress_apply(lambda x: (allgrmf.to_pandas() if not x.isnum else 
+                                                                     (allzzt - x.zzt)/(allw-x.w).to_pandas()), axis = 1)
+        allgrms.loc['All', ['grm', 'w', 'zzt', 'subtracted_grm']] = (allgrmf, allw, allzzt, allgrmf)
+        allgrms.loc['All','isnum'] = False
+    if decompose_grm and (chrs_subset is None):
         allgrms[['U', 's']] = allgrms.progress_apply(lambda x: grm2Us(x.subtracted_grm.values, n_components=2000)[:2], 
                                                          axis=1, result_type="expand")
     allgrms = allgrms.sort_index(key = lambda idx : idx.str.lower().map({str(i): int(i) for i in range(1000)}|\
@@ -562,7 +567,7 @@ def grm2Us(G, n_components=None):
         if n_components is not None: s, U = s[:n_components], U[:, :n_components]
     return U, s
 
-def load_all_grms(paths, decompose_grm = True):
+def load_all_grms(paths, decompose_grm = True, save_all_grm_if_missing: bool = True):
     from glob import glob
     if isinstance(paths, str): paths = glob(paths)
     allgrms = pd.DataFrame.from_records([read_grm(x.replace('.N', '').replace('.grm.bin', '.grm')) for x in paths])
@@ -570,6 +575,18 @@ def load_all_grms(paths, decompose_grm = True):
     allgrms['path'] = allgrms['path'].str.extract(r'([\d\w]+)chrGRM.')
     allgrms['isnum'] = allgrms['path'].str.isnumeric()
     allgrms = allgrms.set_index('path')
+    if 'All' not in allgrms.index:  
+        allw = allgrms.loc[allgrms.isnum,'w'].sum()    
+        allgrmf = ( allgrms.loc[allgrms.isnum,'grm'] * allgrms.loc[allgrms.isnum,'w'] ).sum() / allw
+        allgrms.loc['All', ['grm', 'w', 'subtracted_grm']] = (allgrmf, allw, allgrmf)
+        if save_all_grm_if_missing:
+            save_grms_path = paths.rsplit('/', 1)[0]
+            allgrms.loc['All','grm'].index.to_series().reset_index(name= '___')\
+                   .to_csv(f"{save_grms_path}/AllchrGRM.grm.id", index = False, header = None, sep = '\t')
+            idxs = np.tril_indices_from(allgrmf)
+            allgrmf.values[idxs].astype(np.float32).tofile(f"{save_grms_path}/AllchrGRM.grm.bin") 
+            allw.values[idxs].astype(np.float32).tofile(f"{save_grms_path}/AllchrGRM.grm.N.bin")
+        
     allgrms_weighted = allgrms.loc["All", 'grm']*allgrms.loc["All", 'w']
     allgrms['subtracted_grm'] = allgrms.progress_apply(lambda x: (allgrms.loc["All", 'grm'] if not x.isnum else 
                                                              (allgrms_weighted - x.grm*x.w)/(allgrms.loc["All", 'w']-x.w)).to_pandas(),
@@ -816,7 +833,7 @@ def GWAS(traitdf, genotypes = 'genotypes/genotypes', grms_folder = 'grm', save =
         else: raise ValueError(" y_correction has to be in ['blup_resid', 'ystar', None]")
         if str(C) not in chrunique: chr_alias = read_gen[0].loc[read_gen[0].snp.str.lower().str.startswith(f'{C}:').idxmax(), 'chrom']
         else: chr_alias = C
-        snps = plink2df(read_gen,c=chr_alias, rfids = traits.index)
+        snps = plink2df(read_gen, c=chr_alias, rfids=traits.index)
         if not (snps.index == traits.index).all(): 
             print('reordering snps to align with traits')
             snps =snps.loc[traits.index]
@@ -829,6 +846,7 @@ def GWAS(traitdf, genotypes = 'genotypes/genotypes', grms_folder = 'grm', save =
     if return_table: 
         if 'pandas' not in dtype: return res
         return pd.concat(res)
+    return
 
 
 def describe_trait_chr(traitdf, grms_folder = 'grm', return_allchrs=False, include_cols = ['transformed', 'blup', 'U', 'D_inv_sqrt', 'h2', 'n_components']):
@@ -878,3 +896,124 @@ def shuffle_replicates_normal(df,col ,n=500):
                          index = df.index )
     reps  *=  r.choice([1, np.nan],size =  reps.shape ,   p = [1-napct, napct])
     return reps
+
+
+def r2toD(r2, snp1maf,snp2maf):
+    return np.sqrt(r2*snp1maf*(1-snp1maf)*snp2maf*(1-snp2maf))
+
+def R2(X, Y= None, return_named = True, return_square = True, statistic = 'r2', dtype = np.float64):
+    if statistic not in ['r2', 'r', 'cov', 'D', 'D2', 'chord']: raise ValueError("statistic has to be in ['r2', 'r', 'cov', 'D', 'D2', 'chord']")
+    x = np.array(X).astype(dtype)
+    xna = (~np.isnan(x)).astype(dtype) ##get all nas
+    xnaax0 = xna.sum(axis = 0)    
+    if statistic in ['D', 'D2']: 
+        p_x = (np.nansum(x, axis=0) / xnaax0)
+        x -= p_x
+        p_x = np.clip(p_x*0.5, 1e-12, 1 - 1e-12)
+    else: x -= (np.nansum(x, axis = 0)/xnaax0) #subtract mean
+    np.nan_to_num(x, copy = False,  nan=0.0, posinf=None, neginf=None ) ### will not affect sums 
+    xstd = np.sqrt(np.sum(x**2, axis = 0)/xnaax0) #estimate std
+    xstd[xstd == 0] = np.nan
+    if Y is None:  
+        y, yna, ystd = x, xna, xstd 
+        if statistic in ['D', 'D2']: p_y = p_x
+    else:
+        y = np.array(Y).astype(dtype)
+        yna = (~np.isnan(y)).astype(dtype) ##get all nas
+        ynaax0 = yna.sum(axis = 0)
+        if statistic in ['D', 'D2']: 
+            p_y = (np.nansum(x, axis=0) / xnaax0)
+            y -= p_y
+            p_y = np.clip(p_y*0.5, 1e-12, 1 - 1e-12)
+        else:  y -= (np.nansum(y, axis = 0)/ynaax0) #subtract mean
+        np.nan_to_num(y, copy = False,  nan=0.0, posinf=None, neginf=None ) ### will not affect sums 
+        ystd = np.sqrt(np.sum(y**2, axis = 0)/ynaax0) #estimate std
+        ystd[ystd == 0] = np.nan
+    xty_w = np.dot(xna.T,yna)
+    xty_w[xty_w == 0] = np.nan
+    res = np.dot(x.T,y) / xty_w
+    if statistic in ['r2', 'D2']: 
+        res = np.clip(np.power(res/np.outer(xstd, ystd), 2), a_min = 0, a_max = 1)
+        if statistic == 'D2': res *= np.outer(p_x*(1-p_x), p_y*(1-p_y))
+    elif statistic in ['r', 'D', 'chord']: 
+        res = np.clip(res/np.outer(xstd, ystd), a_min = -1, a_max = 1)
+        if statistic == 'chord': res = np.sqrt(2*(1-res))
+        if statistic == 'D': res *= np.sqrt(np.outer(p_x*(1-p_x), p_y*(1-p_y)))
+    rindex = X.columns if isinstance(X, pd.DataFrame) else list(range(x.shape[1]))
+    if (Y is None) and isinstance(X, pd.DataFrame): rcolumns = X.columns
+    elif isinstance(Y, pd.DataFrame): rcolumns = Y.columns
+    else: rcolumns = list(range(y.shape[1]))
+    if return_named: 
+        res = pd.DataFrame(res, index = rindex, columns = rcolumns)  
+        if not return_square:
+            res = res.reset_index(names = 'bp1').melt(id_vars = 'bp1', var_name='bp2')
+            chrom = res['bp1'].iloc[0].split(':')[0]
+            pos = len(chrom)+ 1
+            res['c'] = chrom
+            res['distance'] = (res.bp1.str.slice(start=pos).astype(int)  - res.bp2.str.slice(start=pos).astype(int)).abs()
+    return res
+
+from numba import njit, prange
+@njit(parallel=True, fastmath=False)
+def _cityblock_distance(X, Y, axis = 'rows', dtype = np.float32, scale = True):
+    if axis == 'columns': 
+        if Y is None: return _cityblock_distance(X.T, Y = None, axis = 'rows')
+        return _cityblock_distance(X.T, Y.T, axis = 'rows')
+    nx, n = X.shape
+    if Y is not None:
+        ny = Y.shape[0]
+        out = np.full((nx, ny), np.nan, dtype=dtype)
+        for i in prange(nx):
+            for j in range(ny):
+                s = 0.0
+                c = 0
+                for k in range(n):
+                    a,b = X[i, k], Y[j, k]
+                    if not np.isnan(a) and not np.isnan(b):
+                        s += abs(a - b)
+                        c += 1
+                if c > 0: out[i, j] = s if not scale else s/c   
+        return out
+    out = np.full((nx, nx), np.nan, dtype=dtype)
+    for i in prange(nx):
+        for j in range(nx):
+            if i>j: 
+                s = 0.0
+                c = 0
+                for k in range(n):
+                    a,b = X[i, k], X[j, k]
+                    if not np.isnan(a) and not np.isnan(b):
+                        s += abs(a - b)
+                        c += 1
+                if c > 0: 
+                    out[i, j] = s if not scale else s/c  
+                    out[j, i] = out[i, j] 
+            if i == j: 
+                out[i, j] = 0
+    return out
+
+def cityblock(X, Y=None,  axis = 'rows', dtype = np.float32, scale = True):
+    if axis == 'columns':
+        rindex = X.columns if isinstance(X, pd.DataFrame) else list(range(X.shape[1]))
+        if (Y is None) and isinstance(X, pd.DataFrame): rcolumns = X.columns
+        elif isinstance(Y, pd.DataFrame): rcolumns = Y.columns
+        elif Y is None: rcolumns = list(range(X.shape[1]))
+        else:  rcolumns = list(range(Y.shape[1]))
+    if axis == 'rows':
+        rindex = X.index if isinstance(X, pd.DataFrame) else list(range(X.shape[0]))
+        if (Y is None) and isinstance(X, pd.DataFrame): rcolumns = X.index
+        elif isinstance(Y, pd.DataFrame): rcolumns = Y.index
+        elif Y is None: rcolumns = list(range(X.shape[0]))
+        else:  rcolumns = list(range(Y.shape[0]))
+    return pd.DataFrame(_cityblock_distance(X.values if isinstance(X, pd.DataFrame) else X, 
+                                            Y.values  if isinstance(Y, pd.DataFrame) else Y, 
+                                            axis = axis, dtype = dtype, scale = scale), 
+                        index = rindex, columns = rcolumns)
+
+
+
+
+
+
+
+    

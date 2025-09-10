@@ -12,7 +12,7 @@ except ImportError as e:
     try:
         from gwas import gwas as gg
     except ImportError:
-        raise ImportError("Could not import `gwas.gwas`. Make sure your package is installed or the structure is correct.") from e
+        raise ImportError("Could not import gwas.gwasgwas.gwas. Make sure your package is installed or the structure is correct.") from e
 
 runall = 'regressout subset grm h2 gwas db qtl gcorr phewas eqtl sqtl goea locuszoom h2fig report store publish porcupineplot'.replace(' ', '|||')
 run2phewas = 'regressout subset grm h2 gwas db qtl gcorr eqtl sqtl goea locuszoom h2fig'.replace(' ', '|||')
@@ -142,12 +142,12 @@ def main():
         kws = kw(dictionary, 'report_')
         gwas.report(round_version=dictionary['round'], gwas_version=dictionary['gwas_version'], **kws)
         gwas.copy_results() ###essential
-    if dictionary['store']:gwas.store(researcher=dictionary['researcher'],
+    if dictionary['store']: gwas.store(researcher=dictionary['researcher'],
                                       round_version=dictionary['round'], 
                                       gwas_version=dictionary['gwas_version'],  
                                       remove_folders=False) ###essential
     try: 
-        if dictionary['publish']:gwas.copy_results() ###essential
+        if dictionary['publish']: gwas.copy_results() ###essential
     except: 
         print('setting up the minio is necessary')
     if dictionary['phewas_fig']: gwas.make_phewas_figs()
