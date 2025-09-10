@@ -190,17 +190,18 @@ def regress_out_v2(df, variable, covariates, model = LinearRegression()):
     regressedOut = df[variable] - regression.predict(df[covariates])
     return regressedOut.add_prefix('regressedLR_')
 
-def quantileTrasformEdited(df, columns):
-    return (df[columns].rank(axis = 0, method = 'first')/(df[columns].count()+1)).apply(norm.ppf)
+def quantileTrasformEdited(df, columns, ties = 'first'):
+    return (df[columns].rank(axis = 0, method = ties)/(df[columns].count()+1)).apply(norm.ppf)
 
 def ScaleTransformer(df, columns, method= 'quantile'):
     res = df.copy()
     if isinstance(method, str):
         if method == 'passthrough': return res
-        elif method == 'quantile_noties': res = quantileTrasformEdited(res, columns)
+        elif method == 'quantile_noties': res = quantileTrasformEdited(res, columns, ties = 'first')
+        elif method == 'quantile':  res = quantileTrasformEdited(res, columns, ties = 'average')
         elif method == 'boxcox': res.loc[:, columns] = PowerTransformer().fit_transform(res.loc[:, columns])
-        elif method == 'quantile': res.loc[:, columns] = QuantileTransformer(n_quantiles = res.shape[0], output_distribution='normal').fit_transform(res.loc[:, columns])
-        else: print('not normalizing after regressing out covariates options are ("quantile", "boxcox", "passthrough")')
+        elif method == 'quantileTransformer': res.loc[:, columns] = QuantileTransformer(n_quantiles = res.shape[0], output_distribution='normal').fit_transform(res.loc[:, columns])
+        else: print('not normalizing after regressing out covariates options are ("quantile", "boxcox", "passthrough", "quantileTransformer", "quantile_noties")')
         return res
     else:
         try: res.loc[:, columns] = method.fit_transform(res.loc[:, columns])

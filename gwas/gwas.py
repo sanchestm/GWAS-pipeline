@@ -2003,7 +2003,7 @@ def regressoutgb(dataframe: pd.DataFrame, data_dictionary: pd.DataFrame, covaria
     explained_vars = []
     reglist = []
     if not len(groupby): dfohe, groupby = dfohe.assign(tempgrouper = 'A'), ['tempgrouper']
-    for group, gdf in tqdm(dfohe.groupby(groupby)):
+    for group, gdf in tqdm(dfohe.groupby(groupby, observed=False)):
         groupaddon = '|'.join(group)
         if continuousall:
             gdf = gdf.astype({x: float for x in continuousall})
@@ -6939,7 +6939,9 @@ Threshold Info
         fulldf = fulldf.drop(remove_reg, axis = 1, errors = 'ignore')
         
         cov_card = pn.Card(pn.Card(*covariates_list,  title = 'r<sup>2</sup> between traits and covariates (%)', collapsed=False),\
-                           pn.Card(fancy_display(fulldf, download_name = 'full_dataset.csv', flexible = True), title = 'Full dataset', collapsed=True),
+                           pn.Card(fancy_display(fulldf, download_name = 'full_dataset.csv', flexible = True,
+                                                 cell_font_size=10,  header_font_size=10,max_width=1100, layout = 'fit_data_fill',max_cell_width=120 ),
+                                   title = 'Full dataset', collapsed=True),
                            title = 'Preprocessing', collapsed=True)
         add_metadata(cov_card).save(f'{self.path}images/report_pieces/covariates.html')
         template.main.append(cov_card)
@@ -7030,7 +7032,8 @@ Column definitions:
         qtl_cols2display = [x for x in ['TopSNP','start_qtl','end_qtl','interval_size','Freq','F_MISS','GENOTYPES','HWE','beta','betase','-Log10(p)','significance_level','trait'] \
                             if x in qtls.columns]
         qtls = qtls[qtl_cols2display + list(founder_ids & set(qtls.columns)) ]
-        qtls_card = pn.Card(qtlstext, fancy_display(qtls, 'qtls.csv', flexible = True), title = 'QTL', collapsed=True)
+        qtls_card = pn.Card(qtlstext, fancy_display(qtls, 'qtls.csv', flexible = True, cell_font_size=10, 
+                                                    header_font_size=10,max_width=1100, layout = 'fit_data_fill',max_cell_width=120 ), title = 'QTL', collapsed=True)
         add_metadata(qtls_card).save(f'{self.path}images/report_pieces/qtls.html')
         template.main.append(qtls_card)
         
@@ -7040,18 +7043,12 @@ Porcupine plot is a graphical tool that combines multiple Manhattan plots, each 
         skipmanhattan = len(set(map(lambda x: x.replace('regressedlr_',''),traits)) \
                 - set(map(lambda x: basename(x).replace('.png', ''), glob(f'{self.path}images/manhattan/*.png'))) )
         skipmanhattan = True if not skipmanhattan else False
-        print()
         if (not static) or redo_figs or (not os.path.isfile(f'{self.path}images/porcupineplot.png')):
             porcfig = pn.pane.HoloViews(self.porcupineplot(display_figure = False, skip_manhattan=skipmanhattan, traitlist=traits ),\
                                         max_width=1200, max_height=600, width = 1200, height = 600)
         else: 
             printwithlog('generating report... loading already ran porcupinefig...')
             porcfig = pn.pane.PNG(f'{self.path}images/porcupineplot.png')
-        # if static and os.path.isfile(f'{self.path}images/porcupineplot.png') and (not redo_figs):
-        #     porcfig = pn.pane.PNG(f'{self.path}images/porcupineplot.png')
-        # else:
-        #     porcfig = pn.pane.HoloViews(self.porcupineplot(display_figure = False, skip_manhattan=skipmanhattan),max_width=1200, max_height=600, width = 1200, height = 600)
-        #     if static: porcfig = pn.pane.PNG(f'{self.path}images/porcupineplot.png')
         pcp_o = [porcupinetext,porcfig]
         if add_qqplot and (len(traits)< 20):
             printwithlog('generating report... making qqplot section...')
@@ -7079,7 +7076,10 @@ The genomic significance threshold is the genome-wide significance threshold cal
 To control type I error, we estimated the significance threshold by a permutation test, as described in (Cheng and Palmer, 2013).'''
         
         manhatanfigs = [pn.Card(pn.pane.PNG(f'{self.path}images/manhattan/{trait}.png', max_width=1000, 
-                     max_height=600, width = 1000, height = 600), fancy_display(qtls.query('trait == @trait'), download_name=f'qtls_in_{trait}.csv'), title = trait, collapsed = True) for trait in qtls.trait.unique()]
+                     max_height=600, width = 1000, height = 600), 
+                               fancy_display(qtls.query('trait == @trait'), download_name=f'qtls_in_{trait}.csv',
+                                             flexible = True, cell_font_size=10, header_font_size=12,max_width=1100, layout = 'fit_data_fill',max_cell_width=120 ),
+                                title = trait, collapsed = True) for trait in qtls.trait.unique()]
         
         manhatanfigs2 = [pn.Card(pn.pane.PNG(f'{self.path}images/manhattan/{trait}.png', max_width=1000, 
                      max_height=600, width = 1000, height = 600), title = trait, collapsed = True) \
@@ -7193,7 +7193,7 @@ Defining columns:
             if len(ginrange := genes_in_range2.query('SNP_origin.eq(@row.TopSNP)')):
                 girantable = fancy_display(ginrange.fillna(''), download_name= f'genes_in_region__{row.trait}__{snp_doc}.csv', 
                                              add_sort=False, wrap_text='wrap', html_cols=['genebass', 'twashub', 'genecup', 'gwashub', 'RGD', 'genecard'], 
-                                             page_size = 40, cell_font_size=12, header_font_size=14,max_width=1400,  layout = 'fit_data_fill', flexible = True)
+                                             page_size = 40, cell_font_size=10, header_font_size=12,max_width=1200,  layout = 'fit_data_fill', flexible = True)
                 giran = pn.Card(girantable, title = 'Gene Links', collapsed = False, min_width=500)
                 all_genes_string = ', '.join(ginrange.symbol.unique())
             else: 
@@ -7221,12 +7221,14 @@ Defining columns:
             cau_title = pn.pane.Markdown(f"### Coding variants: {row.trait} {row.TopSNP}\n")
             try:cau = ann.query('SNP_qtl == @row.TopSNP and trait == @row.trait')[['SNP','gene','Freq','b','-Log10(p)','R2','DP',\
                                                                                    'putative_impact','consequence','aminoacids','codons','refallele',\
-                                                                                   'distance_qtlsnp_annotsnp','HGVS.c','HGVS.p']].drop_duplicates().sort_values('putative_impact')
+                                                                                   'distance_qtlsnp_annotsnp','HGVS.c','HGVS.p']]\
+                               .drop_duplicates().sort_values('putative_impact')
             except:cau = ann.query('SNP_qtl == @row.TopSNP and trait == @row.trait').drop_duplicates().sort_values('putative_impact')
             caulstemp_string = ', '.join([f'{i[0]} contains {j} {i[1].replace("_variant", "")} variant{"s" if j>1 else "" }' for i,j in cau[['gene', 'consequence']].value_counts().items()])
             if caulstemp_string: caulstemp_string += '\n' + cau.to_markdown() + '\n'
             else: caulstemp_string = 'none contain high impact variants according to VEP annotation'
-            if cau.shape[0]: cau = fancy_display(cau.loc[:, ~cau.columns.str.contains('^PASS')], download_name=f'CodingVariants_{row.trait}{row.TopSNP}.csv'.replace(':', '_'), flexible = True)
+            if cau.shape[0]: cau = fancy_display(cau.loc[:, ~cau.columns.str.contains('^PASS')].rename({'distance_qtlsnp_annotsnp': 'distance', 'putative_impact': 'impact'}, axis = 1),
+                                                 download_name=f'CodingVariants_{row.trait}{row.TopSNP}.csv'.replace(':', '_'), flexible = True, cell_font_size=10, header_font_size=12,max_width=1100,max_cell_width=100 )
             else: cau = pn.pane.Markdown(' \n HIGH or MODERATE impact variants absent \n   \n')
 
             phewas_section = []
