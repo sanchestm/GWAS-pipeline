@@ -3,19 +3,17 @@
 from importlib import metadata as _meta, resources as impl_resources, import_module
 from pathlib import Path
 import subprocess, inspect
-
 try:
-    __version__ = _meta.version(__name__)
-    #icon_path = impl_resources.files('gwas').joinpath("rat.ico")
-    icon_path = Path(__file__).resolve().parent / "rat.ico"
-except _meta.PackageNotFoundError:
     root = Path(__file__).resolve().parent
     icon_path = root / "rat.ico"
     try:
         print('running git describe to get version')
         __version__ = subprocess.check_output(  ["git", "-C", root, "describe", "--tags"], text=True).strip()
     except Exception:  __version__ = "0.0.0+unknown"
-
+except _meta.PackageNotFoundError:
+    __version__ = _meta.version(__name__)
+    #icon_path = impl_resources.files('gwas').joinpath("rat.ico")
+    icon_path = Path(__file__).resolve().parent / "rat.ico"
 print(__version__)
 print('print importing packages...')
 from IPython.display import display
@@ -141,6 +139,9 @@ def combine_duplicated_indexes(df):
     dups = df.index.duplicated()
     return df[~dups].combine_first(df[dups])
 
+def save_bokeh_png(fig, filename, scale_factor=3):
+    export_png(hv.render(fig, backend='bokeh'), filename=filename, scale_factor=scale_factor)
+
 def replace_w_mean(s, lim_l, lim_h):
     return s.where(((lim_l<s) & (s<lim_h)) | s.isna(), 
                    s[(s>lim_l) & (s<lim_h)].mean() )
@@ -177,9 +178,13 @@ def read_csv_zip(path, zippath, file_func = basename, zipfile_func = basename, q
             if print_files: print(gwas_files)
             for gf in tqdm(gwas_files) if len(gwas_files)>10 else gwas_files:
                 with zip_ref.open(gf) as file:
-                    tdf = pd.read_csv(file, **kws).assign(file = file_func(gf),  zipfile = zipfile_func(zppathi) )
-                    if query_string is not None: tdf = tdf.query(query_string)
-                    resi += [tdf]
+                    try:
+                        tdf = pd.read_csv(file, **kws).assign(file = file_func(gf),  zipfile = zipfile_func(zppathi) )
+                        if query_string is not None: tdf = tdf.query(query_string)
+                        resi += [tdf]
+                    except Exception as e:
+                        print(e)
+                        print(f'issues with opening file {file}')
         if resi: res += [pd.concat(resi)]
     if not res: 
         raise FileNotFoundError( f'[Errno 2] No such files or in pattern: {path}')
@@ -4075,7 +4080,7 @@ class gwas_pipe:
         fig = fig.opts(frame_height=900, frame_width=900,title = f'Genetic correlation', xlabel = '', ylabel = '',
                        fontsize={ 'xticks': f'{min(int(7*1.5*30/len(traits)), 20)}pt', 'yticks': f'{min(int(7*1.5*30/len(traits)), 20)}pt'},
                        xrotation=45,invert_yaxis = True, yrotation=45)
-        if save:hv.save(fig, f"{self.path}images/genetic_correlation_matrix2{('_'+order).replace('_cluster', '')}.png")
+        if save: save_bokeh_png(fig,  f"{self.path}images/genetic_correlation_matrix2{('_'+order).replace('_cluster', '')}.png", scale_factor=3)
         return fig
         
     
@@ -4139,7 +4144,7 @@ class gwas_pipe:
                                                          )).opts(xrotation = 45, ylabel = r'Heritability', ylim =yrange,fontsize=fontsizes )
         if save:
             hv.save(fig, f"{self.path}images/heritability_sorted.html")
-            hv.save(fig, f"{self.path}images/heritability_sorted.png")
+            save_bokeh_png(fig,  f"{self.path}images/heritability_sorted.png", scale_factor=3)
         return fig
         
     def BLUP(self,  print_call: bool = False, save: bool = True, frac: float = 1.,traits = [],**kwards):
@@ -4717,7 +4722,7 @@ class gwas_pipe:
                                    ld_window_kb =  12000, nonfounders = '')#.query('R2 > @ldr2')
                     ldSNPS = r2temp.SNP_B.to_list() + [maxp.SNP]
                     start_qtl, end_qtl = r2temp.BP_B.agg(['min', 'max'])
-                    ldSNPS_LEN = (end_qtl - start_qtl)# / 1e6   #r2temp.BP_B.agg(lambda x: (x.max()-x.min())/1e6)
+                    ldSNPS_LEN = (end_qtl - start_qtl)
                     df = df.query('~(@idx - @qtl_dist//2 < index < @idx + @qtl_dist//2) and (SNP not in @ldSNPS)')
                 except:
                     printwithlog('could not run plink...')
@@ -5016,7 +5021,7 @@ class gwas_pipe:
             sns.despine()
             os.makedirs(f'{self.path}images/boxplot/', exist_ok=True)
             plt.tight_layout()
-            plt.savefig(f'{self.path}images/boxplot/boxplot{row.SNP}__{row.trait}.png'.replace(':', '_'), dpi = 72)
+            plt.savefig(f'{self.path}images/boxplot/boxplot{row.SNP}__{row.trait}.png'.replace(':', '_'), dpi = 150)
             if display_plots:  plt.show()
             plt.close()   
 
@@ -5227,7 +5232,7 @@ class gwas_pipe:
             finalfig = (fig+rect).cols(1).opts(title = f'locuszoom Chr{topsnp.Chr} {topsnp.trait} {topsnp.SNP}')
             if save: 
                 os.makedirs(f'{self.path}images/lz/{boundary}', exist_ok = True)
-                hv.save(finalfig, f"{self.path}images/lz/{boundary}/lzi__{topsnp.trait}__{topsnp.SNP}.png".replace(':', '_'))
+                save_bokeh_png(finalfig, f"{self.path}images/lz/{boundary}/lzi__{topsnp.trait}__{topsnp.SNP}.png".replace(':', '_'), scale_factor=3)
                 hv.save(finalfig, f"{self.path}images/lz/{boundary}/lzi__{topsnp.trait}__{topsnp.SNP}.html".replace(':', '_'))
                 #export_png(hv.render(finalfig), filename=f"{self.path}images/lz/{boundary}/lzi__{topsnp.trait}__{topsnp.SNP}.png".replace(':', '_'))
             res[boundary] += [finalfig]
@@ -6136,7 +6141,7 @@ class gwas_pipe:
                     fig = fig.opts(xticks=[((dfs.x.agg(['min', 'max'])).sum()//2 , self.replacenumstoXYMT(names)) for names,dfs in  df_gwas.groupby('Chr')],
                                                    xlim =xrange, ylim=yrange, width = 1200,height = 600,  xlabel='Chromosome',
                                    title = f'{t.replace("regressedlr_", "")} n={self.df["regressedlr_"+ t.replace("regressedlr_", "")].count()} h2={figh2}') 
-                    hv.save(fig, f'{self.path}images/manhattan/{t.replace("regressedlr_", "")}.png')
+                    save_bokeh_png(fig, f'{self.path}images/manhattan/{t.replace("regressedlr_", "")}.png', scale_factor=3)
                 if t in traitlist_new: fdf += [df_gwas]
         fdf = pd.concat(fdf).reset_index(drop = True).sort_values('x')
         fig = []
@@ -6163,7 +6168,7 @@ class gwas_pipe:
         fig.opts(xticks=[((dfs.x.agg(['min', 'max'])).sum()//2 , self.replacenumstoXYMT(names)) for names, dfs in fdf.groupby('Chr')],
                                    xlim =xrange, ylim=yrange, xlabel='Chromosome', shared_axes=False,
                                width=1200, height=600, title = f'porcupineplot',legend_position='right',show_legend=True)
-        if save: hv.save(fig, f'{self.path}images/porcupineplot.png')
+        if save: save_bokeh_png(fig, f'{self.path}images/porcupineplot.png', scale_factor=3)
         if display_figure: 
             display(fig)
             return
@@ -6583,7 +6588,7 @@ The decompositions used also allow to extimate a metric of similarity between th
         
         fig = (fig.opts(ylim = yrange, xlim = xrange) + fig_v.opts(ylim = yrange))
         if save:
-            hv.save(fig, f'{self.path}images/qqplot.png')
+            save_bokeh_png(fig, f'{self.path}images/qqplot.png', scale_factor=3)
             hv.save(fig, f'{self.path}images/qqplot.html')
         return fig
     
@@ -6821,8 +6826,7 @@ The decompositions used also allow to extimate a metric of similarity between th
             threshtext = f'''* {self.genome_version}:{round_version} 10%: {round(self.threshold, 2)}
 * {self.genome_version}:{round_version} 5% : {round(self.threshold05, 2)}'''
                     
-        text_sidepanel = f"""# General Information
-
+        text_sidepanel = f"""<h1> General Information </h1>
 
 * Generated on {datetime.today().strftime('%Y-%m-%d')}
 * Pipeline version *{gwas_version}*
@@ -6836,15 +6840,21 @@ Phenotype Info
 
 Genotype Info
 
-* genotypes version: \n*{self.genome_version}:{round_version}*
+* genotypes version: 
+  *{self.genome_version}:{round_version}*
 
-* number of snps: \nbefore filter *{format(int(params['snpsb4']), ',')}*, \nafter filter *{format(int(params['snpsafter']), ',')}*
+* number of snps: 
+  before filter *{format(int(params['snpsb4']), ',')}*,
+  after filter *{format(int(params['snpsafter']), ',')}*
 
-* genotype missing rate filter: < *{params['geno']}* \n(*{format(int( params['removed_geno']),',')}* snps removed)
+* genotype missing rate filter: < *{params['geno']}*
+  (*{format(int( params['removed_geno']),',')}* snps removed)
 
-* minor allele frequency filter: > *{params['maf']}* \n(*{format(int(params['removedmaf']), ',')}* snps removed)
+* minor allele frequency filter: > *{params['maf']}*
+  (*{format(int(params['removedmaf']), ',')}* snps removed)
 
-* hardy-weinberg equilibrium filter: < *{params['hwe']}* \n(*{format(int(params['removedhwe']), ',')}* snps removed)
+* hardy-weinberg equilibrium filter: < *{params['hwe']}*
+  (*{format(int(params['removedhwe']), ',')}* snps removed)
 <hr>
 
 Threshold Info
@@ -6859,7 +6869,7 @@ Threshold Info
         # favicon = icon_path.read_bytes()
         # favicon = base64.b64encode(favicon).decode("ascii")
         # favicon = f"data:image/x-icon;base64,{favicon}"
-        template = pn.template.BootstrapTemplate(title=f'GWAS REPORT', favicon = icon_path)
+        template = pn.template.BootstrapTemplate(title=f'GWAS REPORT', favicon = icon_path, sidebar_width=300)
         os.makedirs(f'{self.path}images/report_pieces/',exist_ok=True )
         os.makedirs(f'{self.path}images/report_pieces/regional_assoc/',exist_ok=True )
         add_metadata = lambda x: pn.Column(x, pn.pane.Alert(text_sidepanel, alert_type="primary"))
@@ -6910,11 +6920,11 @@ Threshold Info
             fig_exp_vars = explained_vars.dropna(how = 'all').hvplot.heatmap(frame_width = 600, frame_height =600, 
                                                                  cmap= 'reds',line_width =.1, line_color ='black')\
                               .opts(xrotation =45, yrotation = 45)
-            fig_exp_vars *= hv.Labels((explained_vars*100).dropna(how = 'all').round(0).fillna(0).astype(int).reset_index().melt(id_vars= 'trait'), 
-                                      kdims= [ 'covariate', 'trait'], vdims=['value']).opts(text_color = 'black')
-            hv.save(fig_exp_vars, f'{self.path}images/melted_explained_variances.png')
+            fig_exp_vars *= hv.Labels((explained_vars*100).dropna(how = 'all').round(0).fillna(0).astype(int).astype(str).replace('0', '').reset_index().melt(id_vars= 'trait'), 
+                          kdims= [ 'covariate', 'trait'], vdims=['value']).opts(text_color = 'gray', text_font_size = '12px')
+            save_bokeh_png(fig_exp_vars, f'{self.path}images/melted_explained_variances.png', scale_factor=3)
             if static:
-                covariates_list += [pn.pane.PNG(f'{self.path}images/melted_explained_variances.png')]
+                covariates_list += [pn.pane.PNG(f'{self.path}images/melted_explained_variances.png', width = 900)]
             else:
                 covariates_list += [pn.pane.HoloViews(fig_exp_vars)]
         # cov_card = pn.Card( pn.Card(cov_text, pn.pane.Plotly(fig_exp_vars), title = 'Covariate r<sup>2</sup> with traits in percent', collapsed=True),
@@ -6942,7 +6952,7 @@ Threshold Info
         
         cov_card = pn.Card(pn.Card(*covariates_list,  title = 'r<sup>2</sup> between traits and covariates (%)', collapsed=False),\
                            pn.Card(fancy_display(fulldf, download_name = 'full_dataset.csv', flexible = True,
-                                                 cell_font_size=10,  header_font_size=10,max_width=1400, layout = 'fit_data_fill',max_cell_width=120 ),
+                                                 cell_font_size=10,  header_font_size=10,max_width=1300, layout = 'fit_data_fill',max_cell_width=120 ),
                                    title = 'Full dataset', collapsed=True),
                            title = 'Preprocessing', collapsed=True)
         add_metadata(cov_card).save(f'{self.path}images/report_pieces/covariates.html')
@@ -6961,7 +6971,7 @@ Genetic correlation is a statistical concept that quantifies the extent to which
 For the figure, the upper triangle represents the genetic correlation (ranges from [-1:1]), while the lower triangle represents the phenotypic correlation. Meanwhile the diagonal displays the heritability (ranges from [0:1]) of the traits. Hierarchical clustering is performed using [scipy's linkage function](https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.linkage.html) with the genetic correlation. Dendrogram is drawn using [scipy dendrogram](https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.dendrogram.html) where color coding for clusters depends on a distance threshold set to 70% of the maximum linkage distance. Asterisks means that test failed, for genetic relationship the main failure point is if the 2 traits being tested are colinear, while for the phenotypic correlation it's due to no overlapping individuals between the 2 traits.'''
             gcorrorder = 'sorted' if sorted_gcorr else 'cluster' 
             bokehgcorrfig = self.make_genetic_correlation_figure(order = gcorrorder, save = True, traits = traits)
-            if static:gcorrfig = pn.pane.PNG(f"{self.path}images/genetic_correlation_matrix2{('_'+gcorrorder).replace('_cluster', '')}.png")
+            if static:gcorrfig = pn.pane.PNG(f"{self.path}images/genetic_correlation_matrix2{('_'+gcorrorder).replace('_cluster', '')}.png", width = 900)
             else: gcorrfig = pn.pane.HoloViews(bokehgcorrfig)
             #gcorrfig = pn.pane.PNG(f'{self.path}images/genetic_correlation_matrix2{"_sorted" if sorted_gcorr else "cluster"}.png', max_width=1200, max_height=1200, width = 1200, height = 1200)
             try: gcorr = pd.read_csv(f"{self.path}results/heritability/genetic_correlation_melted_table.csv", index_col=0).map(lambda x: round(x, 3) if type(x) == float else x.replace('regressedlr_', ''))
@@ -6989,7 +6999,7 @@ Column definitions:
         #
         printwithlog('generating report... making heritability section...')
         herfig = pn.pane.HoloViews(self.make_heritability_figure(add_classes = add_cluster_color_heritability, traitlist = traits))
-        if static: herfig = pn.pane.PNG(f'{self.path}images/heritability_sorted.png', width = 1000)
+        if static: herfig = pn.pane.PNG(f'{self.path}images/heritability_sorted.png', width = 1200)
             
         her = pd.read_csv(f'{self.path}results/heritability/heritability.tsv', sep = '\t')\
              .set_axis(['trait', 'gen_var', 'env_var', 'phe_var', 'heritability', 'likelihood', 'lrt', 'df', 'pval', 'n', 'heritability_se'], axis = 1).drop(['env_var', 'lrt', 'df'],axis = 1)
@@ -7034,8 +7044,9 @@ Column definitions:
         qtl_cols2display = [x for x in ['TopSNP','start_qtl','end_qtl','interval_size','Freq','F_MISS','GENOTYPES','HWE','beta','betase','-Log10(p)','significance_level','trait'] \
                             if x in qtls.columns]
         qtls = qtls[qtl_cols2display + list(founder_ids & set(qtls.columns)) ]
-        qtls_card = pn.Card(qtlstext, fancy_display(qtls.rename({'significance_level':"signif_lvl", 'interval_size':'length'}, axis = 1), 'qtls.csv', flexible = True, cell_font_size=10, 
-                                                    header_font_size=10,max_width=1450, layout = 'fit_data_fill',max_cell_width=120), 
+        qtls_card = pn.Card(qtlstext, fancy_display(qtls.rename({'significance_level':"signif_lvl", 'interval_size':'length', 'F_MISS': 'miss', 'GENOTYPES': 'geno', 'betase': 'se'}, axis = 1), 
+                                                    'qtls.csv', flexible = True, cell_font_size=10, 
+                                                    header_font_size=10,max_width=1430, layout = 'fit_data_fill',max_cell_width=110), 
                             title = 'QTL', collapsed=True)
         add_metadata(qtls_card).save(f'{self.path}images/report_pieces/qtls.html')
         template.main.append(qtls_card)
@@ -7051,7 +7062,7 @@ Porcupine plot is a graphical tool that combines multiple Manhattan plots, each 
                                         max_width=1200, max_height=600, width = 1200, height = 600)
         else: 
             printwithlog('generating report... loading already ran porcupinefig...')
-            porcfig = pn.pane.PNG(f'{self.path}images/porcupineplot.png')
+            porcfig = pn.pane.PNG(f'{self.path}images/porcupineplot.png', width = 1200)
         pcp_o = [porcupinetext,porcfig]
         if add_qqplot and (len(traits)< 20):
             printwithlog('generating report... making qqplot section...')
@@ -7060,7 +7071,7 @@ Porcupine plot is a graphical tool that combines multiple Manhattan plots, each 
                 qqplotfig = pn.pane.HoloViews(self.qqplot(add_pval_thresh = qqplot_add_pval_thresh),
                                               max_width=1200, max_height=1200, width = 900, height = 900)
             if static:
-                qqplotfig = pn.pane.PNG(f'{self.path}images/qqplot.png')
+                qqplotfig = pn.pane.PNG(f'{self.path}images/qqplot.png', width = 1200)
             pcp_o += [qqplotfig]
         porcupine_card = pn.Card(*pcp_o,  title = 'Porcupine Plot', collapsed=True)
         add_metadata(porcupine_card).save(f'{self.path}images/report_pieces/porcupine.html')
@@ -7080,7 +7091,7 @@ To control type I error, we estimated the significance threshold by a permutatio
         
         manhatanfigs = [pn.Card(pn.pane.PNG(f'{self.path}images/manhattan/{trait}.png', max_width=1000, 
                      max_height=600, width = 1000, height = 600), 
-                               fancy_display(qtls.query('trait == @trait').rename({'significance_level': "signif_lvl", 'interval_size':'length'}, axis = 1), 
+                               fancy_display(qtls.query('trait == @trait').rename({'significance_level':"signif_lvl", 'interval_size':'length', 'F_MISS': 'miss', 'GENOTYPES': 'geno'}, axis = 1), 
                                              download_name=f'qtls_in_{trait}.csv',add_search = False, add_sort = False,
                                              flexible = True, cell_font_size=10, header_font_size=12,max_width=1300, layout = 'fit_data_fill',max_cell_width=120 ),
                                 title = trait, collapsed = True) for trait in qtls.trait.unique()]
@@ -7188,7 +7199,7 @@ Defining columns:
         
         out = [regional_assoc_text]
         printwithlog('generating report... making section per qtl...')
-        for index, row in tqdm(list(qtls.iterrows())):
+        for index, row in qtls.iterrows():
             texttitle = f"Trait: {row.trait} SNP: {row.TopSNP}\n"
             #row_desc = fancy_display(row.to_frame().T)
             row_desc = pn.pane.Markdown(row.to_frame().T.fillna('').set_index('TopSNP').to_markdown())
@@ -7208,8 +7219,8 @@ Defining columns:
                 lzplot2 = pn.Card(pn.pane.JPG(f'''{self.path}images/lz/legacy6m/lz__{row.trait}__{snp_doc}.jpeg''', width = 900),
                               title = 'zoomed out locuszoom', collapsed = True)
             else:
-                lzplot = pn.pane.PNG(f'{self.path}images/lz/r2thresh/lzi__{row.trait}__{snp_doc}.png')
-                lzplot2 = pn.Card(pn.pane.PNG(f'{self.path}images/lz/minmax/lzi__{row.trait}__{snp_doc}.png'),
+                lzplot = pn.pane.PNG(f'{self.path}images/lz/r2thresh/lzi__{row.trait}__{snp_doc}.png', width = 900)
+                lzplot2 = pn.Card(pn.pane.PNG(f'{self.path}images/lz/minmax/lzi__{row.trait}__{snp_doc}.png', width = 900),
                                   pn.pane.JPG(f'''{self.path}images/lz/legacyr2/lz__{row.trait}__{snp_doc}.jpeg''', width = 900),
                                   pn.pane.JPG(f'''{self.path}images/lz/legacy6m/lz__{row.trait}__{snp_doc}.jpeg''', width = 900),
                                   title = 'zoomed out locuszoom', collapsed = True) 
@@ -7242,7 +7253,7 @@ Defining columns:
                 pbothtemp = tdf.query('SNP_QTL == @row.TopSNP and trait_QTL == @row.trait')[['SNP_PheDb','-Log10(p)PheDb','R2', 'DP' ,'trait_PheDb', 'project', 'trait_description_PheDb']].drop_duplicates()
                 if pbothtemp.shape[0]: 
                     phewas_string += ', '.join(pbothtemp.trait_PheDb) + '\n' + pbothtemp.to_markdown() + '\n'
-                    pbothtemp = fancy_display(pbothtemp.fillna(''), download_name=f'phewas_{row.trait}{row.TopSNP}.csv'.replace(':', '_'), flexible = True)
+                    pbothtemp = fancy_display(pbothtemp.fillna(''), download_name=f'phewas_{row.trait}{row.TopSNP}.csv'.replace(':', '_'), flexible = True, max_width=1100)
                 else: pbothtemp = pn.pane.Markdown(f' \n SNPS were not detected for other phenotypes in 3Mb window of topSNP  \n   \n')
                 phewas_section += [pboth_title,pbothtemp]
             if phewas_string: 
@@ -7255,7 +7266,7 @@ Defining columns:
             eqtlstemp_string = ', '.join([f'{i} contains {j} expression QTLs' for i,j in eqtltemp.gene_id.value_counts().items()])
             if eqtlstemp_string: eqtlstemp_string += '\n' + eqtltemp.to_markdown() + '\n'
             else: eqtlstemp_string = 'none contain an expression QTL'
-            if eqtltemp.shape[0]: eqtltemp = fancy_display(eqtltemp.fillna(''),download_name=f'eqtl_{row.trait}{row.TopSNP}.csv'.replace(':', '_'), flexible = True)
+            if eqtltemp.shape[0]: eqtltemp = fancy_display(eqtltemp.fillna(''),download_name=f'eqtl_{row.trait}{row.TopSNP}.csv'.replace(':', '_'), flexible = True, max_width=1100)
             else:eqtltemp = pn.pane.Markdown(f' \n SNPS were not {"tested" if c_num > self.n_autosome else "detected"} for eQTLs in 3Mb window of trait topSNP  \n   \n')
         
             sqtl_title = pn.pane.Markdown(f"### sQTL: Lowest P-values for splice qtls in a 3Mb window of {row.trait} {row.TopSNP}\n")
@@ -7264,22 +7275,91 @@ Defining columns:
             sqtltemp_string = ', '.join([f'{i} contains {j} splice QTLs' for i,j in sqtltemp.gene_id.value_counts().items()])
             if sqtltemp_string: sqtltemp_string += '\n' + sqtltemp.to_markdown() + '\n'
             else: sqtltemp_string = 'none contain an splice QTL'
-            if sqtltemp.shape[0]: sqtltemp = fancy_display(sqtltemp.fillna(''), download_name=f'sqtl_{row.trait}{row.TopSNP}.csv'.replace(':', '_'), flexible = True)
+            if sqtltemp.shape[0]: sqtltemp = fancy_display(sqtltemp.fillna(''), download_name=f'sqtl_{row.trait}{row.TopSNP}.csv'.replace(':', '_'), flexible = True, max_width=1100)
             else: sqtltemp = pn.pane.Markdown(f' \n  SNPS were not {"tested" if c_num > self.n_autosome else "detected"} for sQTLs in 3Mb window of trait topSNP  \n   \n')
 
             dt2append = [giran, cau_title, cau] + phewas_section #+[phe_title,  phetemp, phew_title, phewtemp]
             if self.genome_accession in ['GCF_015227675.2', 'GCF_000001895.5']:
                 dt2append += [eqtl_title, eqtltemp,sqtl_title, sqtltemp]
 
-            question = f'''I performed a GWA study in {self.species.replace("_", " ")} for a certain trait ({row.trait}) and there was \
-a significant SNP at {row.TopSNP}. The region near this significant SNP contains the following genes:\
-{all_genes_string}. Out of these genes, {caulstemp_string}. Out of these genes, {eqtlstemp_string}.\
-Out of these genes, {sqtltemp_string}. {phewas_string}. Given this information and the knowledge about these genes in the literature, \
-could you rank the genes from most likely to least likely to cause the phenotype and explain your decision for the 3 most likely genes?\
-For the most likely gene could do describe the gene and it's role in embryo development and adult homeostasis and behaviour?\
-Last, is there any FDA approved drug known to specifically alter this gene or the pathways in which this gene?\
- Choosing the correct genes is of major importance since the validation with knock-out experiments or with testing the FDA approved drugs will be costly. \
-For your answer please write it in long form as a section for a manuscript and not a itemized version. Please be complete in your answers, the more infomation you can provide about how you arrived at your answer the better.'''.replace('    ', '')
+            question = \
+f"""You are an expert computational geneticist and scientific writer. Write a manuscript-style subsection that prioritizes candidate causal genes at a GWAS locus. Follow the instructions exactly.
+
+INPUT
+- Species: {self.species.replace('_', ' ')}
+- Trait/phenotype: {row.trait}
+- Lead variant (top SNP): {row.TopSNP}
+- Genes within the locus/region: {all_genes_string}
+- Evidence subsets (verifiable facts only):
+  • Putative/curated candidates: {caulstemp_string}
+  • eQTL support: {eqtlstemp_string}
+  • sQTL/isoform support: {sqtltemp_string}
+  • PheWAS/trait associations: {phewas_string}
+
+TASK
+Using ONLY the verifiable facts in INPUT and established knowledge that you are confident about:
+1) Rank ALL listed genes from most to least likely to explain the association at this locus.
+2) Write a continuous, publication-ready narrative (no bullets or numbered lists) that:
+   • Names and justifies the three most likely genes, making clear which evidence is most influential for each.
+   • For the single top gene, concisely describe gene/product function and known roles in embryo development, adult homeostasis, and behavior in {self.species.replace('_', ' ')} or well-conserved orthologs (name orthologs and species when used).
+   • Assess therapeutic tractability: whether FDA-approved drugs or clinical agents directly target the gene or modulate a core pathway it participates in; if none, state so and (if appropriate) mention clinically used pathway-level mechanisms.
+   • Explicitly note important unknowns (e.g., direction of effect, tissue specificity) and what data would resolve them (e.g., colocalization, tissue-resolved e/sQTLs, perturbation assays).
+
+EVIDENCE WEIGHTING (internal—reflect succinctly in prose; do not list as rubric)
+~15% LD/proximity and credible-variant placement within regulatory/genic elements.
+~15% QTL/colocalization plausibility and tissue relevance for {row.trait} (directionality if known).
+~35% Prior biology: pathway membership, perturbation/knockout phenotypes, conserved function.
+~20% Expression specificity across trait-relevant tissues/cell types and developmental stages.
+~15% Druggability/clinical evidence (target class, existing modulators, safety).
+
+CITATION POLICY (strict)
+- Use bracketed numeric citations like [1]
+- Place the citation **immediately after** the clause it supports, including after method mentions (e.g., coloc, SMR/HEIDI, TWAS, SuSiE, FINEMAP, ABC, PCHi-C) [#].
+- If no suitable source exists in the provided lists, write “no direct source identified here” rather than invent one.
+- After the narrative, include a compact “References (cited)” list with the full entries for ONLY the citations actually used, in numerical order.
+- Additionally, include a short “Suggested follow-up reading (not cited)” list of up to 5 items with resource names or safely-verifiable review titles/topics (e.g., GTEx v8 multi-tissue eQTL; ENCODE regulatory annotations; Open Targets Genetics colocalization; Mouse Genome Informatics knockout phenotypes; DrugBank/ChEMBL target class summaries). Do not fabricate DOIs; if unsure, give resource name + topic.
+
+FACTUALITY & CALIBRATION (internal rules; reflect in prose, do not list)
+- Self-consistency: internally draft 3 candidate narratives and select the one that uses the most distinct sources with the fewest “no direct source” segments (ties → choose clearer prose).
+- Hallucination guard: if key claims (top gene mechanism, tissue, or tractability) lack sources, hedge explicitly and propose the next experiment (e.g., coloc, tissue-resolved e/sQTL, CRISPR perturbation).
+- Confidence labels: for the top three genes, use calibrated language (“high/moderate/low confidence based on …”) inside the prose.
+
+STYLE & SAFETY REQUIREMENTS (hard)
+- Length: ~500–900 words; scholarly and precise; avoid over-claiming.
+- Use official gene symbols valid for {self.species.replace('_', ' ')}; when using ortholog evidence, name ortholog and species.
+- Do not invent p-values, effect sizes, credible set sizes, or colocalization probabilities; if unknown, state “not reported here.”
+- If the lead SNP is intragenic, consider that gene carefully but still compare all nearby genes.
+- If direction of effect or tissue is unclear, avoid directional claims and state what data would resolve it.
+- If FDA targeting is ambiguous, discuss pathway-level tractability without asserting specificity.
+- Do NOT output your reasoning steps, checklists, or deliberation.
+
+OUTPUT FORMAT (must match exactly)
+1) Narrative prose section with inline bracketed citations [#] as appropriate.
+2) A single line with the final ranking:
+   Ranked genes (most → least): GENE1 > GENE2 > GENE3 > …
+3) References (cited)
+   [#] Full ref 1
+   [#] Full ref 2
+   ...
+4) Suggested follow-up reading (not cited)
+   • Item 1
+   • Item 2
+   (≤5 items)
+
+QUALITY CONTROL (internal; do not print this checklist)
+- Claims trace to INPUT or widely accepted canonical knowledge you are confident in.
+- Every citation number used in text appears in “References (cited)”; no unused entries.
+- Gene symbols and species labels are correct; orthologs named with species.
+- No fabricated statistics; uncertainties clearly marked.
+- Revise once for concision and logical flow before finalizing.
+- Every nontrivial claim cites a provided source; ≥1 citation per paragraph; method mentions carry a method citation.
+- All ranked symbols exist in Genes within the locus/region; human symbols follow HGNC; orthologs are labeled with species.
+- No invented stats; “not reported here” when absent.
+
+Now produce the manuscript-style narrative, followed by the ranking line, the “References (cited)” list, and the “Suggested follow-up reading (not cited)” list in the exact format specified.
+"""
+
+            question = re.sub('\s+', ' ', question)
             gptanswers = []
             all_models = ["OpenScholar/Llama-3.1_OpenScholar-8B"]
             # "allenai/OLMo-2-1124-13B-Instruct" "meta-llama/Llama-3.2-90B-Vision-Instruct"
@@ -7691,7 +7771,7 @@ Are there sex differences?
         hvg.opts(node_size='size', edge_line_width=1,tools=['hover'], shared_axes=False,
                       node_line_color='black', node_color='color', directed=False,  arrowhead_length=0.01)
         labels = hv.Labels(hvg.nodes, ['x', 'y'], 'index')
-        hv.save(hvg, f'{self.path}images/steiner_tree.html')
+        hv.save(hvg, f'{self.path}images/steiner_tree.html', dpi=400)
         st_description = f''' The steiner tree is the approximately the minimum spanning tree that connects  QTL genes found in this study through the Graph of gene interactions. 
 This tree is useful to find novel genes that bridge the genes initially found. In the future, we can also add extra connections that can account for drug interaction in the same Graph.
 The knowledge Graph used comes from the Harvard's [PrimeKG](https://zitniklab.hms.harvard.edu/projects/PrimeKG/). Examples of papers that use the steiner tree in genomics are:
@@ -9120,6 +9200,9 @@ def make_zip_comparison_report(zip1, zip2, nauto = 20, save = True):
                            zipfile_func=lambda x: basename(x).split('_tsanches_')[-1][:-4] )
     traits_names = traits.groupby('zipfile').file.agg(lambda x: set(x))
     shared_traits = traits_names.agg(lambda x: reduce(lambda a,b: a&b, x)  )
+    if not (shared_traits): 
+        print('no shared traits found')
+        return
     traits = traits[traits.file.isin(shared_traits)]
     herall = read_csv_zip('.*results/heritability/heritability.tsv', zippath=zips2run,
                            file_func= lambda x: basename(x).split('_chrgwas')[0].replace('regressedlr_', ''),
@@ -9215,7 +9298,7 @@ def make_zip_comparison_report(zip1, zip2, nauto = 20, save = True):
     #qtl_fig = hv.Table(qtl_allp.replace(np.nan, '')).opts(width = 700, height = 600)
     qtl_fig = fancy_display(qtl_allp.replace(np.nan, ''), max_width = 1000, max_height=600, layout = 'fit_columns', download_name='qtls_pval_comparison.csv', flexible = True)
     #########################
-    traits2look = r'|'.join('.*results/gwas/regressedlr.*' + qtl_all['trait'] + '.*mlma')
+    traits2look = r'|'.join('.*results/gwas/regressedlr.*' + qtl_all['trait'].replace('', np.nan).dropna() + '.*mlma')
     df_gwas = read_csv_zip(traits2look, zippath=zips2run, sep = '\t',
                            usecols = ['Chr', 'SNP', 'bp', 'p'], 
                            dtype= {'Chr': int, 'SNP': str, 'bp':int, 'p':float},

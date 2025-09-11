@@ -100,7 +100,7 @@ requirements:
 
 test:
   imports:
-    - gwas.gwas 
+    - gwas.core 
     - gwas
 
 about:

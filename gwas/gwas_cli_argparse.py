@@ -7,13 +7,13 @@ import re
 from collections import defaultdict
 
 try:
-    from gwas.gwas import *
+    from gwas.core import *
 except ImportError as e:
     print('Failed to import gwas.gwas; trying local import...')
     try:
-        from gwas import *
+        from . import core as gg
     except ImportError:
-        raise ImportError("Could not import `gwas.gwas`. Make sure your package is installed or the structure is correct.") from e
+        raise ImportError("Could not import `gwas.core`. Make sure your package is installed or the structure is correct.") from e
 import sys
 import pandas as pd
 

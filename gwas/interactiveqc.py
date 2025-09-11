@@ -54,7 +54,7 @@ class interactive_QC:
         self.outdfname = f'raw_data_curated_n{self.dfog.shape[0]}_{datetime.today().strftime("%Y%m%d")}.csv'
 
     def quick_view(self):
-        import statsReport
+        from gwas import statsReport
         if type(self.dffinal) == str: sr = statsReport.stat_check(self.dfog)
         else: sr = statsReport.stat_check(self.dffinal)
         tabs = pn.Tabs(tabs_location='left') 
@@ -153,7 +153,6 @@ class interactive_QC:
                     self.dffinal.loc[rat.name, a_] = eval(b_)
     
         from sklearn.preprocessing import LabelEncoder
-    
         df[self.covs_cat] = df[self.covs_cat].astype(str)
         describedall = df.describe(include = 'all', percentiles = [.05, .1, .9, .95])
         describedall.index = describedall.index + '_all'

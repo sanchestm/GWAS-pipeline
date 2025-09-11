@@ -6,11 +6,11 @@ import pandas as pd
 import sys
 
 try:
-    from . import gwas as gg
+    from . import core as gg
 except ImportError as e:
     print('Failed to import gwas.gwas; trying local import...')
     try:
-        from gwas import gwas as gg
+        from gwas import core as gg
     except ImportError:
         raise ImportError("Could not import gwas.gwasgwas.gwas. Make sure your package is installed or the structure is correct.") from e
 
