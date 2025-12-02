@@ -37,7 +37,6 @@ def main():
     allargs = '|||'.join(sys.argv[1:]).replace('runall', runall).replace('run2phewas', run2phewas).split('|||')
     dictionary = defaultdict(lambda: 0, {k.replace('-', ''):v for k,v in [(x + '=1' if '=' not in x else x).split('=') for x in allargs] })
    
-    
     path = dictionary['path'].rstrip('/') + '/' if (dictionary['path'] ) else ''
     
     pj = dictionary['project'].rstrip('/')  if (dictionary['project'] ) else 'test'
@@ -58,7 +57,7 @@ def main():
     if not dictionary['researcher']: dictionary['researcher'] = 'tsanches'
     if not dictionary['round']: dictionary['round'] = '10.5.2'
             
-    if not dictionary['phewas_path']: dictionary['phewas_path'] = 'phewasdb.parquet.gz'
+    if not dictionary['phewas_path']: dictionary['phewas_path'] = f'{path}phewasdb.parquet.gz'
         
     if not dictionary['regressout']:
         df = pd.read_csv(f'{path}{pj}/processed_data_ready.csv',

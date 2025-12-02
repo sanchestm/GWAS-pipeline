@@ -30,6 +30,7 @@ dependencies:
   - hdbscan
   - ydata-profiling
   - arviz
+  - bcftools
   - prophet
   - lightgbm
   - shap
