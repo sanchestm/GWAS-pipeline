@@ -41,7 +41,7 @@ Last, the main essential file is the data dictionary. It tells the pipeline whic
 
 We use `conda` to manage the installation of all necessary packages. Given the generalist nature of this project, there are a lot of dependencies for which the classic conda solver can be slow. Please consider updating conda and making sure that the solver is `libmamba`. Also consider adding the bioconda and conda-forge channels too.
 
-```
+`
 conda update -n base conda
 conda install -n base conda-libmamba-solver
 conda config --set solver libmamba
@@ -50,21 +50,21 @@ conda config --add channels bioconda
 conda config --add channels conda-forge
 
 
-```
+`
 
 for downloading the GWAS-pipeline use `git clone` and then create the necessary conda environment
 
-```
+`
 git clone https://github.com/sanchestm/GWAS-pipeline.git
-cd GWAS-pipeline
-conda env create -f environment.yml
-```
+conda env create -f GWAS-pipeline/environment.yml
+pip install -e GWAS-pipeline
+`
 
 ## directory management
 
 We suggest following one of these standards for data management to make sure we 
 
-```plaintext
+`plaintext
 path2projects/
 ├── projectname/
 │   ├── raw_data.csv
@@ -74,8 +74,8 @@ path2projects/
 │   ├── geno.fam
 │   ├── geno.bam
 └── phewasdb.parquet.gz
-```
-```plaintext
+`
+`plaintext
 path2projects/
 └── projectname/
    ├── raw_data.csv
@@ -84,15 +84,15 @@ path2projects/
    ├── geno.fam
    ├── geno.bam
    └── phewasdb.parquet.gz
-```
+`
 
 ## CLI
 
 for the `CLI` version of the code we can use the `run` flag or we can list the operations that have to be performed. 
 
-```
+`
 cd GWAS-pipeline
-python gwas_cli.py\
+gwas-cli\
        path=path2projects/ \
        genome_accession=GCF_015227675.2 \
        round=versionofgenotypes\
@@ -102,10 +102,10 @@ python gwas_cli.py\
        threshold=5.4\
        phewas_path=phewasdb.parquet.gz\
        runall
-```
-```
+`
+`
 cd GWAS-pipeline
-python gwas_cli.py\
+gwas-cli\
        path=path2projects/ \
        genome_accession=GCF_015227675.2 \
        round=versionofgenotypes\
@@ -113,8 +113,8 @@ python gwas_cli.py\
        project=projectname\
        threads=8\
        phewas_path=phewasdb.parquet.gz\
-       clear_directories subset h2 db gwas threshold=5.4 qtl store phewas goea eqtl gcorr locuszoom sqtl report gwas_version=0.3 
-```
+       clear_directories subset h2 db gwas threshold=5.4 qtl store phewas goea eqtl gcorr locuszoom sqtl report
+`
 
 
 

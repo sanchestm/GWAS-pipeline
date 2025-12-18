@@ -4,7 +4,7 @@ channels:
   - defaults
   - bioconda
 dependencies:
-  - python=3.12
+#  - python # =3.12
   - pandas
   - fastparquet
   - seaborn
@@ -52,7 +52,7 @@ dependencies:
   - jinja2 #=3.1.2
   - geckodriver
   - tabulate
-  - ensembl-vep
+  - ensembl-vep #=114.2
   - pymc[version='>=5']
   - bambi
   - pysam
@@ -80,8 +80,6 @@ dependencies:
   - accelerate
   - pip
   - pip:
-    #- pandas-plink>=2.3
     - goatools
-    - dash-bio==1.0.1
+    - dash-bio #1.0.1
     - alphagenome
-    #- enformer-pytorch

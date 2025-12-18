@@ -141,6 +141,15 @@ def combine_duplicated_indexes(df):
     dups = df.index.duplicated()
     return df[~dups].combine_first(df[dups])
 
+
+def makeqr(text, fillcolor = 'black', backcolor = 'white'):
+    import qrcode
+    qr = qrcode.QRCode( version=None, box_size=10,border=.1,)
+    qr.add_data(text)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color=fillcolor, back_color=backcolor)
+    return img
+
 def save_bokeh_png(fig, filename, scale_factor=3):
     export_png(hv.render(fig, backend='bokeh'), filename=filename, scale_factor=scale_factor)
 
@@ -5287,8 +5296,8 @@ class gwas_pipe:
             eqtl['SNP'] = eqtl['SNP'].str.replace('chr', '')#\
             eqtl = eqtl.query(f'SNP == "{topsnp.SNP}"')
             eqtl['bp'] = eqtl.SNP_eqtldb.str.extract(r':(\d+)').astype(float)
+            eqtl = eqtl.drop('SNP', errors = 'ignore', axis = 1).merge(data[['SNP', '-lg(P)']], left_on='SNP_eqtldb', right_on='SNP')
             
-            eqtl = eqtl.merge(data[['SNP', '-lg(P)']], left_on='SNP_eqtldb', right_on='SNP')
             if not os.path.isfile(f'{self.path}results/sqtl/pretty_sqtl_table.csv'):
                 printwithlog(f' file {self.path}results/sqtl/pretty_sqtl_table.csv does not exist...') 
                 self.sQTL()
@@ -5296,7 +5305,17 @@ class gwas_pipe:
             sqtl['SNP'] = sqtl['SNP'].str.replace('chr', '')#\
             sqtl = sqtl.query(f'SNP == "{topsnp.SNP}"')
             sqtl['bp'] = sqtl.SNP_sqtldb.str.extract(r':(\d+)').astype(float)
-            sqtl = sqtl.merge(data[['SNP', '-lg(P)']], left_on='SNP_sqtldb', right_on='SNP')
+            sqtl = sqtl.drop('SNP', errors = 'ignore', axis = 1).merge(data[['SNP', '-lg(P)']], left_on='SNP_sqtldb', right_on='SNP')
+
+            if not os.path.isfile(f'{self.path}results/xqtl/pretty_xqtl_table.csv'):
+                printwithlog(f' file {self.path}results/xqtl/pretty_xqtl_table.csv does not exist...') 
+                self.xQTL()
+            xqtl = pd.read_csv(f'{self.path}results/xqtl/pretty_xqtl_table.csv' )
+            xqtl['SNP'] = xqtl['SNP'].str.replace('chr', '')#\
+            xqtl = xqtl.query(f'SNP == "{topsnp.SNP}"')
+            xqtl['bp'] = xqtl.SNP_xqtldb.str.extract(r':(\d+)').astype(float)
+            xqtl = xqtl.drop('SNP', errors = 'ignore', axis = 1).merge(data[['SNP', '-lg(P)']], left_on='SNP_xqtldb', right_on='SNP')
+            
             tsf = topsnp.to_frame().T.rename({'p': '-lg(P)'}, axis = 1)
             rect = self.make_genetrack_figure_( c=topsnp.Chr, pos_start=minval, pos_end=maxval,  frame_width=1000)
             fontsizes = {'title': 40,  'labels': 25,   'xticks': 15,  'yticks': 15 }
@@ -5306,15 +5325,18 @@ class gwas_pipe:
                                     colorbar=True,line_width = 1, padding=0.05, xlabel = '', line_color = 'Black'),
                         'sqtl': dict(color='R2', cmap='Blues', size = 23,alpha = .7, clim= (0,1), marker = 'triangle',tools = ['hover'],
                                     colorbar=True,line_width = 1, padding=0.05, xlabel = '', line_color = 'Black'),
+                        'xqtl': dict(color='R2', cmap='Blues', size = 23,alpha = .7, clim= (0,1),tools = ['hover'],
+                                    colorbar=True,line_width = 1, padding=0.05, xlabel = '', line_color = 'Black'),
                         'phewas': dict(color='R2', cmap='Greys', size = 10,alpha = .7, clim= (0,1), marker = 'square',tools = ['hover'],
                                     colorbar=True,line_width = 1, padding=0.05, xlabel = ''),
                         'causal': dict(color='R2', cmap='Oranges', size = 23,alpha = .7, clim= (0,1), marker = 'diamond',tools = ['hover'],
                                     colorbar=True,line_width = 1, padding=0.05, xlabel = '', line_color = 'Black'),
-                        'tsf': dict(color = 'red', size = 35,alpha = 1, clim= (0,1), marker = 'star',tools = ['hover'],
+                        'tsf': dict(color = 'red', size = 35,alpha = 1, clim= (0,1), marker = 'star_dot',tools = ['hover'],
                                     line_width = 1, padding=0.05, xlabel = '', line_color = 'Black')}
             kw_tabled = {'data': data.query(f'{minval}<bp<{maxval}').sort_values( '-lg(P)'),
                          'eqtl': eqtl.query(f'{minval}<bp<{maxval}').sort_values( '-lg(P)'),
                          'sqtl': sqtl.query(f'{minval}<bp<{maxval}').sort_values( '-lg(P)'),
+                         'xqtl': xqtl.query(f'{minval}<bp<{maxval}').sort_values( '-lg(P)'),
                          'phewas': phewas.query(f'{minval}<bp<{maxval}').sort_values( '-lg(P)'),
                          'causal': causal.query(f'{minval}<bp<{maxval}').sort_values( '-lg(P)'),
                          'tsf': tsf.query(f'{minval}<bp<{maxval}').sort_values( '-lg(P)')}
@@ -5325,6 +5347,13 @@ class gwas_pipe:
                     b = kw_tabled[x].hvplot.scatter(x = 'bp', y = '-lg(P)', color='black',hover = [])\
                                     .opts(line_width=4, size = 18, padding=0.05, xlabel = '' ,frame_width=1000, height=400, color = 'black')
                     fig += [b*a]
+                elif x == 'xqtl':
+                    if len(kw_tabled[x]):
+                        markers ={'isoforms': 'triangle','splicing': 'inverted_triangle','alt_TSS': 'plus', 'expression': 'circle_x','alt_polyA': 'square_cross','stability': 'square_x'}
+                        fig += [reduce(lambda x, y : x*y, 
+                               kw_tabled[x].groupby('xqtl_category')\
+                                   .apply(lambda df: df.assign(xQTL = df.name).hvplot.scatter(x = 'bp', y = '-lg(P)',**kw_table[x],frame_width=1000, height=400, marker = markers[df.name],
+                                                                       hover_cols = list(kw_tabled[x].columns)).opts(**kw_table[x]),include_groups=False))]                    
                 else:
                     fig += [kw_tabled[x].hvplot.scatter(x = 'bp', y = '-lg(P)',**kw_table[x],frame_width=1000, height=400, hover_cols = list(kw_tabled[x].columns)).opts(**kw_table[x]) ]
             fig = reduce(lambda x,y: x*y, fig)  
@@ -5832,8 +5861,6 @@ class gwas_pipe:
                                  'NearbySNP', save = False).rename({'gene': 'gene_phewasdb', 'annotation':'annotation_phewasdb'}, axis = 1)
             table_exact_match = self.annotate(table_exact_match.rename({'A1_QTL':'A1', 'A2_QTL': 'A2','Chr_QTL':'Chr', 'bp_QTL':'bp'}, axis = 1), save = False)\
                                     .rename({'A1': 'A1_QTL', 'A2':'A2_QTL','Chr':'Chr_QTL', 'bp':'bp_QTL'}, axis = 1)
-            # table_exact_match= table_exact_match.assign(**{i:'' for i in set(['gene', 'annotation'])-set(table_window_match.columns)})\
-            #                                     .rename({'gene': 'gene_phewasdb', 'annotation':'annotation_phewasdb'}, axis = 1)
             table_exact_match= table_exact_match.assign(**{i:'' for i in set(['gene', 'annotation'])-set(table_exact_match.columns)})\
                                                  .rename({'gene': 'gene_phewasdb', 'annotation':'annotation_phewasdb'}, axis = 1)
             
@@ -5921,7 +5948,147 @@ class gwas_pipe:
             return 
         interact_manual(phewas_manual_query,loc = cloc, r2_thresh= cr2_thresh, phewas_file=phewas_file)
         return 
+
+    def xQTL(self, qtltable: pd.DataFrame= None,
+            pval_thresh: float = 1e-4,
+            r2_thresh: float = .6,
+            nreturn: int = 1,
+            ld_window: int = 3e6,
+            tissue_list: list = ['Adipose','BLA','Brain','Eye','IL','LHb','Liver','NAcc','OFC','PL','pVTA','RMTg'],
+            xqtl_categories: list = ['isoforms', 'splicing', 'alt_TSS', 'expression', 'alt_polyA','stability'],
+            just_cis = True,
+            annotate = True, **kws)-> pd.DataFrame:
+        """
+        Perform xQTL analysis on a given QTL table by iterating over a list of tissues and searching for cis-acting xQTLs in LD with the QTLs.
         
+        Steps:
+        1. Check if the genome accession is valid for xQTL analysis.
+        2. Read in the QTL table if not provided.
+        3. Iterate over the list of tissues.
+        4. For each tissue, read the xQTL data from a remote file.
+        5. Get the nearby SNPs that are in LD with the QTL using plink.
+        6. Merge the xQTL data with the nearby SNPs.
+        7. Filter the resulting dataframe using the provided p-value threshold and R2 threshold.
+        8. Return the n smallest p-values for each QTL.
+        9. Concatenate the results from all tissues.
+        10. Annotate the xQTL table if the annotate flag is True.
+        11. Save the final xQTL table to a file.
+        12. Make pretty tables and save them.
+        
+        :param qtltable: DataFrame containing QTL information.
+        :param pval_thresh: Float threshold for the p-value of the xQTLs (default is 1e-4).
+        :param r2_thresh: Float threshold for the r-squared value of the xQTLs (default is 0.6).
+        :param nreturn: Integer number of xQTLs to return for each QTL (default is 1).
+        :param ld_window: Integer size of the window around the QTL to search for xQTLs (default is 3e6).
+        :param tissue_list: List of tissues to perform xQTL analysis on (default is a list of specific tissues).
+        :param annotate: Boolean indicating whether to annotate the resulting xQTL table (default is True).
+        :param kwards: Additional keyword arguments.
+        :return: DataFrame containing the annotated xQTL table.
+        """
+        printwithlog(f'starting xqtl ... {self.project_name}')
+        os.makedirs(self.path + 'results/xqtl', exist_ok= True)
+        
+        if self.genome_accession not in ['GCF_036323735.1']:
+            res = pd.DataFrame(columns = ['trait', 'SNP', '-log10(P-value)', 'R2', 'SNP_xqtldb', 'tissue','xqtl_category','-log10(pval_nominal)', 'DP', 'Ensembl_gene',
+                                         'gene_id', 'slope','tss_distance', 'af', 'presence_samples', 'transcript_id'])
+            res.to_csv(f'{self.path}results/xqtl/pretty_xqtl_table.csv', index = False)
+            printwithlog(f'curent genome accession {self.genome_accession} not available for xqtl, valid values are "GCF_036323735.1" ')
+            return res
+        
+        if not (isinstance(qtltable, pd.DataFrame) and len(qtltable)): 
+            printwithlog(f'reading file from {self.path}results/qtls/finalqtl.csv...') 
+            if not os.path.isfile(f'{self.path}results/qtls/finalqtl.csv'):
+                printwithlog(f' file {self.path}results/qtls/finalqtl.csv does not exist, consider running callQTLs...') 
+                return pd.DataFrame(columns = ['trait', 'SNP', '-log10(P-value)', 'R2', 'SNP_xqtldb', 'tissue', \
+                                    '-log10(pval_nominal)', 'DP', 'Ensembl_gene', 'gene_id', 'slope', 'tss_distance', 'af', 'presence_samples'])
+            qtltable = pd.read_csv(f'{self.path}results/qtls/finalqtl.csv')\
+                        .reset_index().drop(['index' ] + [f'level_{x}' for x in range(100)], errors = 'ignore', axis = 1)\
+                        .set_index('SNP').loc[:, : 'significance_level']
+        if 'SNP' in qtltable.columns: qtltable = qtltable.set_index('SNP') 
+        if 'trait' not in qtltable.columns: qtltable['trait'] = 'UNK'
+        if 'bp' not in qtltable.columns:
+            qtltable['bp'] = qtltable.index.str.split(':').str[-1].astype(int)
+        if 'Chr' not in qtltable.columns:
+            qtltable['Chr'] = qtltable.index.str.split(':').str[0].map(self.replaceXYMTtonums)
+        out = []
+        genomeacc2rnv = {'GCF_000001895.5': 'rn6', 'GCF_015227675.2': 'rn7', 'GCF_036323735.1': 'rn8'}
+        
+        Acc_snps = pd.read_csv(f'{self.genotypes_subset}.bim', sep = '\t', header = None, usecols = [1, 4,5], names = ['s', 'A1', 'A2'],
+                               dtype = {'s':str, 'A1':str, 'A2':str}).set_index('s')
+        
+        xqtls = pd.DataFrame(glob('/tscc/projects/ps-palmer/dmunro/ratgtex-server-data-v4/xqtl/*'), columns = ['path'])
+        xqtls = pd.concat([xqtls, xqtls.path.str.split('/').str[-1].str.split('.', expand = True)\
+                                       .set_axis(['cis_trans', 'tissue', 'xqtl', 'version', '_', '__'], axis = 1)],\
+                          axis = 1).drop(['_', '__'], axis = 1)
+        xqtls = xqtls[xqtls.tissue.isin(tissue_list)&xqtls.xqtl.isin(xqtl_categories)]
+        xqtls['cis_trans'] = xqtls['cis_trans'].str.extract('(cis|trans)')
+        if just_cis:  xqtls = xqtls[~xqtls.cis_trans.str.contains('trans')]
+        else:  xqtls['xqtl'] = xqtls['xqtl'] + ':' + xqtls['cis_trans']
+        
+        
+        for idx, xqtl_i in (pbar := tqdm(xqtls.iterrows(), total = len(xqtls))):
+            pbar.set_postfix_str(f'tissue:{xqtl_i.tissue} qtl_category:{xqtl_i.xqtl}')
+            dtypes = {'phenotype_id': str, 'variant_id': str, 'tss_distance': np.int64, 'af': np.float32,
+              'ma_samples':np.int32,'ma_count': np.int32, 'pval_nominal': np.float64,
+              'slope': np.float64,'slope_se': np.float64,'pval_nominal_threshold': np.float64,'gene_id': str,'transcript_id': str}
+            tempdf = pd.read_csv(xqtl_i.path, sep = '\t' ,  index_col=False, on_bad_lines="error", quoting=3, parse_dates=False, comment=None, dtype = dtypes)\
+                             .query('pval_nominal.lt(@pval_thresh)')\
+                             .assign(tissue = xqtl_i.tissue, xqtl_category = f'{xqtl_i.xqtl}')\
+                             .rename({'variant_id': 'SNP_xqtldb'}, axis = 1)
+            tempdf['SNP_xqtldb'] =tempdf.SNP_xqtldb.str.replace('chr', '').astype(str)
+            tempdf = tempdf[tempdf.SNP_xqtldb.isin(Acc_snps.index)].set_index('SNP_xqtldb')
+            if (geneid__transcriptid := tempdf.phenotype_id.str.split('__', expand = True).values).shape[1] == 2:
+                tempdf.loc[:, ['gene_id', 'transcript_id']] = geneid__transcriptid
+                del geneid__transcriptid
+            else:
+                tempdf['gene_id'] = tempdf.phenotype_id
+                tempdf['transcript_id'] = np.nan
+            for  _, row in qtltable.iterrows():
+                out_pd_temp = self.plink(bfile = self.genotypes_subset, chr = row.Chr,ld_snp = row.name,r2 = 'dprime',\
+                                   ld_window = ld_window, thread_num = int(self.threadnum), nonfounders = '')\
+                                  .query(f'R2 > {r2_thresh}')\
+                                  .drop(['CHR_A', 'BP_A', 'CHR_B'], axis = 1)\
+                                  .rename({'SNP_A': 'SNP_QTL', 'SNP_B': 'SNP_xqtldb', 'BP_B': 'bp_xqtldb'}, axis = 1)\
+                                  .assign(**row.to_dict())
+                out +=  [out_pd_temp.merge(tempdf, right_index=True, left_on='SNP_xqtldb', how = 'inner' )\
+                           .groupby('gene_id').apply(lambda x: x.nsmallest(nreturn, 'pval_nominal'), include_groups=False).reset_index()]
+                del out_pd_temp
+            del tempdf
+                            
+        out = pd.concat(out).reset_index(drop=True).drop(['index' ] + [f'level_{x}' for x in range(100)], errors = 'ignore', axis = 1)
+        out = out.merge(Acc_snps.rename(lambda x: x+'_xqtldb', axis = 1), left_on='SNP_xqtldb', right_index=True,  how = 'left')
+        if annotate:  out = self.annotate(out, snpcol='SNP_xqtldb', refcol='A2_xqtldb', altcol='A1_xqtldb', save = False)
+        self.xqtl_path = f'{self.path}results/xqtl/xqtl.csv'
+        out['presence_samples'] = out.ma_samples.astype(str) + '/'+ out.ma_count.astype(str)
+        out.to_csv(self.xqtl_path, index= False)
+        
+        #### make pretty tables
+        xqtl_info = pd.read_csv(self.xqtl_path).rename({'p':'-log10(P-value)'}, axis = 1)
+        xqtl_info['-log10(pval_nominal)'] = -np.log10(xqtl_info['pval_nominal'])
+        try:
+            gsearch = query_gene(xqtl_info.gene_id, self.taxid)\
+                      .rename({'EnsemblRapid': 'Ensembl_gene', 'ensembl': 'Ensembl_gene' }, axis =1)[['Ensembl_gene']].fillna('')
+            if len(gsearch) and len(xqtl_info):
+                xqtl_info = xqtl_info.merge(gsearch,how ='left', left_on='gene_id', right_index=True)
+            else:
+                xqtl_info = xqtl_info.assign(Ensembl_gene = [])     
+        except:
+            printwithlog('previous query gene is missing "EnsemblRapid" getting this information from the "ensembl" column')
+            r = query_gene(xqtl_info.gene_id, self.taxid).ensembl\
+                  .map(lambda x: x[0] if isinstance(x, list) else x)\
+                  .map(lambda x: np.nan if pd.isna(x) else x['gene'])\
+                  .to_frame().set_axis(['Ensembl_gene'], axis = 1)
+            r= r.groupby(r.index).agg(lambda x: y[0] if len(y:=x.dropna().unique()) else '')
+            xqtl_info = xqtl_info.merge(r, how ='left', left_on='gene_id', right_index=True)
+        
+        xqtl_info = xqtl_info.loc[:,  ['trait','SNP_QTL','-log10(P-value)','R2','SNP_xqtldb','tissue', 'xqtl_category', '-log10(pval_nominal)','DP' ,
+                                       'Ensembl_gene','gene_id', 'transcript_id', 'slope' ,'tss_distance', 'af', 'presence_samples']].rename(lambda x: x.replace('_QTL', ''), axis = 1)
+        xqtl_info['Ensembl_gene'] = xqtl_info['Ensembl_gene'].map(lambda x: x['gene'] if isinstance(x, dict) else x)
+        xqtl_info.SNP = 'chr' + xqtl_info.SNP
+        xqtl_info = xqtl_info.drop(['index' ] + [f'level_{x}' for x in range(100)], errors = 'ignore', axis = 1)
+        xqtl_info.to_csv(f'{self.path}results/xqtl/pretty_xqtl_table.csv', index = False)
+        return xqtl_info
+    
     def eQTL(self, qtltable: pd.DataFrame= None,
              pval_thresh: float = 1e-4, r2_thresh: float = .6, nreturn: int = 1, ld_window: int = 3e6,\
             tissue_list: list = ['Adipose','BLA','Brain','Eye','IL','LHb','Liver','NAcc','OFC','PL','pVTA','RMTg'],\
@@ -6026,6 +6193,7 @@ class gwas_pipe:
         eqtl_info = eqtl_info.loc[:,  ['trait','SNP_QTL','-log10(P-value)','R2','SNP_eqtldb','tissue', '-log10(pval_nominal)','DP' ,
                                        'Ensembl_gene','gene_id', 'slope' ,'tss_distance', 'af', 'presence_samples']].rename(lambda x: x.replace('_QTL', ''), axis = 1)
         eqtl_info.SNP = 'chr' + eqtl_info.SNP
+        eqtl_info['Ensembl_gene'] = eqtl_info['Ensembl_gene'].map(lambda x: x['gene'] if isinstance(x, dict) else x)
         eqtl_info = eqtl_info.drop(['index' ] + [f'level_{x}' for x in range(100)], errors = 'ignore', axis = 1)
         eqtl_info.to_csv(f'{self.path}results/eqtl/pretty_eqtl_table.csv', index = False)
         return eqtl_info
@@ -6157,6 +6325,7 @@ class gwas_pipe:
                                        'Ensembl_gene','gene_id', 'slope' , 'af', 'sQTLtype', 'presence_samples']].rename(lambda x: x.replace('_QTL', ''), axis = 1)
         sqtl_info.SNP = 'chr' + sqtl_info.SNP
         sqtl_info = sqtl_info.drop(['index' ] + [f'level_{x}' for x in range(100)], errors = 'ignore', axis = 1)
+        sqtl_info['Ensembl_gene'] = sqtl_info['Ensembl_gene'].map(lambda x: x['gene'] if isinstance(x, dict) else x)
         sqtl_info.to_csv(f'{self.path}results/sqtl/pretty_sqtl_table.csv', index = False)
         return sqtl_info
     
@@ -6487,82 +6656,7 @@ The decompositions used also allow to extimate a metric of similarity between th
 [Principal and independent genomic components of brain structure and function]( https://doi.org/10.1111/gbb.12876) but with a key change, we are using P-values while the original paper uses the GWAS z-scored betas'''
         deliverablef = pn.Card(description, *list(deliverable.values())[::-1], title = 'GWAS Latent Space', collapsed = True)#, width=1000
         return deliverablef, deliverable
-
-    # def annotate(self, qtltable: pd.DataFrame(),
-    #              snpcol: str = 'SNP', save: bool = False, **kwards) -> pd.DataFrame():
-        
-    #     '''
-    #     This function annotates a QTL table with the snpEff tool, 
-    #     which is used to query annotations for QTL and phewas results. 
-                
-    #     Parameters 
-    #     ----------
-
-    #     qtltable: pd.DataFrame
-    #         the QTL table to be annotated
-    #     genome: str = 'rn7'
-    #         the genome to use for annotation (default is 'rn7')
-    #     snpcol: str = 'SNP'
-    #         the column name for the SNP column in the QTL table (default is 'SNP')
-    #     save: bool = True
-    #         a boolean indicating whether to save the annotated table to a file (default is True)
-            
-    #     Design
-    #     ------
-
-    #     The function first defines a dictionary that maps the genome input to the corresponding genome version to use in snpEff.
-    #     It then creates a temporary VCF file from the QTL table by resetting the index, selecting specific columns, 
-    #     and assigning certain values to other columns. The VCF file is then passed through the snpEff tool
-    #     and the results are parsed into a new DataFrame.  If save is True, the final annotated table is saved to a file. 
-    #     The function returns the final annotated table.
-    #     '''
-    #     if not (isinstance(qtltable, pd.DataFrame) and len(qtltable)): 
-    #         printwithlog('dataframe is empty, returning same dataframe')
-    #         return qtltable #qtltable = pd.read_csv(self.allqtlspath).set_index('SNP')
-    #     d = {'rn6': 'Rnor_6.0.99', 'rn7':'mRatBN7.2.105', 'cfw': 'GRCm38.99','m38': 'GRCm38.99'}[self.genome]
-    #     #bash('java -jar snpEff/snpEff.jar download -v Rnor_6.0.99')
-    #     #bash('java -jar snpEff/snpEff.jar download -v mRatBN7.2.105')
-    #     #bash('java -jar snpEff/snpEff.jar download -v GRCm39.105') 
-    #     #bash('java -jar snpEff/snpEff.jar download -v GRCm38.99') 
-    #     qtltable['Chr'] = qtltable['Chr'].map(self.replacenumstoXYMT).map(str.upper)
-    #     temp  = qtltable.reset_index()\
-    #                     .loc[:,[ 'Chr', 'bp', snpcol, 'A2', 'A1']]\
-    #                     .assign(QUAL = 40, FILTER = 'PASS' ,INFO = '', FORMAT = 'GT:GQ:DP:HQ')
-    #     temp.columns = ["##CHROM","POS","ID","REF","ALT", 'QUAL', 'FILTER', 'INFO', 'FORMAT']
-    #     temp['##CHROM'] = 'chr'+ temp['##CHROM'].astype(str)
-    #     vcf_manipulation.pandas2vcf(temp, f'{self.path}temp/test.vcf', metadata='')
-    #     #a = bash(f'java -Xmx8g -jar {self.snpeff_path}snpEff.jar {d} -noStats {self.path}temp/test.vcf', print_call = False )# 'snpefftest',  -no-intergenic -no-intron
-    #     a = bash(f'$CONDA_PREFIX/share/snpeff-5.2-0/snpEff -Xmx8g {d} -noStats {self.path}temp/test.vcf', shell = True, silent = True, print_call = False )
-    #     #a = subprocess.run(f'$CONDA_PREFIX/share/snpeff-5.2-0/snpEff -Xmx8g {d} -noStats {self.path}temp/test.vcf', capture_output = True, shell = True).stdout.decode('ascii').strip().split('\n') 
-    #     res = pd.read_csv(StringIO('\n'.join(a)),  comment='#',  sep =r'\s+', 
-    #                       header=None, names = temp.columns,  dtype=str).query('INFO != "skipping"')  
-    #     ann = res['INFO'].str.replace('ANN=', '').str.split('|',expand=True)
-    #     column_dictionary = defaultdict(lambda: 'UNK', {k:v for k,v in enumerate(['alt_temp', 'annotation', 'putative_impact', 'gene', 'geneid', 'featuretype', 'featureid', 'transcriptbiotype',
-    #                       'rank', 'HGVS.c', 'HGVS.p', 'cDNA_position|cDNA_len', 'CDS_position|CDS_len', 'Protein_position|Protein_len',
-    #                       'distancetofeature', 'errors'])})
-    #     ann = ann.rename(column_dictionary, axis = 1)
-    #     ann.index = qtltable.index
-    #     out = pd.concat([qtltable.loc[:,~qtltable.columns.isin(ann.columns)], ann], axis = 1).replace('', np.nan).dropna(how = 'all', axis = 1).drop('alt_temp', axis = 1, errors ='ignore')
-        
-    #     if 'geneid' in out.columns:
-    #         species = translate_dict(self.genome, {'rn7': 'rat', 'rn8':'rat', 'm38':'mouse', 'rn6': 'rat'})
-    #         gene_translation = {x['query']: x['symbol'] for x in mg.querymany(('-'.join(out.geneid)).split('-') ,\
-    #                        scopes='ensembl.gene,symbol,RGD', fields='symbol', species=self.taxid, verbose = False, silent = True)  if 'symbol' in x.keys()}
-    #         if gene_translation: out['gene'] = out.geneid.map(lambda x: translate_dict(x, gene_translation))
-        
-    #     if 'errors' in out.columns:  out = out.loc[:, :'errors']
-    #     try: 
-    #         out['Chr'] = out['Chr'].map(self.replaceXYMTtonums)
-    #     except:
-    #         print('Chr not in columns, returning with possible errors')
-    #         return out
-    #     if save:
-    #         self.annotatedtablepath = f'{self.path}results/qtls/finalqtlannotated.csv'
-    #         out.reset_index().to_csv(self.annotatedtablepath, index= False) 
-    #         #out.reset_index().to_csv(f'{self.path}results/qtls/finalqtl.tsv', index= False, sep = '\t')
-        
-    #     return out 
-
+    
     def annotate(self, qtltable: pd.DataFrame, snpcol:str = 'SNP',  refcol:str = 'A2',
                 altcol:str = 'A1', save: bool = False, adjustchr =False, silent_annotation = False,
                  vep_distance:int = 30000,vep_buffer:int = 1000000, **kwards) -> pd.DataFrame:
@@ -7284,7 +7378,7 @@ To control type I error, we estimated the significance threshold by a permutatio
         eqtlstext = '' if self.species not in ['rattus_norvegicus'] else f'''## Gene Expression changes:
 
 ### expression QTL (eQTLs) 
-We examine if the identified SNP does significant alter the gene expression of genes in cis, possibly describing a pathway in which the SNP impact the phenotype. We also examine SNPs within 3 Mb window and a r2  above 0.6 of the topSNP from the current study, in case the selected SNP is in high LD with another SNP that can alter the gene expression in cis.
+We examine if the identified SNP does significant alter the gene expression of genes in cis, possibly describing a pathway in which the SNP impact the phenotype. We also examine SNPs within 3 Mb window and a r2 above 0.6 of the topSNP from the current study, in case the selected SNP is in high LD with another SNP that can alter the gene expression in cis.
 
 Defining columns:
 
@@ -7312,7 +7406,27 @@ Defining columns:
 * DP: Dprime measure of linkage disequilibrium (correlation between the SNPs adjusted by the maximum possible correlation between those SNPs)
 * gene: Gene where the SNP_sqtldb influences the gene expression
 * slope: Effect size of the SNP_sqtldb onto the Ensembl_gene
-* af: allele frequency of the SNP_sqtldb'''
+* af: allele frequency of the SNP_sqtldb '''
+
+        if self.genome_accession == 'GCF_036323735.1':
+            eqtlstext = f'''## Gene Expression changes:
+
+### expression QTL (xQTLs) 
+We examine if the identified SNP does significant alter the gene expression of genes in cis, possibly describing a pathway in which the SNP impact the phenotype. We also examine SNPs within 3 Mb window and a r2 above 0.6 of the topSNP from the current study, in case the selected SNP is in high LD with another SNP that can alter the gene expression in cis.
+
+Defining columns:
+
+
+* SNP_xqtldb: SNP from xQTL database in LD with topSNP detected from GWAS 
+* -Log10(p)_xqtldb: -log10(p-value) for the association between the xqtlSNP and the gene in cis described in the column Ensembl_gene
+* tissue: tissue in which the gene expression patterns were measured. Possible tissues are: ['Adipose','BLA','Brain','Eye','IL','LHb','Liver','NAcc','OFC','PL','pVTA','RMTg']
+* xqtl_category: category of gene expression alteration. Possible categories are: ['isoforms', 'splicing', 'alt_TSS', 'expression', 'alt_polyA','stability']
+* R2: correlation between SNP from xQTL database (P-value threshold of 1e-4) and the topSNP for the current study
+* DP: D' measure of linkage disequilibrium (correlation between the SNPs adjusted by the maximum possible correlation between those SNPs)
+* gene: Gene where the SNP_xqtldb influences the gene expression
+* transcript_id: transcript of the gene that is affected
+* slope: Effect size of the SNP_xqtldb onto the Ensembl_gene
+* af: allele frequency of the SNP_xqtldb ''' 
         
         regional_assoc_text = f'''
 # **Regional Association plots**
@@ -7359,11 +7473,17 @@ Defining columns:
         if remove_umap_traits_faq:
             phewas = phewas[~phewas.trait_PheDb.str.contains(r'umap\d|^umap_clust|^pc\d$|^pca_clus')]
         
-        eqtl = pd.read_csv(f'{self.path}results/eqtl/pretty_eqtl_table.csv')\
-                 .rename({'-log10(P-value)':'-Log10(p)', '-log10(pval_nominal)': '-Log10(p)_eqtldb' }, axis =1)
-        
-        sqtl = pd.read_csv(f'{self.path}results/sqtl/pretty_sqtl_table.csv')\
-                 .rename({'-log10(P-value)':'-Log10(p)', '-log10(pval_nominal)': '-Log10(p)_sqtldb' }, axis = 1)
+        if  self.genome_accession == 'GCF_036323735.1':
+            if not os.path.isfile(xqtlpath:=f'{self.path}results/xqtl/pretty_xqtl_table.csv'): self.xQTL()
+            xqtl = pd.read_csv(xqtlpath)\
+                     .rename({'-log10(P-value)':'-Log10(p)', '-log10(pval_nominal)': '-Log10(p)_xqtldb' }, axis = 1)
+            add_xqtls = True
+        else: 
+            if not os.path.isfile(eqtlpath:=f'{self.path}results/eqtl/pretty_eqtl_table.csv'): self.eQTL()
+            eqtl = pd.read_csv(eqtlpath).rename({'-log10(P-value)':'-Log10(p)', '-log10(pval_nominal)': '-Log10(p)_eqtldb' }, axis =1)
+            if not os.path.isfile(sqtlpath:=f'{self.path}results/sqtl/pretty_sqtl_table.csv'): self.sQTL()
+            sqtl = pd.read_csv(sqtlpath).rename({'-log10(P-value)':'-Log10(p)', '-log10(pval_nominal)': '-Log10(p)_sqtldb' }, axis = 1)
+            add_xqtls = False
         
         genes_in_range = pd.read_csv(f"{self.path}results/qtls/genes_in_range.csv")
         genes_in_range2 = self.make_genes_in_range_mk_table().reset_index().drop_duplicates()
@@ -7395,9 +7515,6 @@ Defining columns:
                                   pn.pane.JPG(f'''{self.path}images/lz/legacyr2/lz__{row.trait}__{snp_doc}.jpeg''', width = 900),
                                   pn.pane.JPG(f'''{self.path}images/lz/legacy6m/lz__{row.trait}__{snp_doc}.jpeg''', width = 900),
                                   title = 'zoomed out locuszoom', collapsed = True) 
-            #,  max_width=1200, max_height=4000, width = 1200, height = 800
-            # lztext = pn.pane.Markdown(f'[interactive version](https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/{self.project_name}/images/lz/minmax/lzi__{row.trait}__{snp_doc}.html)')
-            # lztext = pn.pane.Markdown(f'''<a href="https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/{self.project_name}/images/lz/minmax/lzi__{row.trait}__{snp_doc}.html" target="_blank">interactive locuszoom🔗</a>''')
             lztext = pn.widgets.Button(name="interactive locuszoom🔗", button_type="primary",  )
             ilzurl = f'https://palmerlab.s3.sdsc.edu/tsanches_dash_genotypes/gwas_results/{self.project_name}/images/lz/minmax/lzi__{row.trait}__{snp_doc}.html'
             lztext.js_on_click(code=f'window.open("{ilzurl}", "_blank");')
@@ -7430,29 +7547,45 @@ Defining columns:
             if phewas_string: 
                 phewas_string = 'After performing a PheWAS, this QTL also correlates to the following traits: ' + phewas_string
             else: phewas_string = 'After performing a PheWAS, no other traits were detected in this region'
-        
-            eqtl_title = pn.pane.Markdown(f"### eQTL: Lowest P-values for eqtls in a 3Mb window of {row.trait} {row.TopSNP}\n")
-            eqtltemp = eqtl.query(f'SNP == "{"chr"+row.TopSNP}" and trait == "{row.trait}"').rename({'Ensembl_gene': 'gene'}, axis = 1)\
-                           [['SNP_eqtldb', '-Log10(p)_eqtldb', 'tissue', 'R2', 'DP', 'gene', 'gene_id', 'slope', 'af']].drop_duplicates()
-            eqtlstemp_string = ', '.join([f'{i} contains {j} expression QTLs' for i,j in eqtltemp.gene_id.value_counts().items()])
-            if eqtlstemp_string: eqtlstemp_string += '\n' + eqtltemp.to_markdown() + '\n'
-            else: eqtlstemp_string = 'none contain an expression QTL'
-            if eqtltemp.shape[0]: eqtltemp = fancy_display(eqtltemp.fillna(''),download_name=f'eqtl_{row.trait}{row.TopSNP}.csv'.replace(':', '_'), flexible = True, max_width=1100)
-            else:eqtltemp = pn.pane.Markdown(f' \n SNPS were not {"tested" if c_num > self.n_autosome else "detected"} for eQTLs in 3Mb window of trait topSNP  \n   \n')
-        
-            sqtl_title = pn.pane.Markdown(f"### sQTL: Lowest P-values for splice qtls in a 3Mb window of {row.trait} {row.TopSNP}\n")
-            sqtltemp = sqtl.query(f'SNP=="{"chr"+row.TopSNP}" and trait == "{row.trait}"').rename({'Ensembl_gene': 'gene'}, axis = 1)\
-                           [['SNP_sqtldb', '-Log10(p)_sqtldb', 'tissue','R2', 'DP', 'gene','gene_id' , 'slope', 'af']].drop_duplicates()
-            sqtltemp_string = ', '.join([f'{i} contains {j} splice QTLs' for i,j in sqtltemp.gene_id.value_counts().items()])
-            if sqtltemp_string: sqtltemp_string += '\n' + sqtltemp.to_markdown() + '\n'
-            else: sqtltemp_string = 'none contain an splice QTL'
-            if sqtltemp.shape[0]: sqtltemp = fancy_display(sqtltemp.fillna(''), download_name=f'sqtl_{row.trait}{row.TopSNP}.csv'.replace(':', '_'), flexible = True, max_width=1100)
-            else: sqtltemp = pn.pane.Markdown(f' \n  SNPS were not {"tested" if c_num > self.n_autosome else "detected"} for sQTLs in 3Mb window of trait topSNP  \n   \n')
+
+            if add_xqtls:
+                xqtl_title = pn.pane.Markdown(f"### xQTL: Lowest P-values for xqtls in a 3Mb window of {row.trait} {row.TopSNP}\n")
+                xqtltemp = xqtl.query(f'SNP == "{"chr"+row.TopSNP}" and trait == "{row.trait}"').rename({'Ensembl_gene': 'gene'}, axis = 1)\
+                               [['SNP_xqtldb', '-Log10(p)_xqtldb', 'tissue', 'xqtl_category', 'transcript_id', 'R2', 'DP', 'gene', 'gene_id', 'slope', 'af']].drop_duplicates()
+                xqtlstemp_string = ', '.join([f'{i} contains {j} expression QTLs' for i,j in xqtltemp.gene_id.value_counts().items()])
+                if xqtlstemp_string: xqtlstemp_string += '\n' + xqtltemp.to_markdown() + '\n'
+                else: xqtlstemp_string = 'none contain an expression QTL'
+                if xqtltemp.shape[0]: xqtltemp = fancy_display(xqtltemp.fillna(''),download_name=f'xqtl_{row.trait}{row.TopSNP}.csv'.replace(':', '_'), flexible = True, max_width=1100)
+                else:xqtltemp = pn.pane.Markdown(f' \n SNPS were not {"tested" if c_num > self.n_autosome else "detected"} for xQTLs in 3Mb window of trait topSNP  \n   \n')
+                question_xqtl_support =  f'''  • xQTL/expression support: {xqtlstemp_string}'''
+                
+            else:
+                eqtl_title = pn.pane.Markdown(f"### eQTL: Lowest P-values for eqtls in a 3Mb window of {row.trait} {row.TopSNP}\n")
+                eqtltemp = eqtl.query(f'SNP == "{"chr"+row.TopSNP}" and trait == "{row.trait}"').rename({'Ensembl_gene': 'gene'}, axis = 1)\
+                               [['SNP_eqtldb', '-Log10(p)_eqtldb', 'tissue', 'R2', 'DP', 'gene', 'gene_id', 'slope', 'af']].drop_duplicates()
+                eqtlstemp_string = ', '.join([f'{i} contains {j} expression QTLs' for i,j in eqtltemp.gene_id.value_counts().items()])
+                if eqtlstemp_string: eqtlstemp_string += '\n' + eqtltemp.to_markdown() + '\n'
+                else: eqtlstemp_string = 'none contain an expression QTL'
+                if eqtltemp.shape[0]: eqtltemp = fancy_display(eqtltemp.fillna(''),download_name=f'eqtl_{row.trait}{row.TopSNP}.csv'.replace(':', '_'), flexible = True, max_width=1100)
+                else:eqtltemp = pn.pane.Markdown(f' \n SNPS were not {"tested" if c_num > self.n_autosome else "detected"} for eQTLs in 3Mb window of trait topSNP  \n   \n')
+            
+                sqtl_title = pn.pane.Markdown(f"### sQTL: Lowest P-values for splice qtls in a 3Mb window of {row.trait} {row.TopSNP}\n")
+                sqtltemp = sqtl.query(f'SNP=="{"chr"+row.TopSNP}" and trait == "{row.trait}"').rename({'Ensembl_gene': 'gene'}, axis = 1)\
+                               [['SNP_sqtldb', '-Log10(p)_sqtldb', 'tissue','R2', 'DP', 'gene','gene_id' , 'slope', 'af']].drop_duplicates()
+                sqtltemp_string = ', '.join([f'{i} contains {j} splice QTLs' for i,j in sqtltemp.gene_id.value_counts().items()])
+                if sqtltemp_string: sqtltemp_string += '\n' + sqtltemp.to_markdown() + '\n'
+                else: sqtltemp_string = 'none contain an splice QTL'
+                if sqtltemp.shape[0]: sqtltemp = fancy_display(sqtltemp.fillna(''), download_name=f'sqtl_{row.trait}{row.TopSNP}.csv'.replace(':', '_'), flexible = True, max_width=1100)
+                else: sqtltemp = pn.pane.Markdown(f' \n  SNPS were not {"tested" if c_num > self.n_autosome else "detected"} for sQTLs in 3Mb window of trait topSNP  \n   \n')
+                question_xqtl_support = f'''  • eQTL support: {eqtlstemp_string}
+  • sQTL/isoform support: {sqtltemp_string}'''               
 
             dt2append = [giran, cau_title, cau] + phewas_section #+[phe_title,  phetemp, phew_title, phewtemp]
             if self.genome_accession in ['GCF_015227675.2', 'GCF_000001895.5']:
                 dt2append += [eqtl_title, eqtltemp,sqtl_title, sqtltemp]
-
+            elif self.genome_accession in ['GCF_036323735.1']:
+                dt2append += [xqtl_title, xqtltemp]
+            # - Trait description: {row.trait_description}
             question = \
 f"""You are an expert computational geneticist and scientific writer. Write a manuscript-style subsection that prioritizes candidate causal genes at a GWAS locus. Follow the instructions exactly.
 
@@ -7463,9 +7596,8 @@ INPUT
 - Genes within the locus/region: {all_genes_string}
 - Evidence subsets (verifiable facts only):
   • Putative/curated candidates: {caulstemp_string}
-  • eQTL support: {eqtlstemp_string}
-  • sQTL/isoform support: {sqtltemp_string}
   • PheWAS/trait associations: {phewas_string}
+{question_xqtl_support}
 
 TASK
 Using ONLY the verifiable facts in INPUT and established knowledge that you are confident about:
@@ -7952,7 +8084,7 @@ The knowledge Graph used comes from the Harvard's [PrimeKG](https://zitniklab.hm
         return pn.Card(st_description, hvg, title='Steiner tree', collapsed=True)
 
     def project_graph_view(self, append_nearby_genes: bool = False, add_gene_enriched: bool = False, add_phewas: bool = True,
-                           add_eqtl: bool = True,add_sqtl: bool = True,add_variants: bool = True, obj2return: str = 'image'):
+                           add_eqtl: bool = True,add_sqtl: bool = True,add_xqtl: bool = True, add_variants: bool = True, obj2return: str = 'image'):
         """
         Generate a project graph view based on various genetic and genomic data.
     
@@ -7992,10 +8124,13 @@ The knowledge Graph used comes from the Harvard's [PrimeKG](https://zitniklab.hm
         
         sqtl = pd.read_csv(f'{self.path}results/sqtl/pretty_sqtl_table.csv')\
                  .rename({'-log10(P-value)':'-Log10(p)', '-log10(pval_nominal)': '-Log10(p)_sqtldb' }, axis = 1)
+
+        xqtl = pd.read_csv(f'{self.path}results/xqtl/pretty_xqtl_table.csv')\
+                 .rename({'-log10(P-value)':'-Log10(p)', '-log10(pval_nominal)': '-Log10(p)_sqtldb' }, axis = 1)
         
         qtls =  pd.read_pickle(f'{self.path}results/geneEnrichment/gene_enrichmentqtls.pkl') 
         merged_qtls =  pd.read_pickle(f'{self.path}results/geneEnrichment/gene_enrichment_mergedqtls.pkl') 
-        for tdf in [phewas_exact, ann, phewas, eqtl, sqtl, qtls, merged_qtls]:
+        for tdf in [phewas_exact, ann, phewas, eqtl, sqtl, xqtl, qtls, merged_qtls]:
             try:tdf.loc[:, tdf.columns.str.contains('SNP')] = tdf.loc[:, tdf.columns.str.contains('SNP')].map(lambda x: x.replace('chr', '') if type(x)== str else x)
             except:tdf.loc[:, tdf.columns.str.contains('SNP')] = tdf.loc[:, tdf.columns.str.contains('SNP')].applymap(lambda x: x.replace('chr', '') if type(x)== str else x)
         
@@ -8098,6 +8233,26 @@ The knowledge Graph used comes from the Harvard's [PrimeKG](https://zitniklab.hm
                         MG.nodes[row.gene_id]['what']['gene_eQTL'] +=  1
                         MG.nodes[row.gene_id]['size'] += 10
                     MG.add_edges_from([(row.SNP_eqtldb, row.gene_id)], weight=float(row['-Log10(p)_eqtldb']*row.R2), type = 'eqtlsnp2eqtlgene')#
+
+        if add_xqtl:
+            for _, row in xqtl.iterrows():
+                if not MG.has_node(row.SNP_xqtldb): 
+                    MG.add_node(row.SNP_xqtldb, what = defaultdict(int, {'xQTL': 1}), size = max(8,row['-Log10(p)']), R2 = row.R2, 
+                                    tissue =  row.tissue , p = row['-Log10(p)'], color = 'black', trait = row.trait,
+                                gene = row.gene_id, sqtlp = row['-Log10(p)_xqtldb'])
+                else:  
+                    MG.nodes[row.SNP_xqtldb]['what']['xQTL'] +=  1
+                    MG.nodes[row.SNP_xqtldb]['size'] += 7
+                MG.add_edges_from([(row.SNP.replace("chr", ''), row.SNP_xqtldb)], weight=float(row['-Log10(p)_xqtldb']*row.R2), type = 'snp2xqtl')
+            
+                if ~pd.isna(row.gene_id) and str(row.gene_id) != 'nan':
+                    if not MG.has_node(row.gene_id): 
+                        MG.add_node(row.gene_id, what = defaultdict(int, {'gene_xQTL': 1}), size=max(8,row['-Log10(p)']), R2 = row.R2, 
+                                    tissue=row.tissue, p=row['-Log10(p)'], color='seagreen', trait=row.trait, gene=row.gene_id, xqtlp=row['-Log10(p)_xqtldb'])
+                    else:  
+                        MG.nodes[row.gene_id]['what']['gene_xQTL'] +=  1
+                        MG.nodes[row.gene_id]['size'] += 10
+                    MG.add_edges_from([(row.SNP_xqtldb, row.gene_id)], weight=float(row['-Log10(p)_xqtldb']*row.R2), type = 'xqtlsnp2xqtlgene')#
         
         if add_sqtl:
             for _, row in sqtl.iterrows():
@@ -8307,15 +8462,18 @@ The knowledge Graph used comes from the Harvard's [PrimeKG](https://zitniklab.hm
         hdbfig, r2fig = UMAP_res['figures'][:2]
         add_lis = []
         for num, i in enumerate([f'{self.path}results/eqtl/pretty_eqtl_table.csv',
-                                 f'{self.path}results/sqtl/sqtl_table.csv',
+                                 f'{self.path}results/sqtl/pretty_sqtl_table.csv',
+                                 f'{self.path}results/xqtl/pretty_xqtl_table.csv'
                                  f'{self.path}results/phewas/pretty_table_both_match.tsv']):
             if os.path.exists(i): 
-                _ = pd.read_csv(i, sep = '\t' if i[-3:] == 'tsv' else ',').rename({'NearbySNP': 'SNP', 'SNP_PheDb': 'SNP'}, axis = 1)
+                _ = pd.read_csv(i, sep = '\t' if i[-3:] == 'tsv' else ',')\
+                      .drop('SNP', axis = 1, errors = 'ignore')\
+                      .rename({'SNP_PheDb': 'SNP', 'SNP_sqtldb': 'SNP', 'SNP_eqtldb': 'SNP', 'SNP_xqtldb': 'SNP'}, axis = 1)
             else: _ = pd.DataFrame(columns = ['SNP', "NONE"])
             if len(tdf := hdbclus.merge(_.set_index('SNP'), suffixes = ('', '_D'),
                              left_index = True,  right_index=True, 
                              how = 'inner')):
-                ff_ = tdf.reset_index(names = 'SNP').hvplot.scatter(x = 'bp', y= 'clusternum', marker = ['diamond', 'triangle', 'square'][num], size = 200,
+                ff_ = tdf.reset_index(names = 'SNP').hvplot.scatter(x = 'bp', y= 'clusternum', marker = ['diamond', 'triangle', 'square', 'square'][num], size = 200,
                                     color = 'gray', line_color = 'white', hover_cols = _.columns.to_list())
                 add_lis += [ff_]
         if len(tdf := hdbclus.merge(qtlssm.set_index('SNP'), suffixes = ('', '_D'),

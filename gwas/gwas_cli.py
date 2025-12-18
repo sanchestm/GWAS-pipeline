@@ -132,9 +132,10 @@ def main():
         gwas.make_heritability_figure()
     if dictionary['manhattanplot'] or dictionary['porcupineplot']: gwas.porcupineplot() ###essential
     if dictionary['phewas']:gwas.phewas(annotate=True, pval_threshold = 1e-4, nreturn = 1, r2_thresh = .65)  ###essential
-    if dictionary['eqtl']:gwas.eQTL(annotate= True) ###essential
-    if dictionary['sqtl']:gwas.sQTL(annotate= True) ###essential
-    if dictionary['goea']:gwas.GeneEnrichment() ###essential
+    if dictionary['eqtl']:gwas.eQTL(annotate= True, **kw(dictionary, 'eqtl_')) ###essential
+    if dictionary['sqtl']:gwas.sQTL(annotate= True, **kw(dictionary, 'sqtl_')) ###essential
+    if dictionary['xqtl']:gwas.xQTL(annotate= True, **kw(dictionary, 'xqtl_')) ###essential
+    if dictionary['goea']:gwas.GeneEnrichment(**kw(dictionary, 'goea_')) ###essential
     if dictionary['locuszoom']: gwas.locuszoom(**kw(dictionary, 'locuszoom_'))  ###essential
     if dictionary['h2fig']: gwas.make_heritability_figure() 
     if dictionary['report']:

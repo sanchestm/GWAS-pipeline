@@ -13,13 +13,16 @@ build:
   noarch: python
   number: 0
   script: build.sh
+  entry_points:
+    - gwas-cli = gwas.gwas_cli:main
+    - gwas-cli-argparse = gwas.gwas_cli_argparse:main
 
 requirements:
   build:
     - python
     - pip
   run:
-    - python >=3.10,<3.13
+    - python=3.12
     - pandas
     - fastparquet
     - seaborn
@@ -34,7 +37,6 @@ requirements:
     - pyarrow
     - plink
     - plink2
-    - snpeff
     - dask-jobqueue
     - gcta
     - plotly
@@ -66,7 +68,7 @@ requirements:
     - jinja2 #=3.1.2
     - geckodriver
     - tabulate
-    - ensembl-vep=112.0
+    - ensembl-vep=114.2
     - pymc[version='>=5']
     - bambi
     - pysam
@@ -95,7 +97,7 @@ requirements:
     - pip
   pip:
     - goatools
-    - dash-bio==1.0.1
+    - dash-bio
     - alphagenome
 
 test:
