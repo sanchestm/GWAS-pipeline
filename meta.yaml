@@ -7,7 +7,7 @@ package:
 
 source:
   url: https://github.com/sanchestm/GWAS-pipeline/archive/refs/tags/{{ version }}.tar.gz
-  sha256: f7dc951f032b8c3ee9d02da2d51d6adc1a981a6800b6220414026eb2f782598b
+  sha256: da237098c7ad979c3cce3bfc92ff579214ff6cdc124495d0e6ac9e7254861fb0
 
 build:
   noarch: python
