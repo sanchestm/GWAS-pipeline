@@ -67,7 +67,7 @@ from time import sleep, time
 from tqdm import tqdm
 from umap import UMAP
 import base64
-import dash_bio as dashbio
+# import dash_bio as dashbio
 import dask
 import dask.bag as db
 import dask.array as da
@@ -2857,7 +2857,7 @@ class gwas_pipe:
                 else: printwithlog('significance threshold not calculated yet, will be performed after subseting the genotypes')
         
     def clear_directories(self, folders: list = ['data', 'genotypes', 'grm', 'log', 'logerr', 'images/',
-                                            'temp', 'results/heritability', 'results/preprocessing',
+                                            'temp', 'results/heritability', 'results/preprocessing', 'pvalthresh',
                                              'results/gwas',  'results/loco', 'results/qtls','results/eqtl','results/sqtl',
                                                   'results/phewas','results/cojo','results/BLUP', 'results/lz/']):
         """
@@ -3786,13 +3786,13 @@ class gwas_pipe:
                            evec.rename(lambda x: str(x)).iloc[:, :5]], axis = 1).corr()
         _ = cgram.columns.str.startswith('gPC')
         cgram = cgram.loc[_, ~_].T.fillna(0)
-        fig2 = dashbio.Clustergram(cgram, center_values = False, column_labels=cgram.columns.to_list(), row_labels=cgram.index.to_list() , color_map = 'RdBu', line_width = 1, )
-        fig2.update_layout( width=1200,height=1000,autosize=False, template = 'simple_white',
-                         coloraxis_colorbar_x=1.05,coloraxis_colorbar_y = .4,coloraxis_colorbar_len = .8)
+        #fig2 = dashbio.Clustergram(cgram, center_values = False, column_labels=cgram.columns.to_list(), row_labels=cgram.index.to_list() , color_map = 'RdBu', line_width = 1, )
+        #fig2.update_layout( width=1200,height=1000,autosize=False, template = 'simple_white',
+        #                 coloraxis_colorbar_x=1.05,coloraxis_colorbar_y = .4,coloraxis_colorbar_len = .8)
         
-        return pn.Card(pn.Card(fig, title = 'genetic PCA', collapsed = True), 
-                pn.Card(fig2, title = 'correlation between genomic PCs and Traits', collapsed = True), 
-                title = 'Genomic PCA', collapsed = True)
+        return pn.Card(pn.Card(fig, title = 'genetic PCA', collapsed = True),   title = 'Genomic PCA', collapsed = True)
+                #pn.Card(fig2, title = 'correlation between genomic PCs and Traits', collapsed = True), 
+              
     
     def scattermatrix(self, traitlist: list = []):
         """
@@ -7662,7 +7662,7 @@ QUALITY CONTROL (internal; do not print this checklist)
 Now produce the manuscript-style narrative, followed by the ranking line, the “References (cited)” list, and the “Suggested follow-up reading (not cited)” list in the exact format specified.
 """
 
-            question = re.sub('\s+', ' ', question)
+            question = re.sub(r'\s+', ' ', question)
             gptanswers = []
             all_models = ["OpenScholar/Llama-3.1_OpenScholar-8B"]
             # "allenai/OLMo-2-1124-13B-Instruct" "meta-llama/Llama-3.2-90B-Vision-Instruct"
@@ -8957,11 +8957,12 @@ def generate_umap_chunks(chrom, win: int = int(2e6), overlap: float = .5,
 
 from sklearn.model_selection import KFold, cross_validate
 from sklearn.base import clone
+from sklearn.metrics import get_scorer_names
 class LGBMImputer:
     def __init__(self, window = 100, qc:bool = True, device = 'cpu', classifier = None, regressor = None, silent = False) :
         #force_col_wise=True,
-        self.map_score = {True:[ 'explained_variance', 'max_error',  'neg_mean_absolute_error', 'r2'],
-            False:['accuracy', 'balanced_accuracy',  'f1_weighted'] } # 'precision_weighted',  'recall_weighted', 'roc_auc_ovo'
+        self.map_score = {True:list(set(get_scorer_names())&set([ 'explained_variance', 'neg_max_error',  'neg_mean_absolute_error', 'r2'])),
+            False: list(set(get_scorer_names())&set(['accuracy', 'balanced_accuracy',  'f1_weighted'])) } # 'precision_weighted',  'recall_weighted', 'roc_auc_ovo'
         self.kf = KFold(n_splits=5, shuffle=True, random_state=42 )
         self.model_table = pd.DataFrame()
         self.window = window
@@ -9525,7 +9526,7 @@ def make_genetrack_figure_(self, c: str= None, pos_start: int = None, pos_end:in
 
 def make_zip_comparison_report(zip1, zip2, nauto = 20, save = True):
     zips2run =[zip1, zip2]
-    traits  = read_csv_zip('.*data/pheno/regressedlr_.*txt', zippath=zips2run, sep = '\s+', header = None, names = ['rfid', 'iid', 'value'], 
+    traits  = read_csv_zip('.*data/pheno/regressedlr_.*txt', zippath=zips2run, sep = r'\s+', header = None, names = ['rfid', 'iid', 'value'], 
                            file_func= lambda x: basename(x.replace('regressedlr_', ''))[:-4],
                            zipfile_func=lambda x: basename(x).split('_tsanches_')[-1][:-4] )
     traits_names = traits.groupby('zipfile').file.agg(lambda x: set(x))

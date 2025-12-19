@@ -61,10 +61,9 @@ pip install -e GWAS-pipeline
 
 ## directory management
 
-We suggest following one of these standards for data management to make sure we 
+We suggest following one of these standards for data management.
 
 ```
-plaintext
 path2projects/
 ├── projectname/
 │   ├── raw_data.csv
@@ -76,7 +75,6 @@ path2projects/
 └── phewasdb.parquet.gz
 ```
 ```
-plaintext
 path2projects/
 └── projectname/
    ├── raw_data.csv

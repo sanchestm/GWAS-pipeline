@@ -39,11 +39,11 @@ def read_fam_bim(prefix):
     """
     Reads the .fam and .bim files using pandas.
     """
-    fam = pd.read_csv(f'{prefix}.fam', sep='\s+', header=None, low_memory=True, engine='c',
+    fam = pd.read_csv(f'{prefix}.fam', sep=r'\s+', header=None, low_memory=True, engine='c',
                       names=['fid', 'iid', 'father', 'mother', 'gender', 'trait'],
                     dtype={'fid':str,'iid':str, 'father': str, 'mother': str }
                      )
-    bim = pd.read_csv(f'{prefix}.bim',  sep= '\s+', header=None, low_memory=True, 
+    bim = pd.read_csv(f'{prefix}.bim',  sep= r'\s+', header=None, low_memory=True, 
                       names=['chrom', 'snp', 'cm', 'pos', 'a0', 'a1'], engine='c',
                       dtype={'chrom':str,'snp': str, 'cm': float,  'pos': int,'a0': str,'a1': str})
     bim['i'] = bim.index.copy()

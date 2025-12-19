@@ -19,7 +19,6 @@ dependencies:
   - pyarrow
   - plink
   - plink2
-  - snpeff
   - dask-jobqueue
   - gcta
   - plotly
@@ -52,7 +51,7 @@ dependencies:
   - jinja2 #=3.1.2
   - geckodriver
   - tabulate
-  - ensembl-vep #=114.2
+  - "ensembl-vep>=112"
   - pymc[version='>=5']
   - bambi
   - pysam
@@ -81,5 +80,4 @@ dependencies:
   - pip
   - pip:
     - goatools
-    - dash-bio #1.0.1
     - alphagenome
