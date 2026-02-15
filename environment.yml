@@ -52,7 +52,7 @@ dependencies:
   - geckodriver
   - tabulate
   - "ensembl-vep>=112"
-  - pymc[version='>=5']
+  - pymc>=5
   - bambi
   - pysam
   - pdf2image

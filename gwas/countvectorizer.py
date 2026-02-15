@@ -22,7 +22,7 @@ from tqdm import tqdm
 @njit(cache=True, fastmath=True)
 def _count_inplace(encoded: np.ndarray, k: int, stride: int, merge_rc: bool, total: np.ndarray) -> None:
     """
-    Update →taltotal (int64[4**k]) with k-mer counts from encodedencoded (int8 array: 0..3 or -1).
+    Update →taltotal (int64[4**k]) with k-mer counts from encoded (int8 array: 0..3 or -1).
     No return, no intermediate allocations.
     """
     L = encoded.shape[0]

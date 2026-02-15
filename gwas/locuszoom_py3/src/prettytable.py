@@ -29,7 +29,8 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import cgi
+# import cgi
+import html
 import copy
 import pickle
 import sys
@@ -483,7 +484,7 @@ class PrettyTable:
         for field in self.fields:
             if fields and field not in fields:
                 continue
-            bits.append("        <th>%s</th>" % cgi.escape(str(field)))
+            bits.append("        <th>%s</th>" % html.escape(str(field)))
         bits.append("    </tr>")
         # Data
         if sortby:
@@ -495,7 +496,7 @@ class PrettyTable:
             for field, datum in zip(self.fields, row):
                 if fields and field not in fields:
                     continue
-                bits.append("        <td>%s</td>" % cgi.escape(str(datum)))
+                bits.append("        <td>%s</td>" % html.escape(str(datum)))
         bits.append("    </tr>")
         bits.append("</table>")
         string = "\n".join(bits)
@@ -523,7 +524,7 @@ class PrettyTable:
             for field in self.fields:
                 if fields and field not in fields:
                     continue
-                bits.append("        <th style=\"padding-left: %dem; padding-right: %dem; text-align: center\">%s</th>" % (lpad, rpad, cgi.escape(str(field))))
+                bits.append("        <th style=\"padding-left: %dem; padding-right: %dem; text-align: center\">%s</th>" % (lpad, rpad, html.escape(str(field))))
             bits.append("    </tr>")
         # Data
         if sortby:
@@ -536,11 +537,11 @@ class PrettyTable:
                 if fields and field not in fields:
                     continue
                 if align == "l":
-                    bits.append("        <td style=\"padding-left: %dem; padding-right: %dem; text-align: left\">%s</td>" % (lpad, rpad, cgi.escape(str(datum))))
+                    bits.append("        <td style=\"padding-left: %dem; padding-right: %dem; text-align: left\">%s</td>" % (lpad, rpad, html.escape(str(datum))))
                 elif align == "r":
-                    bits.append("        <td style=\"padding-left: %dem; padding-right: %dem; text-align: right\">%s</td>" % (lpad, rpad, cgi.escape(str(datum))))
+                    bits.append("        <td style=\"padding-left: %dem; padding-right: %dem; text-align: right\">%s</td>" % (lpad, rpad, html.escape(str(datum))))
                 else:
-                    bits.append("        <td style=\"padding-left: %dem; padding-right: %dem; text-align: center\">%s</td>" % (lpad, rpad, cgi.escape(str(datum))))
+                    bits.append("        <td style=\"padding-left: %dem; padding-right: %dem; text-align: center\">%s</td>" % (lpad, rpad, html.escape(str(datum))))
         bits.append("    </tr>")
         bits.append("</table>")
         string = "\n".join(bits)

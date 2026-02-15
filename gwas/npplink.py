@@ -565,7 +565,7 @@ def grm2Us(G, n_components=None):
         idx = np.argsort(s)[::-1]
         s, U = s[idx], U[:, idx]
         if n_components is not None: s, U = s[:n_components], U[:, :n_components]
-    return U, s
+    return U, np.abs(s)
 
 def load_all_grms(paths, decompose_grm = True, save_all_grm_if_missing: bool = True):
     from glob import glob
