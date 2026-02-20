@@ -486,7 +486,8 @@ def recodeSNPs(arr, a0, a1):
         out = pd.DataFrame(out, index = arr.index, columns = arr.columns).astype('string[pyarrow]')
     return out
 
-def plink2df(plinkpath: str, rfids: list = None, snplist: list = None, c: int = None, pos_start: int = None, pos_end: int = None, 
+def plink2df(plinkpath: str, rfids: list = None, snplist: list = None, c: int = None, pos_start: int = None, pos_end: int = None,
+             sex:  Literal['M', 'F', 'ALL', 'UNK', 'NOUNK'] = 'ALL', 
              downsample_snps: int = None, downsample_stategy: Literal['random', 'equidistant'] = 'random', recodeACGT: bool = False) -> pd.DataFrame:
     if type(plinkpath) == str:  snps, iid, gen = load_plink(plinkpath)
     else: snps, iid, gen = plinkpath
@@ -496,7 +497,7 @@ def plink2df(plinkpath: str, rfids: list = None, snplist: list = None, c: int = 
     except: 
         if c is not None: c = str(c)
         print('non numeric chromosomes: using str(c) in this case')
-    iiid = iid.assign(i = iid.index).set_index('iid')
+    
     query_sentence = []
     if c is not None: query_sentence += ['chrom == @c']
     if (pos_start is not None) and (pos_end is not None): query_sentence += ['pos.between(@pos_start,@pos_end )']
@@ -510,7 +511,24 @@ def plink2df(plinkpath: str, rfids: list = None, snplist: list = None, c: int = 
         if downsample_stategy == 'random': sset = sset.sample(min(int(downsample_snps), sset.shape[0])).sort_values('i')
         elif downsample_stategy == 'equidistant': sset = sset[::max(1,sset.shape[0]//int(downsample_snps))]
         else: print('''downsample_stategy not in ['random', 'equidistant'], ignoring downsampling''')
-    col = iiid if rfids is None else iiid.loc[rfids]
+
+    iiid = iid.assign(i = iid.index).set_index('iid')
+    query_sentence_iid = []
+    if sex != 'ALL':
+        if sex == 'M': query_sentence_iid += ['gender.isin(["M", 1, "1"])']
+        if sex == 'F': query_sentence_iid += ['gender.isin(["F", 2, "2"])']
+        if sex == 'ALL': query_sentence_iid += ['gender.isin(["F", 2, "2","M", 1, "1"])']
+        if sex == 'UNK': query_sentence_iid += ['gender.isin(["0", 0])']
+        if sex == 'NOUNK': query_sentence_iid += ['~gender.isin(["0", 0])']    
+    query_sentence_iid = ' and '.join(query_sentence_iid)
+    if len(query_sentence_iid): iiid = iiid.query(query_sentence_iid) 
+    if rfids is not None: 
+        if len(y:= set(rfids)-set(iiid.index)):  
+            print(f'iids {"|".join(y)} not in rfid genotype file, sample will be dropped')
+        rfids = [x for x in rfids if x in iiid.index]
+    else: rfids = iiid.index
+    col = iiid.loc[rfids]
+    
     if not recodeACGT:
         return pd.DataFrame(gen[col.i.values ][:, sset.i.values].astype(np.float32),
                             index = col.index.values, columns = sset.snp.values )
