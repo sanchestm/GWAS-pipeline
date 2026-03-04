@@ -1,5 +1,5 @@
 # GWAS-pipeline
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18868639.svg)](https://doi.org/10.5281/zenodo.18868639)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18869198.svg)](https://doi.org/10.5281/zenodo.18869198)
 
 This package is a *potpourri* of genetic analysis tools to:
 1) perform ***GWAS*** species and uses the *NCBI datasets* to get genetic information of that species
