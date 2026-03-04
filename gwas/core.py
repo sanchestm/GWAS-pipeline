@@ -3059,6 +3059,7 @@ class gwas_pipe:
         #dfohe[[f'OHE_{x}'for x in ohe.get_feature_names_out(categorical_all)]] = oheencoded
         dfohe.loc[:, [f'OHE_{x}'for x in ohe.get_feature_names_out(categorical_all)]] = oheencoded
         alltraits = list(datadic.query('trait_covariate == "trait"').measure.unique())
+        alltraits_npt = list(datadic.query('trait_covariate == "trait" and covariates != "passthrough"').measure.unique())
         dfohe.loc[:, alltraits] = QuantileTransformer(n_quantiles = 100).fit_transform(dfohe.loc[:, alltraits].apply(pd.to_numeric, errors='coerce'))
         continuousall = list(datadic.query('trait_covariate == "covariate_continuous"').measure)
         #print(f'all continuous variables {continuousall}')
@@ -3083,26 +3084,31 @@ class gwas_pipe:
             melted_variances = partial_explained_vars.reset_index().melt(id_vars = ['index'], 
                                                                   value_vars=partial_explained_vars.columns[:])\
                                                                   .rename({'index':'group'}, axis =1 ).query(f'value > {covariates_threshold}')
-            all_explained_vars += [melted_variances]
+            if len(melted_variances): all_explained_vars += [melted_variances]
         if len(all_explained_vars):
+            if verbose: display(all_explained_vars)
             all_explained_vars = pd.concat(all_explained_vars).drop_duplicates(subset = ['group', 'variable'])
             if verbose: display(all_explained_vars)
             all_explained_vars.to_csv(f'{self.path}melted_explained_variances.csv', index = False)
             melt_list = pd.DataFrame(all_explained_vars.groupby('variable')['group'].apply(list)).reset_index()
             melt_list.to_csv(f'{self.path}pivot_explained_variances.csv',index = False)
-            tempdf = dfohe.loc[:, dfohe.columns.isin(melted_variances.group.unique())].copy()
-            dfohe.loc[:, dfohe.columns.isin(melted_variances.group.unique())] = tempdf.fillna(tempdf.mean())
-            aaaa = melt_list.apply(lambda x: statsReport.regress_out(dfohe,[x.variable],   x.group, model = model), axis =1)
+            tempdf = dfohe.loc[:, dfohe.columns.isin(all_explained_vars.group.unique())].copy()
+            dfohe.loc[:, dfohe.columns.isin(all_explained_vars.group.unique())] = tempdf.fillna(tempdf.mean())
+            aaaa = melt_list.apply(lambda x: statsReport.regress_out(dfohe,[x.variable], x.group, model = model), axis =1)
+            if verbose: display(list(aaaa))
             resid_dataset = pd.concat(list(aaaa), axis = 1)
-            non_regressed_cols = [x for x in alltraits if x not in resid_dataset.columns.str.replace('regressedLR_', '')]
-            non_regressed_df = df[non_regressed_cols].rename(lambda x: 'regressedLR_' + x, axis = 1)
-            resid_dataset = pd.concat([resid_dataset, non_regressed_df], axis = 1)
-            cols2norm = resid_dataset.columns[resid_dataset.columns.str.contains('regressedLR_')]
-            resid_dataset = statsReport.ScaleTransformer(resid_dataset, cols2norm, method = normalize)
+            non_regressed_cols = [x for x in alltraits_npt if x not in resid_dataset.columns.str.replace('regressedLR_', '')]
         else: 
+            if verbose: display('no need to regress out any covariate, make sure this is correct!')
             pd.DataFrame(columns = ['group', 'variable', 'value']).to_csv(f'{self.path}melted_explained_variances.csv', index = False)
             pd.DataFrame(columns = ['variable', 'group']).to_csv(f'{self.path}pivot_explained_variances.csv',index = False)
             resid_dataset = pd.DataFrame()
+            non_regressed_cols = alltraits_npt
+        
+        non_regressed_df = df[non_regressed_cols].rename(lambda x: 'regressedLR_' + x, axis = 1)
+        resid_dataset = pd.concat([resid_dataset, non_regressed_df], axis = 1)
+        cols2norm = resid_dataset.columns[resid_dataset.columns.str.contains('regressedLR_')]
+        resid_dataset = statsReport.ScaleTransformer(resid_dataset, cols2norm, method = normalize)
         dfcomplete = pd.concat([df,resid_dataset],axis = 1)
         dfcomplete.columns = dfcomplete.columns.str.lower()
         dfcomplete = dfcomplete.loc[:,~dfcomplete.columns.duplicated()]

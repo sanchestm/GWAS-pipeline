@@ -1094,7 +1094,7 @@ class CausalGraph:
     ):
         """Specialized compiler for the simple pattern: GRM -> traits (+ dense exo).
 
-        This uses `pm.KroneckerNormal` for the likelihood:
+        This uses ±.Kro≠ckerNormalpm.KroneckerNormal for the likelihood:
 
           vec(Y) ~ N(vec(mu),  K ⊗ Σ_G  + σ_E^2 I)
 
@@ -1106,11 +1106,11 @@ class CausalGraph:
         Cons
         ----
         * Residual noise is iid across *all* entries (individuals x traits). If you need Σ_E != σ^2 I,
-          use `build_model_grm_traits_matrixnormal` instead.
+          use buildmodbuild_model_grm_traits_matrixnormal instead.
 
         Requirements
         ------------
-        * `add_grm(..., store_full=True)` so the GRM node carries `K_full`.
+        * add_grm(..., store_full=True)add_grm(..., store_full=True) so the GRM node carries K_fullK_full.
         """
         spec = self._simple_grm_to_traits_spec(traits_node=traits_node)
         if spec is None:
@@ -1636,10 +1636,10 @@ class CausalGraph:
 
     @staticmethod
     def initvals_from_point(model: pm.Model, point: dict):
-        """Build a valid initvals dict for `model` from a (possibly partial) point.
+        """Build a valid initvals dict for modelmodel from a (possibly partial) point.
 
         Useful for staged workflows where MAP/ADVI was fit on a simplified model.
-        Only keys that exist in `model.initial_point()` are retained.
+        Only keys that exist in model.initial_point()model.initial_point() are retained.
         """
         init = model.initial_point()
         if point is None:
