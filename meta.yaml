@@ -1,12 +1,12 @@
 {% set name = "gwas" %}
-{% set version = "0.4.1" %}
+{% set version = "0.4.2" %}
 
 package:
   name: {{name}}
   version: {{version}}
 
 source:
-  url: https://github.com/sanchestm/GWAS-pipeline/archive/refs/tags/{{ version }}.tar.gz
+  url: https://github.com/sanchestm/GWAS-pipeline/archive/refs/tags/v{{ version }}.tar.gz
   sha256: da237098c7ad979c3cce3bfc92ff579214ff6cdc124495d0e6ac9e7254861fb0
 
 build:
