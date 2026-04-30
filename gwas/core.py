@@ -26,7 +26,7 @@ from dask.diagnostics import ProgressBar
 from dask import delayed
 from dask.distributed import Client, client, progress, wait
 from datetime import datetime
-from fancyimpute import SoftImpute, BiScaler, IterativeSVD
+# from fancyimpute import SoftImpute, BiScaler, IterativeSVD
 from functools import reduce, wraps
 from glob import glob
 from goatools.anno.genetogo_reader import Gene2GoReader
@@ -42,8 +42,6 @@ from matplotlib import cm, colors
 from matplotlib.colors import PowerNorm
 from matplotlib.colors import rgb2hex as mplrgb2hex
 from os.path import dirname, basename
-from prophet.plot import plot_plotly, plot_components_plotly
-from prophet.utilities import regressor_coefficients 
 from scipy.cluster.hierarchy import ward, dendrogram, leaves_list, linkage
 from scipy.spatial import distance
 from scipy.spatial.distance import cdist
@@ -51,7 +49,7 @@ from scipy.stats import pearsonr, zscore, norm
 from sklearn.compose import ColumnTransformer
 from sklearn.decomposition import PCA
 from sklearn.feature_extraction.text import TfidfTransformer
-from sklearn.impute import KNNImputer,SimpleImputer, IterativeImputer, MissingIndicator
+from sklearn.impute import KNNImputer,SimpleImputer, MissingIndicator
 from sklearn.linear_model import LinearRegression, ElasticNetCV, LassoCV, RidgeCV, RANSACRegressor
 from sklearn.metrics.pairwise import nan_euclidean_distances, pairwise_distances
 from sklearn.metrics import get_scorer
@@ -97,8 +95,6 @@ import panel as pn
 import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as plotio
-import prophet
-import psycopg2
 import pysam
 import re
 import requests
@@ -1956,7 +1952,7 @@ def vcf2plink(vcf: str = 'round9_1.vcf.gz', n_autosome: int = 20, out_path: str 
     bash(f'plink --thread-num 16 --vcf {vcf} --chr-set {n_autosome} no-xy --keep_allele_order --set-hh-missing --set-missing-var-ids @:# --make-bed --out {out_path}')
 
 
-def impute_single_trait(dataframe: pd.DataFrame, imputing_col: str , covariate_cols: list, groupby: list, scaler = StandardScaler(), imputer = SoftImpute(verbose = False)):
+def impute_single_trait(dataframe: pd.DataFrame, imputing_col: str , covariate_cols: list, groupby: list, scaler = StandardScaler(), imputer = None):
     """
     Impute missing values in a specified column using specified covariates and imputation method.
 
@@ -2001,6 +1997,10 @@ def impute_single_trait(dataframe: pd.DataFrame, imputing_col: str , covariate_c
     >>> print(result['imputed'])
     >>> print(result['qc'])
     """
+    
+    if imputer is None: 
+        from fancyimpute import SoftImpute, BiScaler, IterativeSVD
+        imputer = SoftImpute(verbose = False)
     if type(imputing_col) == str: imputing_col = [imputing_col]
     if type(covariate_cols) == str: covariate_cols = [covariate_cols]
     if type(groupby) == str: groupby = [groupby]
@@ -2234,6 +2234,9 @@ def _prophet_reg(dforiginal: pd.DataFrame,y_column: str = 'y',
     >>> result = _prophet_reg(df, y_column='y', categorical_regressors=['cat'], regressors=['reg1', 'reg2'])
     >>> print(result)
     """    
+    import prophet
+    from prophet.plot import plot_plotly, plot_components_plotly
+    from prophet.utilities import regressor_coefficients 
     df = dforiginal.copy().set_index(index_col)
     
     if df[ds_column].dtype in [int, float]:
@@ -7072,7 +7075,7 @@ The decompositions used also allow to extimate a metric of similarity between th
         genes_in_range = genes_in_range[~dups].combine_first(genes_in_range[dups]).reset_index().set_index('SNP_origin')
         return genes_in_range
 
-    def report(self, round_version: str = '10.5.2', covariate_explained_var_threshold: float = 0.02, gwas_version: str =None, add_gpt_query: bool = False,
+    def report(self, round_version: str = '11.2.1', covariate_explained_var_threshold: float = 0.02, gwas_version: str =None, add_gpt_query: bool = False,
                sorted_gcorr: bool = True, add_gwas_latent_space: str = 'nmf', add_experimental: bool = False, remove_umap_traits_faq: bool = True, 
                qqplot_add_pval_thresh: bool = False, add_qqplot:bool = False, add_cluster_color_heritability: bool = False,
                legacy_locuszoom: bool = True, static: bool = True, traits: bool = None, remove_missing_animals_section: bool = True, headername: str = ''):
@@ -7175,7 +7178,8 @@ Threshold Info
         # favicon = icon_path.read_bytes()
         # favicon = base64.b64encode(favicon).decode("ascii")
         # favicon = f"data:image/x-icon;base64,{favicon}"
-        template = pn.template.BootstrapTemplate(title=f'GWAS REPORT', favicon = icon_path, sidebar_width=300)
+        template = pn.template.MaterialTemplate(title=f'GWAS REPORT', favicon = icon_path, sidebar_width=300) # main_max_width="none"
+        sections_report = []
         os.makedirs(f'{self.path}images/report_pieces/',exist_ok=True )
         os.makedirs(f'{self.path}images/report_pieces/regional_assoc/',exist_ok=True )
         add_metadata = lambda x: pn.Column(x, pn.pane.Alert(text_sidepanel, alert_type="primary"))
@@ -7198,8 +7202,8 @@ Threshold Info
                                                    download_name= 'missing_rats.csv', flexible = True), \
                                      title = 'not genotyped samples', collapsed=True)]
         append2 = pn.Card(*trait_d_card , title = 'Trait Descriptions', collapsed=True)
+        sections_report.append(append2)
         add_metadata(append2).save(f'{self.path}images/report_pieces/trait_descriptions.html')
-        template.main.append(append2)
         # del append2
         # gc.collect()
         
@@ -7263,8 +7267,8 @@ Threshold Info
                                                  cell_font_size=10,  header_font_size=10,max_width=1300, layout = 'fit_data_fill',max_cell_width=120 ),
                                    title = 'Full dataset', collapsed=True),
                            title = 'Preprocessing', collapsed=True)
+        sections_report.append(cov_card)
         add_metadata(cov_card).save(f'{self.path}images/report_pieces/covariates.html')
-        template.main.append(cov_card)
         # del cov_card
         # gc.collect()
         printwithlog('generating report... making genetic correlation section...')
@@ -7272,7 +7276,7 @@ Threshold Info
         except:
             printwithlog('genetic pca failed')
             panel_genetic_pca = pn.Card('failure calculating genomic PCA', title = 'Genomic PCA', collapsed = True)
-        #template.main.append(panel_genetic_pca)
+        #sections_report.append(panel_genetic_pca)
         if len(traits)>1:
             gcorrtext = f'''# *Genetic Correlation Matrix*
 
@@ -7291,8 +7295,8 @@ For the figure, the upper triangle represents the genetic correlation (ranges fr
             # gcorr = fancy_display(gcorr.query('trait1.isin(@traitfilter) and trait2.isin(@traitfilter)'), 
             #                       download_name='genetic_correlation.csv')
             genetic_corr = pn.Card(gcorrtext, gcorrfig, pn.Card(gcorr, title = 'tableView', collapsed=True),title = 'Genetic Correlation', collapsed=True)
+            sections_report.append(genetic_corr)
             add_metadata(genetic_corr).save(f'{self.path}images/report_pieces/genetic_corr.html')
-            template.main.append(genetic_corr)
         heritext = '''# **SNP Heritability Estimates h<sup>2</sup>** 
 
 SNP heritability (often reported as h<sup>2</sup> ) is the fraction of phenotypic variance that can be explained by the genetic variance measured from the Biallelic SNPS called by the genotyping pipeline. It is conceptually similar to heritability estimates that are obtained from panels of inbred strains (or using a twin design in humans), but SNP heritability is expected to be lower.  Specifically, this section shows the SNP heritability (“narrow-sense heritability”) estimated for each trait by GCTA-GREML, which uses the phenotypes and genetic relatedness matrix (GRM) as inputs. Traits with higher SNP heritability are more likely to produce significant GWAS results. It is important to consider both the heritability estimate but also the standard error; smaller sample sizes typically have very large errors, making the results harder to interpret. 
@@ -7317,8 +7321,8 @@ Column definitions:
         her = her[her.trait.isin(traitfilter)]
         her = fancy_display(her, download_name='heritablitity.csv')
         herit_card =  pn.Card(heritext, herfig, her, title = 'Heritability', collapsed=True)
+        sections_report.append(herit_card)
         add_metadata(herit_card).save(f'{self.path}images/report_pieces/heritability.html')
-        template.main.append(herit_card)
         # del herit_card
         # gc.collect()
 
@@ -7360,8 +7364,8 @@ Column definitions:
                                                     'qtls.csv', flexible = True, cell_font_size=10, 
                                                     header_font_size=10,max_width=1430, layout = 'fit_data_fill',max_cell_width=110), 
                             title = 'QTL', collapsed=True)
+        sections_report.append(qtls_card)
         add_metadata(qtls_card).save(f'{self.path}images/report_pieces/qtls.html')
-        template.main.append(qtls_card)
         # del qtls_card
         # gc.collect()
         
@@ -7388,8 +7392,8 @@ Porcupine plot is a graphical tool that combines multiple Manhattan plots, each 
                 qqplotfig = pn.pane.PNG(f'{self.path}images/qqplot.png', width = 1200)
             pcp_o += [qqplotfig]
         porcupine_card = pn.Card(*pcp_o,  title = 'Porcupine Plot', collapsed=True)
+        sections_report.append(porcupine_card)
         add_metadata(porcupine_card).save(f'{self.path}images/report_pieces/porcupine.html')
-        template.main.append(porcupine_card)
         # del porcupine_card
         # gc.collect()
         printwithlog('generating report... making manhattan section...')
@@ -7421,7 +7425,7 @@ To control type I error, we estimated the significance threshold by a permutatio
                               pn.Card(*manhatanfigs2, title='Plots without QTLs', collapsed=True),
                               title = 'Manhattan Plots', collapsed=True)
         add_metadata(manhatan_card).save(f'{self.path}images/report_pieces/manhattan.html')
-        template.main.append( manhatan_card )
+        sections_report.append( manhatan_card )
         # del manhatan_card, manhatanfigs, manhatanfigs2
         # gc.collect()
         db_vals_t = pd.concat(pd.read_parquet(x).assign(phewas_file = x) for x in self.phewas_db.split(',')).reset_index(drop= True)
@@ -7552,8 +7556,8 @@ Defining columns:
             if len(ginrange := genes_in_range2.query('SNP_origin.eq(@row.TopSNP)')):
                 girantable = fancy_display(ginrange.fillna(''), download_name= f'genes_in_region__{row.trait}__{snp_doc}.csv', 
                                              add_sort=False, wrap_text='wrap', html_cols=['genebass', 'twashub', 'genecup', 'gwashub', 'RGD', 'genecard', 'opentargets'], 
-                                             page_size = 40, cell_font_size=10, header_font_size=12,max_width=1200,  layout = 'fit_data_fill', flexible = True)
-                giran = pn.Card(girantable, title = 'Gene Links', collapsed = False, min_width=500)
+                                             page_size = 40, cell_font_size=10, header_font_size=12,min_width=1200,  layout = 'fit_data_fill', flexible = True)
+                giran = pn.Card(girantable, title = 'Gene Links', collapsed = False, min_width=1200)
                 all_genes_string = ', '.join(ginrange.symbol.unique())
             else: 
                 giran = pn.Card(f'no Genes in section for SNP {row.TopSNP}', title = 'Gene Links', collapsed = False, min_width=500)
@@ -7594,7 +7598,7 @@ Defining columns:
                 pbothtemp = tdf.query('SNP_QTL == @row.TopSNP and trait_QTL == @row.trait')[['SNP_PheDb','-Log10(p)PheDb','R2', 'DP' ,'trait_PheDb', 'project', 'trait_description_PheDb']].drop_duplicates()
                 if pbothtemp.shape[0]: 
                     phewas_string += ', '.join(pbothtemp.trait_PheDb) + '\n' + pbothtemp.to_markdown() + '\n'
-                    pbothtemp = fancy_display(pbothtemp.fillna(''), download_name=f'phewas_{row.trait}{row.TopSNP}.csv'.replace(':', '_'), flexible = True, max_width=1100)
+                    pbothtemp = fancy_display(pbothtemp.fillna(''), download_name=f'phewas_{row.trait}{row.TopSNP}.csv'.replace(':', '_'), flexible = True,  min_width=1200)
                 else: pbothtemp = pn.pane.Markdown(f' \n SNPS were not detected for other phenotypes in 3Mb window of topSNP  \n   \n')
                 phewas_section += [pboth_title,pbothtemp]
             if phewas_string: 
@@ -7608,7 +7612,7 @@ Defining columns:
                 xqtlstemp_string = ', '.join([f'{i} contains {j} expression QTLs' for i,j in xqtltemp.gene_id.value_counts().items()])
                 if xqtlstemp_string: xqtlstemp_string += '\n' + xqtltemp.to_markdown() + '\n'
                 else: xqtlstemp_string = 'none contain an expression QTL'
-                if xqtltemp.shape[0]: xqtltemp = fancy_display(xqtltemp.fillna(''),download_name=f'xqtl_{row.trait}{row.TopSNP}.csv'.replace(':', '_'), flexible = True, max_width=1100)
+                if xqtltemp.shape[0]: xqtltemp = fancy_display(xqtltemp.fillna(''),download_name=f'xqtl_{row.trait}{row.TopSNP}.csv'.replace(':', '_'), flexible = True,  min_width=1200)
                 else:xqtltemp = pn.pane.Markdown(f' \n SNPS were not {"tested" if c_num > self.n_autosome else "detected"} for xQTLs in 3Mb window of trait topSNP  \n   \n')
                 question_xqtl_support =  f'''  • xQTL/expression support: {xqtlstemp_string}'''
                 
@@ -7619,7 +7623,7 @@ Defining columns:
                 eqtlstemp_string = ', '.join([f'{i} contains {j} expression QTLs' for i,j in eqtltemp.gene_id.value_counts().items()])
                 if eqtlstemp_string: eqtlstemp_string += '\n' + eqtltemp.to_markdown() + '\n'
                 else: eqtlstemp_string = 'none contain an expression QTL'
-                if eqtltemp.shape[0]: eqtltemp = fancy_display(eqtltemp.fillna(''),download_name=f'eqtl_{row.trait}{row.TopSNP}.csv'.replace(':', '_'), flexible = True, max_width=1100)
+                if eqtltemp.shape[0]: eqtltemp = fancy_display(eqtltemp.fillna(''),download_name=f'eqtl_{row.trait}{row.TopSNP}.csv'.replace(':', '_'), flexible = True, min_width=1200)
                 else:eqtltemp = pn.pane.Markdown(f' \n SNPS were not {"tested" if c_num > self.n_autosome else "detected"} for eQTLs in 3Mb window of trait topSNP  \n   \n')
             
                 sqtl_title = pn.pane.Markdown(f"### sQTL: Lowest P-values for splice qtls in a 3Mb window of {row.trait} {row.TopSNP}\n")
@@ -7628,7 +7632,7 @@ Defining columns:
                 sqtltemp_string = ', '.join([f'{i} contains {j} splice QTLs' for i,j in sqtltemp.gene_id.value_counts().items()])
                 if sqtltemp_string: sqtltemp_string += '\n' + sqtltemp.to_markdown() + '\n'
                 else: sqtltemp_string = 'none contain an splice QTL'
-                if sqtltemp.shape[0]: sqtltemp = fancy_display(sqtltemp.fillna(''), download_name=f'sqtl_{row.trait}{row.TopSNP}.csv'.replace(':', '_'), flexible = True, max_width=1100)
+                if sqtltemp.shape[0]: sqtltemp = fancy_display(sqtltemp.fillna(''), download_name=f'sqtl_{row.trait}{row.TopSNP}.csv'.replace(':', '_'), flexible = True,  min_width=1200)
                 else: sqtltemp = pn.pane.Markdown(f' \n  SNPS were not {"tested" if c_num > self.n_autosome else "detected"} for sQTLs in 3Mb window of trait topSNP  \n   \n')
                 question_xqtl_support = f'''  • eQTL support: {eqtlstemp_string}
   • sQTL/isoform support: {sqtltemp_string}'''               
@@ -7681,7 +7685,7 @@ FACTUALITY & CALIBRATION (internal rules; reflect in prose, do not list)
 - Confidence labels: for the top three genes, use calibrated language (“high/moderate/low confidence based on …”) inside the prose.
 
 STYLE & SAFETY REQUIREMENTS (hard)
-- Length: ~500–900 words version and an itemized version; scholarly and precise; avoid over-claiming.
+- Length: ~200–400 words version and an itemized version; scholarly and precise; avoid over-claiming.
 - Use official gene symbols valid for {self.species.replace('_', ' ')}; when using ortholog evidence, name ortholog and species.
 - Do not invent p-values, effect sizes, credible set sizes, or colocalization probabilities; if unknown, state “not reported here.”
 - If the lead SNP is intragenic, consider that gene carefully but still compare all nearby genes.
@@ -7693,6 +7697,11 @@ OUTPUT FORMAT (must match exactly)
 1) Narrative prose section with inline bracketed citations [#] as appropriate.
 2) A single line with the final ranking:
    Ranked genes (most → least): GENE1 > GENE2 > GENE3 > …
+3) A markdown table version of the final ranking:
+|   RANK | GENE   | PRIOR BIOLOGY                      | DRUGGABILITY                                                       | SUPPORTING INFO                 |
+|-------:|:-------|:-----------------------------------|:-------------------------------------------------------------------|:--------------------------------|
+|      1 | GENE_A | short describtion of prior biology | DRUGA:well described [citation]<br>DRUGB:less described [citation] | coding variants : 3<br>xQTLs: 5 |
+|      2 | GENE_B | short describtion of prior biology | DRUGX:well described [citation]<br>DRUGZ:less described [citation] | coding variants : 1<br>xQTLs: 2 |
 3) References (cited)
    [#] Full ref 1
    [#] Full ref 2
@@ -7734,18 +7743,19 @@ Now produce the manuscript-style narrative, followed by the ranking line, the �
                     gptanswers += [response]
 
             if len(gptanswers):
-                gpt_card = pn.Card(clipboard_button(question),pn.Accordion(*zip(all_models, gptanswers), width = 1100),
+                gpt_card = pn.Card(clipboard_button(question),pn.Accordion(*zip(all_models, gptanswers), min_width = 1400),
                 title = "LLM discussion for the Regional Association", collapsed = True)
             else: gpt_card = clipboard_button(question)
         
-            reg_card = pn.Card(*[row_desc,lzplot,lzplot2,lztext,boxplot,gpt_card,pn.Card(*dt2append, title = 'tables', collapsed = False)]   ,title = texttitle, collapsed = True)
+            reg_card = pn.Card(*[row_desc,lzplot,lzplot2,lztext,boxplot,gpt_card,pn.Card(*dt2append, title = 'tables', collapsed = False)]   ,
+                               title = texttitle, collapsed = True, min_width = 1400)
             add_metadata(reg_card).save(f"{self.path}images/report_pieces/regional_assoc/{row.trait}@{row.TopSNP.replace(':', '__')}.html")
             out += [reg_card]
             #
 
         reg_assoc = pn.Card(*out, title = 'Regional Association Plots', collapsed = True)
+        sections_report.append(reg_assoc)
         add_metadata(reg_assoc).save(f'{self.path}images/report_pieces/regional_assoc.html')
-        template.main.append(reg_assoc)
         # del reg_assoc
         # gc.collect()
         if add_experimental:
@@ -7770,8 +7780,9 @@ This network plot shows the connectivity between traits, topSNPS, eQTLS, sQTLS, 
                 add2card += [self.GWAS_latent_space(method = add_gwas_latent_space)[0]]
                 add2card += [self.steiner_tree()]
             experimental_card = pn.Card(*add2card, title = 'Experimental', collapsed=True)
+            sections_report.append(experimental_card)
             add_metadata(experimental_card).save(f'{self.path}images/report_pieces/experimental.html')
-            template.main.append(experimental_card)
+            
         #db_vals_t = pd.concat(pd.read_parquet(x).query(f'p < {pval_threshold}').assign(phewas_file = x) for x in self.phewas_db.split(',')).reset_index(drop= True)
         faqtable = db_vals_t[['project' ,'trait']].value_counts().to_frame().rename({0: 'number of SNPs'}, axis =1).reset_index()
         faqtext = f'''Do the traits look approximately normally distributed? 
@@ -7788,23 +7799,19 @@ Are there sex differences?
     
     Which traits are included in the PheWAS database:'''
         faqtext = pn.pane.Markdown(faqtext)
-        
-        template.main.append(pn.Card(faqtext, fancy_display(faqtable, 'list_of_traits.csv', flexible = True), title = 'FAQ', collapsed = True))
+        sections_report.append(pn.Card(faqtext, fancy_display(faqtable, 'list_of_traits.csv', flexible = True), title = 'FAQ', collapsed = True))
         
         reftext = '''* Chitre AS, Polesskaya O, Holl K, Gao J, Cheng R, Bimschleger H, Garcia Martinez A, George T, Gileta AF, Han W, Horvath A, Hughson A, Ishiwari K, King CP, Lamparelli A, Versaggi CL, Martin C, St Pierre CL, Tripi JA, Wang T, Chen H, Flagel SB, Meyer P, Richards J, Robinson TE, Palmer AA, Solberg Woods LC. Genome-Wide Association Study in 3,173 Outbred Rats Identifies Multiple Loci for Body Weight, Adiposity, and Fasting Glucose. Obesity (Silver Spring). 2020 Oct;28(10):1964-1973. doi: 10.1002/oby.22927. Epub 2020 Aug 29. PMID: 32860487; PMCID: PMC7511439.'''
-        template.main.append(pn.Card(reftext, title = 'References', collapsed = True))
-
+        sections_report.append(pn.Card(reftext, title = 'References', collapsed = True))
         if os.path.isfile(f'{self.path}run_notes.md'):
             with open(f'{self.path}run_notes.md') as f: rnotes = f.read()
-            template.main.append(pn.Card(pn.pane.Markdown(rnotes), collapsed = True, title ='Manual Notes'))
-
+            sections_report.append(pn.Card(pn.pane.Markdown(rnotes), collapsed = True, title ='Manual Notes'))
+        template.main.append(pn.Column(*sections_report, sizing_mode="stretch_width"))
         print("MAIN CONTENT:", template.main)
         print("NUMBER OF SECTIONS:", len(template.main))
         template.header.append(f'## {self.project_name if not headername else headername}')
         template.save(f'{self.path}results/gwas_report.html', resources=INLINE, embed = False, title = f'{self.project_name}_GWAS') #CDN
-        #template.save(f'{self.path}results/gwas_report.html', resources=INLINE)
         bash(f'''cp {self.path}results/gwas_report.html {self.path}results/gwas_report_{self.project_name}_round{round_version}_threshold{round(self.threshold,2)}_n{self.df.shape[0]}_date{datetime.today().strftime('%Y-%m-%d')}_gwasversion_{gwas_version}.html''')
-        #printwithlog(f'{destination.replace("/tscc/projects/ps-palmer/s3/data", "https://palmerlab.s3.sdsc.edu")}/{self.project_name}/results/gwas_report.html')
     
     def store(self, researcher: str , round_version: str, gwas_version: str= None, remove_folders: bool = False):
         """
@@ -9814,11 +9821,11 @@ def make_zip_comparison_report(zip1, zip2, nauto = 20, save = True):
                                              favicon='/tscc/projects/ps-palmer/gwas/GWAS-pipeline/gwas/rat.ico',
                                              collapsed_sidebar=True)
     template.sidebar.extend([pn.pane.Alert(side_text, alert_type="primary")])
-    template.main.append(pn.Card(table_fig, collapsed = False, title = 'traits', width = 1800 ))
-    template.main.append(pn.Card(n_her_figure, collapsed = False, title = 'heritability', width = 1800 ))
-    template.main.append(pn.Card(qtl_pval_fig, collapsed = False, title = 'QTLs pval figure', width = 1800 ))
-    # template.main.append(pn.Card(qtl_fig,  collapsed = False, title = 'QTL regions',width = 1800 ))
-    template.main.append(pn.Card(pcp, collapsed = False, title = 'porcupine',width = 1800 ))
+    sections_report.append(pn.Card(table_fig, collapsed = False, title = 'traits', width = 1800 ))
+    sections_report.append(pn.Card(n_her_figure, collapsed = False, title = 'heritability', width = 1800 ))
+    sections_report.append(pn.Card(qtl_pval_fig, collapsed = False, title = 'QTLs pval figure', width = 1800 ))
+    # sections_report.append(pn.Card(qtl_fig,  collapsed = False, title = 'QTL regions',width = 1800 ))
+    sections_report.append(pn.Card(pcp, collapsed = False, title = 'porcupine',width = 1800 ))
     template.header.append(f'## {zips2run[0][lng_prefix:lng_suffix]} vs {zips2run[1][lng_prefix:lng_suffix]} {tdy.strftime("%Y-%B-%d")}')
     template.save(f'report_comparision{zip1.split("/")[-1]}vs{zip2.split("/")[-1]}_{tdy.strftime("%Y%b%d")}.html', resources=INLINE,  title='GWAS comparison')
     return template

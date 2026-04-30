@@ -1,0 +1,87 @@
+name: gwas_min
+channels:
+  - conda-forge
+  - defaults
+  - bioconda
+dependencies:
+  - python=3.13
+  - pandas
+  # - fastparquet
+  - seaborn
+  - umap-learn
+  - ipywidgets
+  - dask
+  - scikit-learn
+  - openjdk=11
+  - ipykernel
+  # - jax
+  - pyarrow
+  - plink
+  - plink2
+  - gcta
+  - plotly
+  - biopython
+  - mygene
+  # - pytables
+  # - h5py
+  - hdbscan
+  - ydata-profiling
+  # - arviz
+  - bcftools
+  # - prophet
+  - lightgbm
+  # - shap
+  # - scikit-optimize
+  # - xgboost
+  - nltk
+  - tabulate
+  - pygraphviz
+  # - sqlalchemy
+  - ncbi-datasets-cli
+  - panel
+  - hvplot
+  - holoviews
+  # - fancyimpute
+  # - scikit-image
+  - selenium
+  - datashader
+  # - nbformat
+  - firefox
+  # - jinja2 #=3.1.2
+  - geckodriver
+  - tabulate
+  - "ensembl-vep>=112"
+  # - pymc>=5
+  # - bambi
+  - pysam
+  - pdf2image
+  - r-base
+  # - r-essentials
+  # - r-chron
+  # - r-vctrs
+  # - r-kableextra
+  # - r-rjsonio
+  # - r-dt
+  # - r-htmltools
+  # - r-httr
+  # - r-openxlsx
+  # - r-rmarkdown
+  # - r-plyr
+  # - r-readxl
+  # - pandoc
+  # - r-purrr
+  # - r-dplyr
+  # - r-data.table
+  - r-base
+  # - r-genio
+  # - r-rrblup
+  # - r-bglr
+  # - imagemagick
+  # - transformers
+  - python-kaleido
+  # - accelerate
+  # - mappy
+  - pip
+  - pip:
+    - goatools
+    # - alphagenome

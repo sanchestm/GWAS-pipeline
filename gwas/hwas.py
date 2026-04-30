@@ -15,9 +15,8 @@ from scipy.stats import f as scipyf
 from scipy.stats import t as scipyt
 from tqdm import tqdm
 import pysam
-import npplink
-import genome_decomposition_v2 as gdv2
-
+from . import npplink
+from . import genome_decomposition_v2 as gdv2
 
 __all__ = [
     "detect_stitch_haplotype_field",

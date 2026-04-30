@@ -33,7 +33,6 @@ dependencies:
   - prophet
   - lightgbm
   - shap
-  - scikit-optimize
   - xgboost
   - nltk
   - pygraphviz
