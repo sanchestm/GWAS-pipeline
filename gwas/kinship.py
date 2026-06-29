@@ -386,3 +386,13 @@ def generation_deltas_from_predecessors(E, indices):
 
 # Phi, A = kinship_from_child_parent(sped2) 
 # sps2fig(Phi, ids).opts(frame_width = 600,frame_height = 600)
+
+
+# from gwas.kinship import kinship_from_pedigree, generation_deltas_from_predecessors
+# E = kinship_from_pedigree(pedigree)
+# indices = pedigree[~pedigree[f'generation'].isna()].rfid.map(E[4]).values
+# ped_gen = pedigree.loc[~pedigree[f'generation'].isna(), [f'generation']].values
+# sp_dist, sp_path, delta = generation_deltas_from_predecessors(E[2], indices)
+# new_gen = np.nanmedian(ped_gen - delta, axis = 0)
+# pedigree[f'generation_propagation'] = pedigree['rfid'].map(E[4]).apply(lambda x : new_gen[x]) + 1
+# pedigree = pedigree[pedigree.coatcolor.isin(['BROWNHOOD', 'BLACKHOOD', 'BROWN', 'BLACK', 'ALBINO'])]

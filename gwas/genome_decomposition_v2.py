@@ -1724,7 +1724,7 @@ pandas.Series
     her = pd.DataFrame(data=np.stack([vg, ve, h2, svg, sve, h2_se, h2_pvalue, h2_pvalue < 0.05]).T, index=df.columns, columns=['vG', 'vE', 'h2', 'vG_se', 'vE_se', 'h2_se', 'pval', 'significance'])
     return pd.Series({'heritability_table': her, 'g_corr_table': gcorr_melted, 'G': Gcov, 'rG_SE': RG_se, 'E': Ecov})
 
-def mvGWAS(traitdf, genotypes='genotypes/genotypes', grms_folder='grm', save_path='results/gwas_parquet/', save=False, y_correction='blup_resid', y_correction_multivariate=False, return_table=True, stat='ttest', chrset=None, dtype='pandas', dof='correct', snp_block_size=50000000.0, gwa_center=True, gwa_scale=False, regression_mode='blas'):
+def mvGWAS(traitdf, genotypes='genotypes/genotypes', grms_folder='grm', save_path='results/gwas_parquet/', save=False, y_correction='blup_resid', y_correction_multivariate=False, return_table=True, stat='ttest', chrset=None, dtype='pandas', dof='correct', snp_block_size=50000000.0, gwa_center=True, gwa_scale=False, regression_mode='blas', covariance_estimator='psd', npplink_h2_ncomponents = 3000 ):
     """Mvgwas.
 
 Allowed inputs
@@ -1761,6 +1761,10 @@ gwa_scale : bool
     default=False.
 regression_mode : str
     default='blas'.
+covariance_estimator: str
+    allowed values: 'npplink_svd'; default='psd'.
+npplink_h2_ncomponents: int
+    default=3000.
 
 Returns
 -------
@@ -1795,13 +1799,23 @@ None | object | pandas.DataFrame
         c_grm = npplink.read_grm(row.path.replace('.bin', ''))
         subgrm = allGRM['grm'].to_pandas() if not row.isnum else ((allGRM['grm'] * allGRM['w'] - c_grm['grm'] * c_grm['w']) / (allGRM['w'] - c_grm['w'])).to_pandas()
         pbar.set_description(f'GWAS-Chr{c}-estimating var/covarmatrix')
-        GErG = genetic_varcov_PSD(subgrm, traitdf, n_boot=0)
+        if covariance_estimator == 'psd':
+            pbar.set_description(f'GWAS-Chr{c}-PSD: estimating var/covarmatrix')
+            GErG = genetic_varcov_PSD(subgrm, traitdf, n_boot=0)
+            gen_var_cov, env_var_cov = GErG['G'], GErG['E']
+        elif covariance_estimator == 'npplink_svd':
+            pbar.set_description(f'GWAS-Chr{c}-npplink: estimating h2 and setting y_correction to diagonal')
+            h2 = npplink.heritability(traitdf, GRM = subgrm, n_components=min(npplink_h2_ncomponents, traitdf.shape[0]-1))['h2']
+            gen_var_cov, env_var_cov = h2 * traitdf.std(), (1-h2) * traitdf.std()
+            gen_var_cov = pd.DataFrame(np.diag(gen_var_cov),index = gen_var_cov.index, columns = gen_var_cov.index)
+            env_var_cov = pd.DataFrame(np.diag(env_var_cov),index = env_var_cov.index, columns = env_var_cov.index)
+            y_correction_multivariate = False
         if y_correction == 'blup_resid':
             pbar.set_description(f'GWAS-Chr{c}-BLUPresiduals-MEM:{current_mem()}')
-            traits = traitdf - mvBLUP(traitdf, subgrm, GErG['G'], E=GErG['E'], missing='exact', diag_only=not y_correction_multivariate)
+            traits = traitdf - mvBLUP(traitdf, subgrm, gen_var_cov, E=env_var_cov, missing='exact', diag_only=not y_correction_multivariate)
         elif y_correction in ['ystar']:
             pbar.set_description(f'GWAS-Chr{c}-whitenmatrix-MEM:{current_mem()}')
-            traits = mvWhiten(traitdf, subgrm, GErG['G'], E=GErG['E'], only_observed=False, diag_only=not y_correction_multivariate)
+            traits = mvWhiten(traitdf, subgrm, gen_var_cov, E=env_var_cov, only_observed=False, diag_only=not y_correction_multivariate)
         if snp_block_size < chrom_sizes[c]:
             snp_blocks = list(pairwise(np.arange(0, chrom_sizes[c] + snp_block_size, snp_block_size)))
             if return_table and (not save):

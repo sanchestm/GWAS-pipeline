@@ -268,9 +268,6 @@ def jaccard_from_sketches(sketches: np.ndarray) -> np.ndarray:
     return S
 
 
-
-
-
 # ============================================================
 #  JIT KERNELS — EDGES (rolling; float32 weights; in-place)
 # ============================================================

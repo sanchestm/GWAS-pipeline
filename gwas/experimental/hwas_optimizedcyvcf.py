@@ -3092,3 +3092,847 @@ def mvHWAS(
             return sumstats
         return pd.concat(sumstats, ignore_index=True) if len(sumstats) else pd.DataFrame()
     return None
+
+# =============================================================================
+# Fast FORMAT reader engine overrides (single-file patch)
+# =============================================================================
+# These definitions intentionally override the optimized loader definitions above.
+# They add reader_engine={'auto','cyvcf2','htslib','bcftools','pysam'} and fix the
+# default STITCH HD behavior so an 8-component founder/haplotype dosage vector is
+# read as 8 components, not collapsed to 4.
+
+import subprocess as _subprocess
+import tempfile as _tempfile
+import shutil as _shutil
+
+
+def _collapse_phased_flag(collapse_phased="auto", *, field: str | None = None) -> bool:
+    """Normalize collapse_phased.
+
+    The default is intentionally False. STITCH HD/HDS/AP-style founder dosage
+    vectors are already additive founder/haplotype vectors; an 8-founder HD field
+    must stay length 8. Set collapse_phased=True only for fields explicitly known
+    to be encoded as two phased vectors of length H each.
+    """
+    if collapse_phased is None or collapse_phased == "auto":
+        return False
+    return bool(collapse_phased)
+
+
+def _flatten_value(value: Any) -> list[Any]:
+    """Flatten a pysam/cyvcf2 scalar/vector value and preserve missing elements."""
+    if value is None:
+        return []
+    if isinstance(value, (str, bytes)):
+        return [value.decode() if isinstance(value, bytes) else value]
+    arr = np.asarray(value, dtype=object)
+    if arr.ndim == 0:
+        return [arr.item()]
+    return arr.reshape(-1).tolist()
+
+
+def _is_missing_scalar(x: Any) -> bool:
+    if x is None:
+        return True
+    if isinstance(x, bytes):
+        x = x.decode()
+    if isinstance(x, str):
+        return x in {"", ".", "NA", "NaN", "nan", "None", "none"}
+    try:
+        return bool(pd.isna(x))
+    except Exception:
+        return False
+
+
+def _safe_cast_vector(vals, *, dtype, fill):
+    """Cast VCF scalar/vector values while replacing None/'.' with dtype fill."""
+    dt = np.dtype(dtype)
+    out_vals = []
+    for x in vals:
+        if _is_missing_scalar(x):
+            out_vals.append(fill)
+        else:
+            if isinstance(x, bytes):
+                x = x.decode()
+            out_vals.append(x)
+    if dt == np.dtype(object):
+        return np.asarray([None if _is_missing_scalar(x) else str(x) for x in vals], dtype=object)
+    if np.issubdtype(dt, np.bool_):
+        return np.asarray(out_vals, dtype=dt)
+    if np.issubdtype(dt, np.integer):
+        # Float-looking integer fields can occur in VCF text paths; cast safely.
+        return np.asarray([fill if _is_missing_scalar(x) else int(float(x)) for x in out_vals], dtype=dt)
+    return np.asarray(out_vals, dtype=dt)
+
+
+def _infer_components(value: Any, collapse_phased: bool = False) -> int:
+    vals = _flatten_value(value)
+    n = len(vals)
+    if n == 0:
+        return 0
+    if _collapse_phased_flag(collapse_phased) and n > 2 and (n % 2 == 0):
+        return n // 2
+    return n
+
+
+def _convert_value(value: Any, *, ncomp: int, dtype, collapse_phased: bool = False):
+    """Convert one VCF scalar/vector value to a fixed-size array/scalar.
+
+    Missing numeric elements are converted to the dtype-specific fill value
+    (NaN for floats, -1 for integers). This fixes crashes when vector FORMAT
+    fields contain partial missing entries such as (0.1, None, 0.2, ...).
+    """
+    fill = _missing_fill(dtype)
+    dt = np.dtype(dtype)
+    vals = _flatten_value(value)
+
+    if ncomp <= 1:
+        if not vals:
+            return fill
+        if dt == np.dtype(object):
+            return None if _is_missing_scalar(vals[0]) else str(vals[0])
+        return _safe_cast_vector(vals[:1], dtype=dt, fill=fill)[0]
+
+    if dt == np.dtype(object):
+        out = np.empty((int(ncomp),), dtype=object)
+        out[:] = None
+    else:
+        out = np.full((int(ncomp),), fill, dtype=dt)
+    if not vals:
+        return out
+
+    if _collapse_phased_flag(collapse_phased) and len(vals) == 2 * int(ncomp) and len(vals) > 2:
+        left = _safe_cast_vector(vals[:ncomp], dtype=np.float32, fill=np.nan)
+        right = _safe_cast_vector(vals[ncomp:], dtype=np.float32, fill=np.nan)
+        vals = (left + right).tolist()
+
+    vals = vals[: int(ncomp)]
+    out[: len(vals)] = _safe_cast_vector(vals, dtype=dt, fill=fill)
+    return out
+
+
+def _require_cyvcf2():
+    try:
+        from cyvcf2 import VCF
+    except ImportError as exc:
+        raise ImportError(
+            "reader_engine='cyvcf2' requires cyvcf2. Install with `conda install -c bioconda cyvcf2`."
+        ) from exc
+    return VCF
+
+
+def _require_bcftools():
+    exe = _shutil.which("bcftools")
+    if exe is None:
+        raise ImportError(
+            "reader_engine='bcftools'/'htslib' requires the bcftools executable on PATH. "
+            "Install with `conda install -c bioconda bcftools`."
+        )
+    return exe
+
+
+def _resolve_reader_engine(reader_engine="auto", *, n_fields=None, require_numeric=False):
+    key = "auto" if reader_engine is None else str(reader_engine).lower()
+    if key in {"htslib", "bcftools-query", "bcftools_query"}:
+        key = "bcftools"
+    if key not in {"auto", "cyvcf2", "bcftools", "pysam"}:
+        raise ValueError("reader_engine must be one of {'auto','cyvcf2','bcftools','htslib','pysam'}")
+    if key != "auto":
+        return key
+
+    # cyvcf2 is the preferred fast path for vector FORMAT fields. It is much
+    # faster than looping over rec.samples with pysam.
+    try:
+        _require_cyvcf2()
+        return "cyvcf2"
+    except Exception:
+        pass
+
+    # bcftools query is a useful HTSlib-backed fallback for one numeric field.
+    if (n_fields is None or int(n_fields) == 1) and require_numeric:
+        try:
+            _require_bcftools()
+            return "bcftools"
+        except Exception:
+            pass
+
+    return "pysam"
+
+
+def _variant_key_common(chrom, pos, ref, alt, vid=None):
+    alt_s = _normalize_alt_tuple(alt)
+    vid_s = "." if vid in [None, ""] else str(vid)
+    return (str(chrom), int(pos), str(ref), str(alt_s), vid_s)
+
+
+def _variant_key_from_cyvcf2(v):
+    return _variant_key_common(v.CHROM, int(v.POS), v.REF, v.ALT, getattr(v, "ID", None))
+
+
+def _coerce_numeric_array(arr, *, dtype, fill):
+    """Convert cyvcf2/bcftools FORMAT output to dtype and normalize missing."""
+    dt = np.dtype(dtype)
+    if dt == np.dtype(object):
+        return np.asarray(arr, dtype=object)
+    a = np.asarray(arr)
+    if a.dtype.kind in "OSU":
+        flat = _safe_cast_vector(a.reshape(-1).tolist(), dtype=dt, fill=fill)
+        return flat.reshape(a.shape)
+    a = a.astype(dt, copy=False)
+    if np.issubdtype(dt, np.floating):
+        # cyvcf2 may use large negative sentinels for missing values.
+        a = np.where(a < -1e20, np.nan, a)
+    elif np.issubdtype(dt, np.integer):
+        a = np.where(a < -1000000000, fill, a)
+    return a
+
+
+def _reshape_format_array(arr, *, n_samples, ncomp, dtype, fill, collapse_phased=False):
+    """Return FORMAT array with shape (sample,) or (sample, component)."""
+    dt = np.dtype(dtype)
+    ncomp = int(ncomp)
+    if arr is None:
+        shape = (n_samples,) if ncomp == 1 else (n_samples, ncomp)
+        return np.full(shape, fill, dtype=dt if dt != np.dtype(object) else object)
+
+    a = np.asarray(arr, dtype=object if dt == np.dtype(object) else None)
+    if a.ndim == 0:
+        a = np.repeat(a.reshape(1), n_samples, axis=0)
+    if a.ndim == 1:
+        if a.shape[0] == n_samples:
+            a = a.reshape(n_samples, 1)
+        else:
+            # One-sample vector or malformed scalar-vector; flatten as components.
+            a = np.resize(a.reshape(1, -1), (n_samples, a.size))
+    else:
+        a = a.reshape(a.shape[0], -1)
+
+    if a.shape[0] != n_samples:
+        # Keep the function robust rather than silently reordering samples.
+        raise ValueError(f"FORMAT array sample dimension mismatch: observed {a.shape[0]}, expected {n_samples}")
+
+    if _collapse_phased_flag(collapse_phased) and a.shape[1] == 2 * ncomp and a.shape[1] > 2:
+        left = _coerce_numeric_array(a[:, :ncomp], dtype=np.float32, fill=np.nan)
+        right = _coerce_numeric_array(a[:, ncomp:], dtype=np.float32, fill=np.nan)
+        a = left + right
+
+    if ncomp == 1:
+        col = a[:, 0] if a.shape[1] else np.full((n_samples,), fill, dtype=dt)
+        return _coerce_numeric_array(col, dtype=dt, fill=fill)
+
+    out = np.full((n_samples, ncomp), fill, dtype=dt if dt != np.dtype(object) else object)
+    m = min(ncomp, a.shape[1])
+    if m:
+        out[:, :m] = _coerce_numeric_array(a[:, :m], dtype=dt, fill=fill)
+    return out
+
+
+def _make_chunk_output(sample_ids, variant_chunk, format_specs):
+    out = {}
+    n_samples = len(sample_ids)
+    n_vars = len(variant_chunk)
+    for field, spec in format_specs.items():
+        ncomp = int(spec["ncomp"])
+        shape = (n_samples, n_vars) if ncomp == 1 else (n_samples, n_vars, ncomp)
+        fill = _missing_fill(spec["dtype"])
+        if np.dtype(spec["dtype"]) == np.dtype(object):
+            arr = np.empty(shape, dtype=object)
+            arr[:] = fill
+        else:
+            arr = np.full(shape, fill, dtype=spec["dtype"])
+        out[field] = arr
+    return out
+
+
+def _wanted_variant_map(variant_chunk: pd.DataFrame):
+    wanted = {}
+    for j, row in enumerate(variant_chunk.reset_index(drop=True).itertuples(index=False)):
+        chrom = str(row.chrom)
+        pos = int(row.pos)
+        ref = str(row.ref)
+        alt = str(row.alt)
+        vid = "." if pd.isna(row.id) else str(row.id)
+        # Primary key with ID plus an ID-agnostic key. The latter handles readers
+        # that do not expose '.' exactly the same way as pysam/cyvcf2.
+        wanted[(chrom, pos, ref, alt, vid)] = j
+        wanted[(chrom, pos, ref, alt, ".")] = j
+        wanted[(chrom, pos, ref, alt, "*")] = j
+    return wanted
+
+
+def _lookup_variant_index(wanted, chrom, pos, ref, alt, vid=None):
+    alt_s = _normalize_alt_tuple(alt)
+    vid_s = "." if vid in [None, ""] else str(vid)
+    return wanted.get((str(chrom), int(pos), str(ref), str(alt_s), vid_s),
+           wanted.get((str(chrom), int(pos), str(ref), str(alt_s), "."),
+           wanted.get((str(chrom), int(pos), str(ref), str(alt_s), "*"))))
+
+
+def _chunk_reader_all_formats_pysam(bcf_path, variant_chunk: pd.DataFrame, sample_ids, format_specs):
+    """Robust fallback FORMAT reader using pysam sample loops."""
+    pysam = _require_pysam()
+    variant_chunk = variant_chunk.reset_index(drop=True)
+    sample_ids = list(sample_ids)
+    out = _make_chunk_output(sample_ids, variant_chunk, format_specs)
+    wanted = _wanted_variant_map(variant_chunk)
+
+    def _fill_record(rec):
+        j = _lookup_variant_index(wanted, rec.contig, rec.pos, rec.ref, _normalize_alt_tuple(rec.alts), rec.id)
+        if j is None:
+            return
+        for i, sid in enumerate(sample_ids):
+            sample = rec.samples[sid]
+            for field, spec in format_specs.items():
+                if field not in rec.format:
+                    continue
+                val = _convert_value(
+                    sample.get(field),
+                    ncomp=int(spec["ncomp"]),
+                    dtype=spec["dtype"],
+                    collapse_phased=bool(spec.get("collapse_phased", False)),
+                )
+                if int(spec["ncomp"]) == 1:
+                    out[field][i, j] = val
+                else:
+                    out[field][i, j, :] = val
+
+    with pysam.VariantFile(bcf_path) as vf:
+        try:
+            vf.subset_samples(sample_ids)
+        except Exception:
+            pass
+        try:
+            for chrom, grp in variant_chunk.groupby("chrom", sort=False):
+                start = max(int(grp["pos"].min()) - 1, 0)
+                stop = int(grp["pos"].max())
+                for rec in vf.fetch(str(chrom), start, stop):
+                    _fill_record(rec)
+        except (ValueError, OSError, RuntimeError):
+            # Usually unindexed input. Fall back to linear scan. Conversion errors
+            # are intentionally not swallowed here.
+            vf.close()
+            with pysam.VariantFile(bcf_path) as vf2:
+                try:
+                    vf2.subset_samples(sample_ids)
+                except Exception:
+                    pass
+                for rec in vf2:
+                    _fill_record(rec)
+    return out
+
+
+def _chunk_reader_all_formats_cyvcf2(bcf_path, variant_chunk: pd.DataFrame, sample_ids, format_specs):
+    """Fast FORMAT reader using cyvcf2.Variant.format(field)."""
+    VCF = _require_cyvcf2()
+    variant_chunk = variant_chunk.reset_index(drop=True)
+    sample_ids = list(sample_ids)
+    out = _make_chunk_output(sample_ids, variant_chunk, format_specs)
+    wanted = _wanted_variant_map(variant_chunk)
+
+    vcf = VCF(str(bcf_path))
+    try:
+        try:
+            vcf.set_samples(sample_ids)
+        except Exception:
+            # If set_samples fails, continue and validate sample dimension below.
+            pass
+
+        def _fill_variant(v):
+            j = _lookup_variant_index(wanted, v.CHROM, int(v.POS), v.REF, _normalize_alt_tuple(v.ALT), getattr(v, "ID", None))
+            if j is None:
+                return
+            for field, spec in format_specs.items():
+                ncomp = int(spec["ncomp"])
+                fill = _missing_fill(spec["dtype"])
+                try:
+                    raw = v.format(field)
+                except Exception:
+                    # GT and arbitrary strings are less reliable through Variant.format;
+                    # use pysam for these rare cases.
+                    raise
+                arr = _reshape_format_array(
+                    raw,
+                    n_samples=len(sample_ids),
+                    ncomp=ncomp,
+                    dtype=spec["dtype"],
+                    fill=fill,
+                    collapse_phased=bool(spec.get("collapse_phased", False)),
+                )
+                if ncomp == 1:
+                    out[field][:, j] = arr
+                else:
+                    out[field][:, j, :] = arr
+
+        try:
+            for chrom, grp in variant_chunk.groupby("chrom", sort=False):
+                start = int(grp["pos"].min())
+                stop = int(grp["pos"].max())
+                region = f"{chrom}:{start}-{stop}"
+                for v in vcf(region):
+                    _fill_variant(v)
+        except Exception:
+            # Unindexed input or cyvcf2 region issue. Linear iteration is still
+            # cyvcf2/C-backed and usually faster than per-sample pysam parsing.
+            vcf.close()
+            vcf = VCF(str(bcf_path))
+            try:
+                vcf.set_samples(sample_ids)
+            except Exception:
+                pass
+            for v in vcf:
+                _fill_variant(v)
+    finally:
+        try:
+            vcf.close()
+        except Exception:
+            pass
+    return out
+
+
+def _parse_bcftools_value_token(token: str):
+    if token is None:
+        return []
+    token = str(token)
+    if token in {"", "."}:
+        return []
+    # FORMAT vectors are usually comma-separated. Preserve phased/bar-separated
+    # strings by splitting on common vector delimiters only after replacing '|'.
+    token = token.replace("|", ",").replace("/", ",")
+    return token.split(",")
+
+
+def _chunk_reader_all_formats_bcftools(bcf_path, variant_chunk: pd.DataFrame, sample_ids, format_specs):
+    """Fast HTSlib-backed reader using `bcftools query` for one numeric FORMAT field.
+
+    This is intended for production HWAS reads of a single numeric vector field
+    such as HD/HDS/AP. For multiple fields or object fields use cyvcf2/pysam.
+    """
+    if len(format_specs) != 1:
+        raise ValueError("reader_engine='bcftools' currently supports exactly one FORMAT field per call.")
+    field, spec = next(iter(format_specs.items()))
+    if np.dtype(spec["dtype"]) == np.dtype(object):
+        raise ValueError("reader_engine='bcftools' is only supported for numeric FORMAT fields.")
+
+    exe = _require_bcftools()
+    variant_chunk = variant_chunk.reset_index(drop=True)
+    sample_ids = list(sample_ids)
+    out = _make_chunk_output(sample_ids, variant_chunk, format_specs)
+    wanted = _wanted_variant_map(variant_chunk)
+    ncomp = int(spec["ncomp"])
+    fill = _missing_fill(spec["dtype"])
+
+    with _tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as sfh:
+        sample_file = sfh.name
+        for sid in sample_ids:
+            sfh.write(str(sid) + "\n")
+    try:
+        for chrom, grp in variant_chunk.groupby("chrom", sort=False):
+            start = int(grp["pos"].min())
+            stop = int(grp["pos"].max())
+            region = f"{chrom}:{start}-{stop}"
+            # One line per variant, then one SAMPLE:VALUE token per selected sample.
+            fmt = f"%CHROM\t%POS\t%REF\t%ALT[\t%SAMPLE:%{field}]\n"
+            cmd = [exe, "query", "-r", region, "-S", sample_file, "-f", fmt, str(bcf_path)]
+            proc = _subprocess.run(cmd, check=True, text=True, capture_output=True)
+            for line in proc.stdout.splitlines():
+                if not line:
+                    continue
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) < 4:
+                    continue
+                chrom_o, pos_o, ref_o, alt_o = parts[:4]
+                j = _lookup_variant_index(wanted, chrom_o, int(pos_o), ref_o, alt_o, ".")
+                if j is None:
+                    continue
+                # Fill by sample order from the -S file. The output bracket follows
+                # that order; we still parse SAMPLE:VALUE to tolerate absent samples.
+                sample_to_row = {str(sid): i for i, sid in enumerate(sample_ids)}
+                for tok_i, token in enumerate(parts[4:]):
+                    if ":" in token:
+                        sid, val = token.split(":", 1)
+                        row_i = sample_to_row.get(sid, tok_i)
+                    else:
+                        val = token
+                        row_i = tok_i
+                    if row_i is None or row_i >= len(sample_ids):
+                        continue
+                    vals = _parse_bcftools_value_token(val)
+                    conv = _convert_value(vals, ncomp=ncomp, dtype=spec["dtype"], collapse_phased=bool(spec.get("collapse_phased", False)))
+                    if ncomp == 1:
+                        out[field][row_i, j] = conv
+                    else:
+                        out[field][row_i, j, :] = conv
+    finally:
+        try:
+            os.unlink(sample_file)
+        except Exception:
+            pass
+    return out
+
+
+def _chunk_reader_all_formats(
+    bcf_path,
+    variant_chunk: pd.DataFrame,
+    sample_ids,
+    format_specs,
+    reader_engine="auto",
+):
+    """Dispatching chunk FORMAT reader.
+
+    `cyvcf2` and `bcftools` avoid the slow nested Python loop over samples used by
+    the robust pysam fallback. `htslib` is an alias for the bcftools-query path.
+    """
+    n_fields = len(format_specs)
+    require_numeric = all(np.dtype(spec["dtype"]) != np.dtype(object) for spec in format_specs.values())
+    engine = _resolve_reader_engine(reader_engine, n_fields=n_fields, require_numeric=require_numeric)
+    if engine == "cyvcf2":
+        try:
+            return _chunk_reader_all_formats_cyvcf2(bcf_path, variant_chunk, sample_ids, format_specs)
+        except Exception:
+            if str(reader_engine).lower() == "cyvcf2":
+                raise
+            # Auto fallback for unsupported fields / local cyvcf2 edge cases.
+            if n_fields == 1 and require_numeric:
+                try:
+                    return _chunk_reader_all_formats_bcftools(bcf_path, variant_chunk, sample_ids, format_specs)
+                except Exception:
+                    pass
+            return _chunk_reader_all_formats_pysam(bcf_path, variant_chunk, sample_ids, format_specs)
+    if engine == "bcftools":
+        return _chunk_reader_all_formats_bcftools(bcf_path, variant_chunk, sample_ids, format_specs)
+    return _chunk_reader_all_formats_pysam(bcf_path, variant_chunk, sample_ids, format_specs)
+
+
+def scan_stitch_bcf(
+    bcf_path,
+    haplotype_field="auto",
+    collapse_phased="auto",
+    max_variants=None,
+    schema_scan_variants=128,
+    include_info=True,
+):
+    """Scan variant metadata and FORMAT schemas in one pass.
+
+    `collapse_phased` defaults to 'auto', which does not collapse vector fields.
+    This is the correct default for STITCH HD because an 8-founder HD field should
+    remain length 8. Pass collapse_phased=True only for true 2H phased vectors.
+    """
+    pysam = _require_pysam()
+    collapse_flag = _collapse_phased_flag(collapse_phased, field=None)
+    preferred = ["HD", "AP", "HP", "HAP", "HAPROB", "HAPPROB", "HDS", "DS", "GP"]
+    fixed_hap_field = None if haplotype_field in [None, "auto"] else str(haplotype_field)
+
+    records = []
+    selected_hap_field = fixed_hap_field
+    best_field = None
+    best_score = (-1, -1, -1)
+    observed_components = {}
+
+    with pysam.VariantFile(bcf_path) as vf:
+        sample_ids = list(vf.header.samples)
+        probes = sample_ids[: min(4, len(sample_ids))]
+
+        info_specs = {}
+        if include_info:
+            for field, meta in vf.header.info.items():
+                info_specs[str(field)] = {
+                    "dtype": _field_dtype(str(field), getattr(meta, "type", None)),
+                    "ncomp": 1,
+                    "type": getattr(meta, "type", None),
+                    "number": getattr(meta, "number", None),
+                }
+        format_specs = {}
+        for field, meta in vf.header.formats.items():
+            format_specs[str(field)] = {
+                "dtype": _field_dtype(str(field), getattr(meta, "type", None)),
+                "ncomp": 1,
+                "type": getattr(meta, "type", None),
+                "number": getattr(meta, "number", None),
+                "collapse_phased": False,
+            }
+        info_raw = {field: [] for field in info_specs}
+
+        if fixed_hap_field is not None and fixed_hap_field not in format_specs:
+            raise KeyError(f"Requested haplotype FORMAT field {fixed_hap_field!r} is not in the BCF header.")
+
+        for i, rec in enumerate(vf):
+            if max_variants is not None and i >= max_variants:
+                break
+            records.append(
+                {
+                    "chrom": str(rec.contig),
+                    "pos": int(rec.pos),
+                    "snp": rec.id if rec.id not in [None, "."] else f"{rec.contig}:{rec.pos}:{rec.ref}:{_normalize_alt_tuple(rec.alts)}",
+                    "id": "." if rec.id is None else str(rec.id),
+                    "ref": str(rec.ref),
+                    "alt": _normalize_alt_tuple(rec.alts),
+                    "qual": np.nan if rec.qual is None else float(rec.qual),
+                    "filter": _normalize_filter_value(rec.filter.keys() if hasattr(rec.filter, "keys") else rec.filter),
+                    "i": i,
+                }
+            )
+
+            if include_info:
+                for field in info_specs:
+                    val = rec.info.get(field)
+                    info_raw[field].append(val)
+                    info_specs[field]["ncomp"] = max(info_specs[field]["ncomp"], max(1, _infer_components(val, collapse_phased=False)))
+
+            if i < schema_scan_variants:
+                for sid in probes:
+                    s = rec.samples[sid]
+                    for field, spec in format_specs.items():
+                        if field not in rec.format:
+                            continue
+                        val = s.get(field)
+                        raw_n = max(1, _infer_components(val, collapse_phased=False))
+                        observed_components[field] = max(observed_components.get(field, 1), raw_n)
+                        spec["ncomp"] = max(spec["ncomp"], raw_n)
+
+                        if fixed_hap_field is None and raw_n > 1:
+                            pref_rank = (len(preferred) - preferred.index(field)) if field in preferred else 0
+                            score = (pref_rank, raw_n, int(raw_n > 2))
+                            if score > best_score:
+                                best_score = score
+                                best_field = field
+
+        if fixed_hap_field is None:
+            selected_hap_field = best_field
+        if selected_hap_field is None:
+            raise ValueError("Could not infer the haplotype FORMAT field. Pass haplotype_field explicitly.")
+
+        raw_hap_components = int(observed_components.get(selected_hap_field, format_specs[selected_hap_field]["ncomp"]))
+        n_haplotypes = int(_infer_components([0] * raw_hap_components, collapse_phased=collapse_flag))
+        format_specs[selected_hap_field]["collapse_phased"] = bool(collapse_flag)
+        format_specs[selected_hap_field]["ncomp"] = max(1, n_haplotypes)
+
+    if n_haplotypes <= 0:
+        raise ValueError("Could not infer the number of haplotypes from the chosen FORMAT field.")
+
+    variants = pd.DataFrame.from_records(records)
+    samples = pd.DataFrame({"iid": sample_ids, "i": np.arange(len(sample_ids), dtype=int)})
+
+    info_arrays = {}
+    n_variants = len(variants)
+    if include_info:
+        for field, spec in info_specs.items():
+            ncomp = max(1, int(spec["ncomp"]))
+            arr = []
+            for val in info_raw[field]:
+                arr.append(_convert_value(val, ncomp=ncomp, dtype=spec["dtype"], collapse_phased=False))
+            if ncomp == 1:
+                info_arrays[field] = np.asarray(arr, dtype=spec["dtype"] if spec["dtype"] is not object else object)
+            else:
+                info_arrays[field] = np.asarray(arr, dtype=spec["dtype"] if spec["dtype"] is not object else object).reshape(n_variants, ncomp)
+
+    variants.attrs["haplotype_field"] = str(selected_hap_field)
+    variants.attrs["n_haplotypes"] = int(n_haplotypes)
+    variants.attrs["format_specs"] = format_specs
+    variants.attrs["info_specs"] = info_specs
+    variants.attrs["info_arrays"] = info_arrays
+    samples.attrs["haplotype_field"] = str(selected_hap_field)
+    samples.attrs["n_haplotypes"] = int(n_haplotypes)
+    return variants, samples
+
+
+def load_stitch_bcf(
+    bcf_path,
+    chunk_variants=1000,
+    dtype=np.float32,
+    haplotype_field="auto",
+    collapse_phased="auto",
+    max_variants=None,
+    backend="dask",
+    *,
+    reader_engine="auto",
+):
+    """Load only the selected haplotype field lazily.
+
+    Returns (variants, samples, haplotypes), where haplotypes has shape
+    (sample, snp, haplotype). `reader_engine='cyvcf2'` is usually fastest.
+    """
+    variants, samples = scan_stitch_bcf(
+        bcf_path,
+        haplotype_field=haplotype_field,
+        collapse_phased=collapse_phased,
+        max_variants=max_variants,
+        include_info=False,
+    )
+    n_haplotypes = int(variants.attrs["n_haplotypes"])
+    haplotype_field = variants.attrs["haplotype_field"]
+    _require_dask()
+
+    spec = dict(variants.attrs["format_specs"][haplotype_field])
+    spec["dtype"] = dtype
+    format_specs = {haplotype_field: spec}
+
+    delayed_chunks = []
+    for offset in range(0, len(variants), chunk_variants):
+        vchunk = variants.iloc[offset: offset + chunk_variants].copy()
+        nchunk = len(vchunk)
+        delayed_arr = delayed(_chunk_reader_all_formats)(
+            bcf_path,
+            vchunk,
+            samples["iid"].tolist(),
+            format_specs,
+            reader_engine,
+        )
+        delayed_field = delayed(lambda d, k: d[k])(delayed_arr, haplotype_field)
+        delayed_chunks.append(da.from_delayed(delayed_field, shape=(len(samples), nchunk, n_haplotypes), dtype=dtype))
+    hap = da.concatenate(delayed_chunks, axis=1) if delayed_chunks else da.empty((len(samples), 0, n_haplotypes), dtype=dtype)
+
+    if backend == "numpy":
+        hap = np.asarray(hap.compute(), dtype=dtype)
+    elif backend == "jax":
+        _, jnp = _require_jax()
+        hap = jnp.asarray(hap.compute(), dtype=dtype)
+    elif backend != "dask":
+        raise ValueError("backend must be one of {'dask','numpy','jax'}")
+    return variants, samples, hap
+
+
+def load_stitch_bcf_xarray(
+    bcf_path,
+    chunk_variants=1000,
+    dtype=np.float32,
+    haplotype_field="auto",
+    collapse_phased="auto",
+    max_variants=None,
+    backend="dask",
+    *,
+    parse_mode="full",
+    format_fields=None,
+    include_info=True,
+    reader_engine="auto",
+):
+    """Lazily parse a BCF into an xarray.Dataset with selectable reader engines.
+
+    Parameters
+    ----------
+    reader_engine : {'auto','cyvcf2','htslib','bcftools','pysam'}, default='auto'
+        cyvcf2 uses C-backed Variant.format(); htslib/bcftools uses bcftools
+        query for one numeric FORMAT field; pysam is the robust fallback.
+    collapse_phased : {'auto', bool}, default='auto'
+        Default 'auto' does not collapse vector fields. This preserves STITCH HD
+        as 8 components when the file has 8 founder/haplotype dosages.
+    """
+    _require_dask()
+    variants, samples = scan_stitch_bcf(
+        bcf_path,
+        haplotype_field=haplotype_field,
+        collapse_phased=collapse_phased,
+        max_variants=max_variants,
+        include_info=include_info,
+    )
+    hap_field = variants.attrs["haplotype_field"]
+    format_specs_all = variants.attrs["format_specs"]
+    format_specs = _selected_format_fields(format_specs_all, format_fields, haplotype_field=hap_field, parse_mode=parse_mode)
+    if hap_field in format_specs and np.dtype(format_specs[hap_field]["dtype"]).kind in "iuifc":
+        format_specs[hap_field] = dict(format_specs[hap_field])
+        format_specs[hap_field]["dtype"] = dtype
+
+    info_specs = variants.attrs.get("info_specs", {})
+    info_arrays = variants.attrs.get("info_arrays", {})
+
+    chunk_readers = []
+    chunk_slices = []
+    for offset in range(0, len(variants), chunk_variants):
+        vchunk = variants.iloc[offset: offset + chunk_variants].copy()
+        chunk_slices.append((offset, offset + len(vchunk)))
+        chunk_readers.append(
+            delayed(_chunk_reader_all_formats)(
+                bcf_path,
+                vchunk,
+                samples["iid"].tolist(),
+                format_specs,
+                reader_engine,
+            )
+        )
+
+    data_vars = {}
+    coords = {
+        "iid": samples["iid"].to_numpy(),
+        "snp": variants["snp"].to_numpy(),
+        "chrom": ("snp", variants["chrom"].to_numpy()),
+        "pos": ("snp", variants["pos"].to_numpy()),
+        "variant_id": ("snp", variants["id"].to_numpy()),
+        "ref": ("snp", variants["ref"].to_numpy()),
+        "alt": ("snp", variants["alt"].to_numpy()),
+        "qual": ("snp", variants["qual"].to_numpy()),
+        "filter": ("snp", variants["filter"].to_numpy()),
+    }
+
+    for field, spec in format_specs.items():
+        arr_chunks = []
+        ndim = 2 if int(spec["ncomp"]) == 1 else 3
+        for reader, (start, stop) in zip(chunk_readers, chunk_slices):
+            nchunk = stop - start
+            arr = delayed(lambda d, k: d[k])(reader, field)
+            shape = (len(samples), nchunk) if ndim == 2 else (len(samples), nchunk, int(spec["ncomp"]))
+            arr_chunks.append(da.from_delayed(arr, shape=shape, dtype=spec["dtype"]))
+        full = da.concatenate(arr_chunks, axis=1) if arr_chunks else da.empty((len(samples), 0), dtype=spec["dtype"])
+        if ndim == 2:
+            data_vars[field] = (("iid", "snp"), full)
+        else:
+            comp_dim = f"{field}_component"
+            coords[comp_dim] = np.arange(int(spec["ncomp"]), dtype=int)
+            data_vars[field] = (("iid", "snp", comp_dim), full)
+
+    if include_info:
+        for field, spec in info_specs.items():
+            arr = info_arrays[field]
+            var_name = f"INFO_{field}"
+            if arr.ndim == 1:
+                data_vars[var_name] = (("snp",), arr)
+            else:
+                comp_dim = f"INFO_{field}_component"
+                coords[comp_dim] = np.arange(arr.shape[1], dtype=int)
+                data_vars[var_name] = (("snp", comp_dim), arr)
+
+    collapse_flag = _collapse_phased_flag(collapse_phased, field=hap_field)
+    ds = xr.Dataset(
+        data_vars=data_vars,
+        coords=coords,
+        attrs={
+            "bcf_path": str(bcf_path),
+            "haplotype_field": hap_field,
+            "n_haplotypes": int(variants.attrs["n_haplotypes"]),
+            "collapse_phased": bool(collapse_flag),
+            "parse_mode": str(parse_mode),
+            "format_fields": tuple(format_specs.keys()),
+            "include_info": bool(include_info),
+            "reader_engine": str(reader_engine),
+        },
+    )
+    return _maybe_materialize_dataset(ds, backend=backend)
+
+
+def load_stitch_haplotypes_xarray(
+    bcf_path,
+    chunk_variants=1000,
+    dtype=np.float32,
+    haplotype_field="auto",
+    collapse_phased="auto",
+    max_variants=None,
+    backend="dask",
+    include_info=False,
+    reader_engine="auto",
+):
+    """Production loader: lazily parse only the selected haplotype FORMAT field."""
+    return load_stitch_bcf_xarray(
+        bcf_path,
+        chunk_variants=chunk_variants,
+        dtype=dtype,
+        haplotype_field=haplotype_field,
+        collapse_phased=collapse_phased,
+        max_variants=max_variants,
+        backend=backend,
+        parse_mode="hwas",
+        format_fields="haplotype",
+        include_info=include_info,
+        reader_engine=reader_engine,
+    )
+
+
+if "load_stitch_haplotypes_xarray" not in __all__:
+    __all__.append("load_stitch_haplotypes_xarray")

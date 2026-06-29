@@ -48,9 +48,13 @@ def main():
         
     if not dictionary['threshold']: dictionary['threshold'] = 5.39
     if dictionary['threshold'] != 'auto':  dictionary['threshold']= float(dictionary['threshold'])
-    
-    if not dictionary['threshold05']: dictionary['threshold05'] = 5.64
-    dictionary['threshold05'] = float(dictionary['threshold05'])
+
+    if dictionary['threshold05']: dictionary['threshold_high'] = dictionary['threshold05']
+    if not dictionary['threshold_high']: dictionary['threshold_high'] = 6.123
+    if dictionary['threshold_high'] != 'auto':  dictionary['threshold_high']= float(dictionary['threshold_high'])
+
+    if not dictionary['alpha_low'] : dictionary['alpha_low'] = '10%'
+    if not dictionary['alpha_high'] : dictionary['alpha_high'] = '5%'
         
     if not dictionary['genome_accession']: dictionary['genome_accession'] = 'GCF_015227675.2'
         
@@ -87,7 +91,9 @@ def main():
                  phewas_db = dictionary['phewas_path'],
                  trait_descriptions= traits_d,
                  threshold = dictionary['threshold'],
-                 threshold05 = dictionary['threshold05'],
+                 threshold_high = dictionary['threshold_high'],
+                 alpha_low = dictionary['alpha_low'],
+                 alpha_high = dictionary['alpha_high'],
                  threads = dictionary['threads'])
     gg.printwithlog(path)
     gg.printwithlog(pj)
@@ -125,9 +131,10 @@ def main():
                                                  round_version=dictionary['round'], 
                                                  gwas_version=dictionary['gwas_version'])
     if dictionary['qtl']: ###essential
+        kws = kw(dictionary, 'qtl_')
         qtl_add_founder = True if (dictionary['founder_genotypes'] not in ['none', 'None', 0]) else False
-        try: qtls = gwas.callQTLs( NonStrictSearchDir=False, add_founder_genotypes = qtl_add_founder)
-        except: qtls = gwas.callQTLs( NonStrictSearchDir=True)
+        qtls = gwas.callQTLs( NonStrictSearchDir=False, add_founder_genotypes = qtl_add_founder, **kws)
+        # except: qtls = gwas.callQTLs( NonStrictSearchDir=True)
         #gwas.annotate(qtls)
         gwas.effectsize() 
     if dictionary['effect']: gwas.effectsize() 

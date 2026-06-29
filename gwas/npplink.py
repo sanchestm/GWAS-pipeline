@@ -10,6 +10,7 @@ from scipy.stats import t as scipyt
 from scipy.stats import chi2
 from scipy.special import stdtr, erfc
 from tqdm import tqdm
+tqdm.pandas()
 import itertools
 from typing import Literal
 from scipy.linalg import blas
@@ -409,7 +410,8 @@ def plink2GRM(plinkfile:str, n_autosomes:int=None, downsample_snps:float = None,
         allzzt = allgrms.loc[allgrms.isnum,'zzt'].sum()
         allw = allgrms.loc[allgrms.isnum,'w'].sum()    
         allgrmf = allzzt/allw
-        fam[['iid', 'iid']].to_csv(f"{save_grms_path}/AllchrGRM.grm.id", index = False, header = None, sep = '\t')
+        allgrmf['grm'].coords['sample_0'].to_dataframe().to_csv(f"{save_grms_path}/AllchrGRM.grm.id", header = None, sep = '\t')
+        # fam[['iid', 'iid']].to_csv(f"{save_grms_path}/AllchrGRM.grm.id", index = False, header = None, sep = '\t')
         idxs = np.tril_indices_from(allgrmf)
         allgrmf.values[idxs].astype(np.float32).tofile(f"{save_grms_path}/AllchrGRM.grm.bin") 
         allw.values[idxs].astype(np.float32).tofile(f"{save_grms_path}/AllchrGRM.grm.N.bin") 
@@ -726,14 +728,14 @@ def scale_with_mask(X, precision = np.float32, center = True, scale = True):
         X_centered = X - np.nanmean(X, axis=0)
         X_centered[~M] = 0.0
     else: 
-        X_centered = X 
+        X_centered = X.copy() 
         X_centered[~M] = 0.0
-    if not scale: return X_centered, np.ones(X.shape[1], dtype=precision), M.astype(precision)
+    if not scale: return np.ascontiguousarray(X_centered, precision), np.ones(X.shape[1], dtype=precision), np.ascontiguousarray(M, precision)
     sum_sq = np.einsum("ij,ij->j", X_centered, X_centered, optimize=True)
     std = np.sqrt(sum_sq / M.sum(axis=0))
     std[std == 0] = np.nan
     X_scaled = X_centered / std
-    return X_scaled, std, M.astype(precision)
+    return np.ascontiguousarray(X_scaled, precision), std.astype(precision), np.ascontiguousarray(M, precision)
 
 def regression_with_einsum(ssnps, straits, snps_mask, traits_mask,dof='correct', stat = 'ttest', sided = 'two-sided', center = True,):
     if sided not in ['two-sided','one-sided']: raise ValueError("sided must be 'two-sided' or 'one-sided'")
@@ -887,7 +889,7 @@ def describe_trait_chr(traitdf, grms_folder = 'grm', return_allchrs=False, inclu
            .set_index(['c', 'trait'])
 
 def BLUP(traitdf, grms_folder = 'grm', return_allchrs=False):
-    grms = load_all_grms(f'{grms_folder}/*.grm.bin', decompose_grm=False)
+    grms = load_all_grms(f'{grms_folder}/{"All" if not return_allchrs else ""}*.grm.bin', decompose_grm=False)
     tdf = traitdf.loc[grms.loc[ 'All', 'subtracted_grm'].index, :]
     chrs2run = ['All'] + (grms.index[~grms.index.str.contains('^All$')].to_list() if return_allchrs else [])
     return pd.concat([rm_relatedness(_c,_t,tdf,grms, svd_input=False)['blup'] for _c, _t in tqdm(list(itertools.product(chrs2run, tdf.columns)), leave = True, desc = 'calculating BLUP')], axis = 1)
@@ -898,15 +900,22 @@ def ySTAR(traitdf, grms_folder = 'grm', return_allchrs=False):
     chrs2run = ['All'] + (grms.index[~grms.index.str.contains('^All$')].to_list() if return_allchrs else [])
     return pd.concat([rm_relatedness(_c,_t,tdf,grms, svd_input=False)['transformed'] for _c, _t in tqdm(list(itertools.product(chrs2run, tdf.columns)), leave = True, desc = 'whittening y')], axis = 1)
 
-def heritability(traitdf, grms_folder = 'grm', return_allchrs=False, svd_input=False, n_components = None):
-    allgrms,res = load_all_grms(f'{grms_folder}/*.grm.bin', decompose_grm=False), []
-    chrs2run = ['All'] + (allgrms.index[~allgrms.index.str.contains('^All$')].to_list() if return_allchrs else [])
+def heritability(traitdf, grms_folder = 'grm', return_allchrs=False, svd_input=False, n_components = None, GRM = None):
+    chrs2run, res = ['All'], []
+    if GRM is None:
+        if return_allchrs: 
+            allgrms = load_all_grms(f'{grms_folder}/*.grm.bin', decompose_grm=False)
+            chrs2run += allgrms.index[~allgrms.index.str.contains('^All$')].to_list()
+        else: 
+            allgrms = load_all_grms(f'{grms_folder}/All*.grm.bin', decompose_grm=False)
     for _c, _t in tqdm(list(itertools.product(chrs2run, traitdf.columns)), leave = True, desc = 'calculating heritability'):
-        grm_c= allgrms.loc[str(_c),'grm'].to_pandas()
+        if GRM is None: grm_c = allgrms.loc[str(_c),'grm'].to_pandas()
+        else: grm_c = GRM
         _y = traitdf.loc[grm_c.index, _t]
         params = dict(y = _y, return_SVD=True, n_components = n_components) 
         params = params | (dict(s = allgrms.loc[str(c),'s'], U = allgrms.loc[str(c),'U']) if svd_input else dict(grm = grm_c))
-        res += [pd.Series(H2SVD(**params) | dict(trait = _t, chrom = _c, n = _y.count()), name = f'{_t}_{_c}').drop(['U', 's'])]
+        idxname = f'{_t}_{_c}' if return_allchrs else f'{_t}'
+        res += [pd.Series(H2SVD(**params) | dict(trait = _t, chrom = _c, n = _y.count()), name = idxname).drop(['U', 's'])]
     return pd.concat(res, axis=1).T
 
 def shuffle_replicates(df,col ,n=500):
