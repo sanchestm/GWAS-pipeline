@@ -958,7 +958,7 @@ def R2(X, Y= None, return_named = True, return_square = True, statistic = 'r2', 
         yna = (~np.isnan(y)).astype(dtype) ##get all nas
         ynaax0 = yna.sum(axis = 0)
         if statistic in ['D', 'D2']: 
-            p_y = (np.nansum(x, axis=0) / xnaax0)
+            p_y = (np.nansum(y, axis=0) / ynaax0)
             y -= p_y
             p_y = np.clip(p_y*0.5, 1e-12, 1 - 1e-12)
         else:  y -= (np.nansum(y, axis = 0)/ynaax0) #subtract mean
@@ -988,6 +988,314 @@ def R2(X, Y= None, return_named = True, return_square = True, statistic = 'r2', 
             res['c'] = chrom
             res['distance'] = (res.bp1.str.slice(start=pos).astype(int)  - res.bp2.str.slice(start=pos).astype(int)).abs()
     return res
+
+def R2_exact_blocked(X, Y=None, return_named=True, return_square=True,
+       statistic='r2', dtype=np.float32):
+
+    if statistic not in ['r2', 'r', 'cov', 'D', 'D2', 'chord']:
+        raise ValueError("statistic has to be in ['r2', 'r', 'cov', 'D', 'D2', 'chord']")
+
+    x = np.array(X).astype(dtype)
+    xna = (~np.isnan(x)).astype(dtype)
+    np.nan_to_num(x, copy=False, nan=0.0, posinf=None, neginf=None)
+
+    if Y is None:
+        y, yna = x, xna
+        # Number of jointly observed samples for every pair
+        xty_w = np.dot(xna.T, xna)
+        # Pairwise sufficient statistics.
+        # Exploit symmetry to avoid redundant matrix multiplications.
+        xsum = np.dot(x.T, xna)
+        ysum = xsum.T
+        x2sum = np.dot((x * x).T, xna)
+        y2sum = x2sum.T
+        xysum = np.dot(x.T, x)
+
+    else:
+        y = np.array(Y).astype(dtype)
+        yna = (~np.isnan(y)).astype(dtype)
+        np.nan_to_num(y, copy=False, nan=0.0, posinf=None, neginf=None)
+        xty_w = np.dot(xna.T, yna)
+        xsum = np.dot(x.T, yna)
+        ysum = np.dot(xna.T, y)
+        x2sum = np.dot((x * x).T, yna)
+        y2sum = np.dot(xna.T, y * y)
+        xysum = np.dot(x.T, y)
+
+    xty_w[xty_w == 0] = np.nan
+    # Exact pairwise means
+    xmean = xsum / xty_w
+    ymean = ysum / xty_w
+    # Exact pairwise covariance and variances
+    res = xysum / xty_w - xmean * ymean
+    xvar = x2sum / xty_w - xmean * xmean
+    yvar = y2sum / xty_w - ymean * ymean
+    # Protect against tiny negative values from floating-point roundoff
+    xvar = np.maximum(xvar, 0)
+    yvar = np.maximum(yvar, 0)
+    if statistic in ['r2', 'r', 'D', 'D2', 'chord']:
+        denom = np.sqrt(xvar * yvar)
+        denom[denom == 0] = np.nan
+        r = np.clip(res / denom, a_min=-1, a_max=1)
+        if statistic in ['r2', 'D2']:
+            res = r * r
+            if statistic == 'D2':
+                p_x = np.clip(xmean * 0.5, 1e-12, 1 - 1e-12)
+                p_y = np.clip(ymean * 0.5, 1e-12, 1 - 1e-12)
+                res *= p_x * (1 - p_x) * p_y * (1 - p_y)
+        else:
+            res = r
+            if statistic == 'chord':
+                res = np.sqrt(2 * (1 - res))
+            if statistic == 'D':
+                p_x = np.clip(xmean * 0.5, 1e-12, 1 - 1e-12)
+                p_y = np.clip(ymean * 0.5, 1e-12, 1 - 1e-12)
+                res *= np.sqrt(
+                    p_x * (1 - p_x) * p_y * (1 - p_y)
+                )
+    rindex = X.columns if isinstance(X, pd.DataFrame) else list(range(x.shape[1]))
+    if (Y is None) and isinstance(X, pd.DataFrame):
+        rcolumns = X.columns
+    elif isinstance(Y, pd.DataFrame):
+        rcolumns = Y.columns
+    else:
+        rcolumns = list(range(y.shape[1]))
+    if return_named:
+        res = pd.DataFrame(res, index=rindex, columns=rcolumns)
+        if not return_square:
+            res = res.reset_index(names='bp1').melt( id_vars='bp1', var_name='bp2' )
+            chrom = res['bp1'].iloc[0].split(':')[0]
+            pos = len(chrom) + 1
+            res['c'] = chrom
+            res['distance'] = ( res.bp1.str.slice(start=pos).astype(int) - res.bp2.str.slice(start=pos).astype(int)  ).abs()
+    return res
+
+def R2_exact(X, Y=None, return_named=True, return_square=True,
+             statistic='r2', dtype=np.float32, block_size=1024):
+
+    if statistic not in ['r2', 'r', 'cov', 'D', 'D2', 'chord']:
+        raise ValueError(
+            "statistic has to be in ['r2', 'r', 'cov', 'D', 'D2', 'chord']"
+        )
+
+    # ------------------------------------------------------------------
+    # Input
+    # ------------------------------------------------------------------
+    x = np.asarray(X, dtype=dtype).copy()
+
+    # Keep missingness mask boolean: 1 byte/element instead of 4 for float32
+    xna = ~np.isnan(x)
+    np.nan_to_num(x, copy=False, nan=0.0, posinf=None, neginf=None)
+
+    nx, px = x.shape
+
+    if Y is None:
+        y = x
+        yna = xna
+        py = px
+        symmetric = True
+    else:
+        y = np.asarray(Y, dtype=dtype).copy()
+        yna = ~np.isnan(y)
+        np.nan_to_num(y, copy=False, nan=0.0, posinf=None, neginf=None)
+
+        if y.shape[0] != nx:
+            raise ValueError("X and Y must have the same number of rows")
+
+        py = y.shape[1]
+        symmetric = False
+
+    # ------------------------------------------------------------------
+    # Final result is the only full px × py floating-point matrix.
+    # ------------------------------------------------------------------
+    res = np.empty((px, py), dtype=dtype)
+
+    # ------------------------------------------------------------------
+    # Blocked calculation
+    # ------------------------------------------------------------------
+    for i in range(0, px, block_size):
+        i2 = min(i + block_size, px)
+
+        xi = x[:, i:i2]
+        mi_bool = xna[:, i:i2]
+
+        # Numeric mask only for the current block
+        mi = mi_bool.astype(dtype, copy=False)
+
+        # Compute Xi² once per row block
+        xi2 = xi * xi
+
+        # For symmetric X vs X, only calculate upper triangle
+        j_start = i if symmetric else 0
+
+        for j in range(j_start, py, block_size):
+            j2 = min(j + block_size, py)
+
+            yj = y[:, j:j2]
+            mj_bool = yna[:, j:j2]
+            mj = mj_bool.astype(dtype, copy=False)
+
+            # ----------------------------------------------------------
+            # Pairwise sufficient statistics, all only bi × bj
+            # ----------------------------------------------------------
+
+            # n_ij: number jointly observed
+            n = mi.T @ mj
+
+            # sum X among jointly observed samples
+            sx = xi.T @ mj
+
+            # sum Y among jointly observed samples
+            sy = mi.T @ yj
+
+            # sum X² among jointly observed samples
+            sxx = xi2.T @ mj
+
+            # sum Y² among jointly observed samples
+            syy = mi.T @ (yj * yj)
+
+            # sum XY among jointly observed samples
+            sxy = xi.T @ yj
+
+            # ----------------------------------------------------------
+            # Exact pairwise centered sufficient statistics
+            #
+            # Cxy = Σxy - ΣxΣy/n
+            # Cxx = Σx² - Σx²/n
+            # Cyy = Σy² - Σy²/n
+            # ----------------------------------------------------------
+            valid = n > 0
+
+            # Avoid divide-by-zero while keeping invalid cells NaN later
+            n_safe = np.where(valid, n, 1)
+
+            # Pair-specific means needed only by D / D2
+            if statistic in ['D', 'D2']:
+                mean_x = sx / n_safe
+                mean_y = sy / n_safe
+
+            sxy -= sx * sy / n_safe
+            sxx -= sx * sx / n_safe
+            syy -= sy * sy / n_safe
+
+            # Numerical roundoff can make variance very slightly negative
+            np.maximum(sxx, 0, out=sxx)
+            np.maximum(syy, 0, out=syy)
+
+            # ----------------------------------------------------------
+            # Statistic
+            # ----------------------------------------------------------
+            if statistic == 'cov':
+                block = sxy / n_safe
+                block[~valid] = np.nan
+
+            else:
+                # Reuse sxx as denominator to avoid another large temporary
+                np.multiply(sxx, syy, out=sxx)
+                np.sqrt(sxx, out=sxx)
+
+                zero_var = sxx == 0
+
+                # r = Cxy / sqrt(Cxx*Cyy)
+                np.divide(
+                    sxy,
+                    sxx,
+                    out=sxy,
+                    where=~zero_var
+                )
+
+                sxy[zero_var | ~valid] = np.nan
+                np.clip(sxy, -1, 1, out=sxy)
+
+                if statistic == 'r':
+                    block = sxy
+
+                elif statistic == 'r2':
+                    np.square(sxy, out=sxy)
+                    block = sxy
+
+                elif statistic == 'chord':
+                    # sqrt(2 * (1-r))
+                    sxy *= -1
+                    sxy += 1
+                    sxy *= 2
+                    np.sqrt(sxy, out=sxy)
+                    block = sxy
+
+                elif statistic in ['D', 'D2']:
+                    # Exact pair-specific allele frequencies
+                    mean_x *= 0.5
+                    mean_y *= 0.5
+
+                    np.clip(mean_x, 1e-12, 1 - 1e-12, out=mean_x)
+                    np.clip(mean_y, 1e-12, 1 - 1e-12, out=mean_y)
+
+                    # p(1-p), in place
+                    pxv = mean_x
+                    pyv = mean_y
+
+                    pxv *= (1 - pxv)
+                    pyv *= (1 - pyv)
+
+                    if statistic == 'D':
+                        # sqrt[p_x(1-p_x) p_y(1-p_y)]
+                        scale = np.sqrt(pxv * pyv)
+                        sxy *= scale
+                        block = sxy
+
+                    else:  # D2
+                        np.square(sxy, out=sxy)
+                        sxy *= pxv * pyv
+                        block = sxy
+
+            # ----------------------------------------------------------
+            # Store block
+            # ----------------------------------------------------------
+            res[i:i2, j:j2] = block
+
+            # X versus itself: exact symmetry, no need to recompute lower
+            if symmetric and i != j:
+                res[j:j2, i:i2] = block.T
+
+    # ------------------------------------------------------------------
+    # Labels / existing output behavior
+    # ------------------------------------------------------------------
+    rindex = (
+        X.columns
+        if isinstance(X, pd.DataFrame)
+        else list(range(px))
+    )
+
+    if symmetric and isinstance(X, pd.DataFrame):
+        rcolumns = X.columns
+    elif isinstance(Y, pd.DataFrame):
+        rcolumns = Y.columns
+    else:
+        rcolumns = list(range(py))
+
+    if return_named:
+        res = pd.DataFrame(
+            res,
+            index=rindex,
+            columns=rcolumns
+        )
+
+        if not return_square:
+            res = res.reset_index(names='bp1').melt(
+                id_vars='bp1',
+                var_name='bp2'
+            )
+
+            chrom = res['bp1'].iloc[0].split(':')[0]
+            pos = len(chrom) + 1
+            res['c'] = chrom
+            res['distance'] = (
+                res.bp1.str.slice(start=pos).astype(int)
+                - res.bp2.str.slice(start=pos).astype(int)
+            ).abs()
+
+    return res
+
 
 from numba import njit, prange
 @njit(parallel=True, fastmath=False)

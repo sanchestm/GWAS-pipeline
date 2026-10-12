@@ -153,13 +153,13 @@ def main():
     if dictionary['report']:
         kws = kw(dictionary, 'report_')
         gwas.report(round_version=dictionary['round'], gwas_version=dictionary['gwas_version'], **kws)
-        gwas.copy_results() ###essential
-    if dictionary['store']: gwas.store(researcher=dictionary['researcher'],
+    if dictionary['store']: 
+        gwas.store(researcher=dictionary['researcher'],
                                       round_version=dictionary['round'], 
                                       gwas_version=dictionary['gwas_version'],  
                                       remove_folders=False) ###essential
     try: 
-        if dictionary['publish']: gwas.copy_results() ###essential
+        if dictionary['publish'] or dictionary['store'] or dictionary['report'] : gwas.copy_results() ###essential
     except: 
         print('setting up the minio is necessary')
     if dictionary['phewas_fig']: gwas.make_phewas_figs()
